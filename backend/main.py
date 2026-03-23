@@ -32,9 +32,8 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     _startup_logger.info("QAstra starting up | version=%s | env=%s", settings.APP_VERSION, settings.ENVIRONMENT)
 
-    # Create tables (in production, use alembic migrations)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Tables are managed by Alembic migrations (alembic upgrade head).
+    # Base.metadata.create_all is no longer called here.
 
     # Ensure screenshots directory exists
     screenshots_dir = Path(settings.SCREENSHOTS_DIR)

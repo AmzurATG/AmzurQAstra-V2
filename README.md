@@ -90,12 +90,19 @@ npm run dev
 ### Database Setup
 
 ```powershell
-# Create database
-psql -U postgres -c "CREATE DATABASE qastra;"
+# First-time setup: create database and user (requires PostgreSQL superuser)
+cd database
+python database_setup_local.py
 
-# Run migrations (from backend folder)
-cd backend
+# Run Alembic migrations to create all tables (from backend folder)
+cd ..\backend
 alembic upgrade head
+```
+
+To clean the database (drop all objects):
+```powershell
+cd database
+python database_clean.py
 ```
 
 ## Document Storage
@@ -126,13 +133,6 @@ Set `STORAGE_TYPE` in your `.env` file to switch between backends.
 | Frontend | React, TypeScript, Tailwind CSS, Zustand |
 | MCP Server | Node.js, TypeScript, Playwright |
 | AI | OpenAI GPT-4, Anthropic Claude, LiteLLM |
-
-## Default Credentials
-
-```
-Email: admin@qastra.dev
-Password: admin123
-```
 
 ## License
 
