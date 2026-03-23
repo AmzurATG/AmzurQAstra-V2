@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/*
+!logs/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploads
+uploads/*
+!uploads/.gitkeep
+
+# Document Storage (outside backend for uvicorn stability)
+storage/*
+!storage/.gitkeep
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Playwright
+test-results/
+playwright-report/
+
+# Misc
+*.bak
+*.tmp

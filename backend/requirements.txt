@@ -1,0 +1,68 @@
+# FastAPI & Server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+email-validator==2.3.0
+
+# Database
+sqlalchemy[asyncio]==2.0.25
+asyncpg==0.29.0
+alembic==1.13.1
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+bcrypt==5.0.0
+cryptography>=41.0.0
+
+# Redis
+redis==5.0.1
+celery==5.3.6
+
+# HTTP Client
+httpx==0.26.0
+aiohttp==3.13.3
+
+# LLM Integrations
+openai==2.29.0
+anthropic==0.18.0
+litellm>=1.30.0
+tiktoken==0.12.0
+
+# HuggingFace
+huggingface_hub==1.7.1
+tokenizers==0.22.2
+
+# Document Parsing
+pypdf2==3.0.1
+python-docx==1.1.0
+markdown==3.5.1
+
+# File Handling
+python-magic==0.4.27
+aiofiles==23.2.1
+pillow==12.1.1
+fsspec==2026.2.0
+
+# Cloud Storage
+aioboto3>=13.0.0  # AWS S3 async support
+
+# Jira Integration
+jira==3.6.0
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
+
+# CLI & Output
+typer==0.24.1
+rich==14.3.3
+
+# Utilities
+python-dotenv==1.0.0
+tenacity==8.2.3
+PyYAML==6.0.3
+jsonschema==4.26.0
+regex==2026.2.28
