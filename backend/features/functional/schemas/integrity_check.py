@@ -1,7 +1,7 @@
 """
 Integrity Check Schemas
 """
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from pydantic import BaseModel
 
@@ -30,6 +30,9 @@ class IntegrityCheckRequest(BaseModel):
     credentials: Optional[IntegrityCheckCredentials] = None
     critical_pages: Optional[List[CriticalPage]] = None
     take_screenshots: bool = True
+    # app_form = email/password on your app's login page; google_sso = open app's "Sign in with Google" then fill Google account creds
+    login_mode: Literal["app_form", "google_sso"] = "app_form"
+    browser_engine: Optional[Literal["playwright", "steel"]] = None
 
 
 class PageCheckResult(BaseModel):
@@ -52,6 +55,8 @@ class StepResult(BaseModel):
     duration_ms: int
     error: Optional[str] = None
     screenshot_path: Optional[str] = None
+    # LLM diagnosis populated by Gemini when the step fails
+    llm_diagnosis: Optional[str] = None
 
 
 class TestCaseResult(BaseModel):
@@ -73,6 +78,8 @@ class IntegrityCheckResponse(BaseModel):
     status: str  # "passed", "failed", "error"
     app_reachable: bool
     login_successful: Optional[bool] = None
+    login_error: Optional[str] = None
+    login_llm_diagnosis: Optional[str] = None
     # Test case results
     test_cases_total: int = 0
     test_cases_passed: int = 0

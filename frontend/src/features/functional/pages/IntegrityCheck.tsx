@@ -1,498 +1,645 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { Card, CardTitle } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
 import { Input } from '@common/components/ui/Input'
 import { useProjectStore } from '@common/store/projectStore'
 import { integrityCheckApi } from '../api'
-import type { IntegrityCheckResult, IntegrityCheckPreview } from '../types'
+import { useIntegrityCheck } from '../hooks/useIntegrityCheck'
+import { useAuthSession } from '../hooks/useAuthSession'
+import { AuthSessionPanel } from '../components/AuthSessionPanel'
+import { StepTimeline } from '../components/StepTimeline'
+import { ScreenshotFilmstrip } from '../components/ScreenshotFilmstrip'
+import type {
+  IntegrityLoginMode,
+  IntegrityCheckPreview,
+  IntegrityCheckResult,
+  IntegrityCheckRun,
+} from '../types'
 import toast from 'react-hot-toast'
+import { resolveScreenshotUrl } from '@common/utils/backendOrigin'
 import {
   ShieldCheckIcon,
-  CheckCircleIcon,
-  XCircleIcon,
   PlayIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
+  XCircleIcon,
   BookOpenIcon,
   ClipboardDocumentListIcon,
   ListBulletIcon,
   ExclamationTriangleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ArchiveBoxIcon,
+  ArrowTopRightOnSquareIcon,
+  ArrowPathIcon,
+  ClipboardDocumentIcon,
+  GlobeAltIcon,
+  KeyIcon,
 } from '@heroicons/react/24/outline'
 
-export default function IntegrityCheck() {
-  const { projectId } = useParams<{ projectId: string }>()
-  const { currentProject, fetchProject } = useProjectStore()
-  const [appUrl, setAppUrl] = useState('')
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [isRunning, setIsRunning] = useState(false)
-  const [result, setResult] = useState<IntegrityCheckResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
+type Tab = 'run' | 'history'
+
+function safeExternalHref(url: string): string | null {
+  try {
+    const u = new URL(url.trim())
+    if (u.protocol === 'http:' || u.protocol === 'https:') return u.href
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+function truncateUrl(url: string, max = 48): string {
+  if (url.length <= max) return url
+  return `${url.slice(0, max)}…`
+}
+
+function labelAuthMethod(m: IntegrityCheckRun['auth_method']): string {
+  if (m === 'google_sso') return 'Google on app'
+  if (m === 'google_oauth') return 'Google (legacy)'
+  if (m === 'credentials') return 'App form'
+  return 'No login'
+}
+
+const LOGIN_MODE_OPTIONS: {
+  value: IntegrityLoginMode
+  label: string
+  hint: string
+  Icon: typeof GlobeAltIcon
+}[] = [
+  {
+    value: 'app_form',
+    label: 'App login form',
+    hint: 'Fill email & password on your application’s own login page',
+    Icon: KeyIcon,
+  },
+  {
+    value: 'google_sso',
+    label: 'Google on site',
+    hint: 'Clicks “Sign in with Google” on your app, then signs in with the Google account below',
+    Icon: GlobeAltIcon,
+  },
+]
+
+// ─── Small helpers ────────────────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    passed: 'bg-emerald-100 text-emerald-700',
+    failed: 'bg-red-100 text-red-700',
+    error: 'bg-red-100 text-red-700',
+    running: 'bg-blue-100 text-blue-700',
+    pending: 'bg-gray-100 text-gray-600',
+  }
+  return (
+    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${map[status] ?? 'bg-gray-100 text-gray-600'}`}>
+      {status}
+    </span>
+  )
+}
+
+function labelForScreenshotPath(path: string): string {
+  const file = path.split('/').pop()?.replace(/\.png$/i, '') || path
+  const m = file.match(/^step_(\d+)_(.+)$/i)
+  if (!m) return file
+  const n = m[1]
+  const raw = m[2]
+  if (n === '000') {
+    if (raw === 'navigate') return 'Navigate'
+    if (raw === 'post_login') return 'Post-login'
+    if (raw.startsWith('login_')) return raw.replace(/^login_/, 'Login: ').replace(/_/g, ' ')
+  }
+  return `Step ${parseInt(n, 10)} · ${raw.replace(/_/g, ' ')}`
+}
+
+function buildScreenshotFilmstripItems(result: IntegrityCheckResult): { url: string; label: string }[] {
+  const rows: { url: string; label: string }[] = []
+  const seen = new Set<string>()
+  for (const p of result.screenshots || []) {
+    if (!p || seen.has(p)) continue
+    seen.add(p)
+    rows.push({ url: resolveScreenshotUrl(p), label: labelForScreenshotPath(p) })
+  }
+  for (const tc of result.test_case_results) {
+    for (const s of tc.step_results) {
+      const p = s.screenshot_path
+      if (!p || seen.has(p)) continue
+      seen.add(p)
+      const shortTitle = tc.title.length > 28 ? `${tc.title.slice(0, 28)}…` : tc.title
+      rows.push({
+        url: resolveScreenshotUrl(p),
+        label: `${shortTitle} · #${s.step_number}`,
+      })
+    }
+  }
+  return rows
+}
+
+function RunSummaryBanner({ result }: { result: NonNullable<ReturnType<typeof useIntegrityCheck>['result']> }) {
+  const passed = result.status === 'passed'
+  return (
+    <div className={`flex flex-col gap-3 rounded-xl border p-4 ${passed ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'}`}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+        <div className={`flex-shrink-0 rounded-full p-2 ${passed ? 'bg-emerald-100' : 'bg-red-100'}`}>
+          {passed
+            ? <ShieldCheckIcon className="h-7 w-7 text-emerald-600" />
+            : <XCircleIcon className="h-7 w-7 text-red-600" />
+          }
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className={`font-bold text-lg ${passed ? 'text-emerald-800' : 'text-red-800'}`}>
+            {passed ? 'All checks passed' : 'Some checks failed'}
+          </p>
+          <p className="text-sm text-gray-600">
+            {result.test_cases_passed}/{result.test_cases_total} test cases passed
+            &nbsp;·&nbsp;
+            {result.duration_ms != null ? `${(result.duration_ms / 1000).toFixed(1)}s` : ''}
+          </p>
+        </div>
+        <div className="grid shrink-0 grid-cols-3 gap-3 text-center text-sm sm:min-w-[280px]">
+          {[
+            { label: 'Reachable', val: result.app_reachable ? 'Yes' : 'No', ok: result.app_reachable },
+            { label: 'Login', val: result.login_successful == null ? 'Skipped' : result.login_successful ? 'OK' : 'Failed', ok: result.login_successful !== false },
+            { label: 'Failed', val: String(result.test_cases_failed), ok: result.test_cases_failed === 0 },
+          ].map(({ label, val, ok }) => (
+            <div key={label} className="rounded-lg bg-white/70 px-3 py-1.5 shadow-sm">
+              <p className="text-xs text-gray-500">{label}</p>
+              <p className={`font-semibold ${ok ? 'text-emerald-700' : 'text-red-600'}`}>{val}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+      {(result.login_error || result.login_llm_diagnosis) && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/90 p-3 text-sm text-amber-950">
+          {result.login_error && <p className="font-medium text-amber-900">{result.login_error}</p>}
+          {result.login_llm_diagnosis && (
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap font-sans text-xs text-amber-900/90">
+              {result.login_llm_diagnosis}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Preview section (collapsed by default) ───────────────────────────────────
+
+function PreviewSection({ projectId }: { projectId: number }) {
+  const [open, setOpen] = useState(false)
   const [preview, setPreview] = useState<IntegrityCheckPreview | null>(null)
-  const [isLoadingPreview, setIsLoadingPreview] = useState(false)
-  const [expandedStories, setExpandedStories] = useState<Set<number>>(new Set())
-  const [expandedTestCases, setExpandedTestCases] = useState<Set<number>>(new Set())
+  const [loading, setLoading] = useState(false)
 
-  // Fetch project details on mount
   useEffect(() => {
-    if (projectId) {
-      fetchProject(projectId)
-    }
-  }, [projectId, fetchProject])
-
-  // Pre-fill form from project settings
-  useEffect(() => {
-    if (currentProject) {
-      if (currentProject.app_url) {
-        setAppUrl(currentProject.app_url)
-      }
-      if (currentProject.app_username) {
-        setUsername(currentProject.app_username)
-      }
-    }
-  }, [currentProject])
-
-  // Load preview on mount
-  useEffect(() => {
-    if (projectId) {
-      loadPreview()
-    }
+    setLoading(true)
+    integrityCheckApi.getPreview(projectId)
+      .then(r => setPreview(r.data))
+      .catch(() => {})
+      .finally(() => setLoading(false))
   }, [projectId])
 
-  const loadPreview = async () => {
-    if (!projectId) return
-    setIsLoadingPreview(true)
-    try {
-      const response = await integrityCheckApi.getPreview(Number(projectId))
-      setPreview(response.data)
-    } catch (err) {
-      console.error('Failed to load integrity check preview:', err)
-    } finally {
-      setIsLoadingPreview(false)
-    }
-  }
+  return (
+    <Card>
+      <button className="flex w-full items-center justify-between" onClick={() => setOpen(v => !v)}>
+        <div className="flex items-center gap-2">
+          <ShieldCheckIcon className="h-4 w-4 text-primary-500" />
+          <CardTitle>Execution Preview</CardTitle>
+        </div>
+        <div className="flex items-center gap-4 text-sm text-gray-500">
+          {preview && <>
+            <span className="flex items-center gap-1"><BookOpenIcon className="h-3.5 w-3.5" />{preview.total_user_stories} stories</span>
+            <span className="flex items-center gap-1"><ClipboardDocumentListIcon className="h-3.5 w-3.5" />{preview.total_test_cases} cases</span>
+            <span className="flex items-center gap-1"><ListBulletIcon className="h-3.5 w-3.5" />{preview.total_steps} steps</span>
+          </>}
+          {open ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
+        </div>
+      </button>
 
-  const toggleStory = (id: number) => {
-    setExpandedStories((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
+      {open && (
+        <div className="mt-4">
+          {loading && <p className="text-sm text-gray-500">Loading…</p>}
+          {!loading && preview?.total_test_cases === 0 && (
+            <div className="flex items-start gap-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3">
+              <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-shrink-0 text-yellow-600" />
+              <p className="text-sm text-yellow-800">No test cases flagged for integrity check. Enable the toggle on User Stories or Test Cases.</p>
+            </div>
+          )}
+          {!loading && preview && preview.total_test_cases > 0 && (
+            <div className="space-y-1 text-sm text-gray-700">
+              {preview.user_stories.map(us => (
+                <div key={us.id} className="rounded border border-gray-100 px-3 py-2">
+                  <p className="font-medium">{us.external_key && <span className="mr-1 font-mono text-primary-600">{us.external_key}</span>}{us.title}</p>
+                  <p className="text-xs text-gray-400">{us.test_cases.length} test cases</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
 
-  const toggleTestCase = (id: number) => {
-    setExpandedTestCases((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
+// ─── History tab ──────────────────────────────────────────────────────────────
 
-  const handleRunCheck = async () => {
-    if (!appUrl) {
-      toast.error('Please enter an application URL')
+function historyBorderClass(status: IntegrityCheckRun['status']): string {
+  if (status === 'passed') return 'border-l-emerald-500'
+  if (status === 'failed' || status === 'error') return 'border-l-red-500'
+  if (status === 'running') return 'border-l-blue-500'
+  return 'border-l-gray-300'
+}
+
+function HistoryTab({
+  projectId,
+  onReuseUrl,
+}: {
+  projectId: number
+  onReuseUrl: (url: string) => void
+}) {
+  const { history, isLoadingHistory, loadHistory } = useIntegrityCheck()
+  useEffect(() => {
+    loadHistory(projectId)
+  }, [projectId, loadHistory])
+
+  const copyUrl = async (url: string) => {
+    const href = safeExternalHref(url)
+    if (!href) {
+      toast.error('Invalid URL to copy')
       return
     }
-    if (!projectId) {
-      toast.error('Project ID is required')
-      return
-    }
-
-    setIsRunning(true)
-    setError(null)
-    setResult(null)
-
     try {
-      const response = await integrityCheckApi.run({
-        project_id: parseInt(projectId),
-        app_url: appUrl,
-        credentials: username || password ? { username, password } : undefined,
-      })
-      setResult(response.data)
-      toast.success('Integrity check completed')
-    } catch (err: any) {
-      const message = err.response?.data?.detail || err.message || 'Failed to run integrity check'
-      setError(message)
-      toast.error(message)
-    } finally {
-      setIsRunning(false)
+      await navigator.clipboard.writeText(href)
+      toast.success('URL copied')
+    } catch {
+      toast.error('Could not copy')
     }
   }
 
-  const formatDuration = (ms: number) => {
-    if (ms < 1000) return `${ms}ms`
-    return `${(ms / 1000).toFixed(1)}s`
+  if (isLoadingHistory) {
+    return <p className="py-6 text-center text-sm text-gray-500">Loading history…</p>
+  }
+  if (history.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-12 text-gray-400">
+        <ArchiveBoxIcon className="h-10 w-10" />
+        <p className="text-sm">No past runs yet. Run your first check on the New Run tab.</p>
+      </div>
+    )
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Build Integrity Check</h1>
-        <p className="text-gray-600">Verify your application is ready for testing</p>
-      </div>
-
-      {/* Configuration */}
-      <Card>
-        <CardTitle>Configuration</CardTitle>
-        <div className="mt-4 space-y-4">
-          <Input
-            label="Application URL"
-            value={appUrl}
-            onChange={(e) => setAppUrl(e.target.value)}
-            placeholder="https://app.example.com"
-          />
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input
-              label="Username (optional)"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="test@example.com"
-            />
-            <Input
-              label="Password (optional)"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-            />
-          </div>
-
-          <Button onClick={handleRunCheck} isLoading={isRunning} disabled={!appUrl}>
-            <PlayIcon className="w-4 h-4 mr-2" />
-            {isRunning ? 'Running Check...' : 'Run Integrity Check'}
-          </Button>
-        </div>
-      </Card>
-
-      {/* Execution Preview */}
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <ShieldCheckIcon className="w-5 h-5 text-green-600" />
-            <CardTitle>Execution Preview</CardTitle>
-          </div>
-          {preview && (
-            <div className="flex items-center gap-4 text-sm text-gray-500">
-              <span className="flex items-center gap-1">
-                <BookOpenIcon className="w-4 h-4" />
-                {preview.total_user_stories} user {preview.total_user_stories === 1 ? 'story' : 'stories'}
-              </span>
-              <span className="flex items-center gap-1">
-                <ClipboardDocumentListIcon className="w-4 h-4" />
-                {preview.total_test_cases} test {preview.total_test_cases === 1 ? 'case' : 'cases'}
-              </span>
-              <span className="flex items-center gap-1">
-                <ListBulletIcon className="w-4 h-4" />
-                {preview.total_steps} {preview.total_steps === 1 ? 'step' : 'steps'}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {isLoadingPreview && (
-          <p className="text-sm text-gray-500 py-4">Loading preview...</p>
-        )}
-
-        {!isLoadingPreview && preview && preview.total_test_cases === 0 && (
-          <div className="flex items-center gap-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <ExclamationTriangleIcon className="w-5 h-5 text-yellow-600 flex-shrink-0" />
-            <p className="text-sm text-yellow-800">
-              No user stories or test cases are flagged for integrity check. Go to User Stories or Test Case Detail and enable the Integrity Check toggle.
-            </p>
-          </div>
-        )}
-
-        {!isLoadingPreview && preview && preview.total_test_cases > 0 && (
-          <div className="space-y-2">
-            {/* User Stories with their test cases */}
-            {preview.user_stories.map((us) => (
-              <div key={`us-${us.id}`} className="border border-gray-200 rounded-lg">
-                <button
-                  onClick={() => toggleStory(us.id)}
-                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    {expandedStories.has(us.id) ? (
-                      <ChevronDownIcon className="w-4 h-4 text-gray-500" />
-                    ) : (
-                      <ChevronRightIcon className="w-4 h-4 text-gray-500" />
-                    )}
-                    <BookOpenIcon className="w-4 h-4 text-blue-500" />
-                    {us.external_key && (
-                      <span className="text-sm font-mono text-primary-600">{us.external_key}</span>
-                    )}
-                    <span className="font-medium text-gray-900 text-sm">{us.title}</span>
-                  </div>
-                  <span className="text-xs text-gray-500">
-                    {us.test_cases.length} test {us.test_cases.length === 1 ? 'case' : 'cases'}
+    <div className="space-y-3">
+      <p className="text-xs text-gray-500">
+        Open the app that was tested, copy the URL, or load it back into a new run.
+      </p>
+      {history.map(run => {
+        const openHref = safeExternalHref(run.app_url)
+        return (
+          <div
+            key={run.id}
+            className={`rounded-xl border border-gray-200 border-l-4 bg-white shadow-sm transition-shadow hover:shadow-md ${historyBorderClass(run.status)}`}
+          >
+            <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge status={run.status} />
+                  <span className="rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-600">
+                    Run #{run.id}
                   </span>
-                </button>
-
-                {expandedStories.has(us.id) && (
-                  <div className="border-t border-gray-100 px-4 pb-3">
-                    {us.test_cases.map((tc) => (
-                      <div key={`tc-${tc.id}`} className="ml-6 mt-2">
-                        <button
-                          onClick={() => toggleTestCase(tc.id)}
-                          className="w-full flex items-center justify-between py-2 hover:bg-gray-50 rounded px-2 text-left"
-                        >
-                          <div className="flex items-center gap-2">
-                            {expandedTestCases.has(tc.id) ? (
-                              <ChevronDownIcon className="w-3.5 h-3.5 text-gray-400" />
-                            ) : (
-                              <ChevronRightIcon className="w-3.5 h-3.5 text-gray-400" />
-                            )}
-                            <ClipboardDocumentListIcon className="w-4 h-4 text-indigo-500" />
-                            <span className="text-sm text-gray-800">{tc.title}</span>
-                          </div>
-                          <span className="text-xs text-gray-400">
-                            {tc.steps.length} {tc.steps.length === 1 ? 'step' : 'steps'}
-                          </span>
-                        </button>
-
-                        {expandedTestCases.has(tc.id) && tc.steps.length > 0 && (
-                          <div className="ml-8 mt-1 space-y-1">
-                            {tc.steps.map((step) => (
-                              <div
-                                key={step.step_number}
-                                className="flex items-center gap-2 text-xs text-gray-600 py-1 px-2 bg-gray-50 rounded"
-                              >
-                                <span className="text-gray-400 w-5 text-right">#{step.step_number}</span>
-                                <span className="px-1.5 py-0.5 rounded bg-white border border-gray-200 font-mono">
-                                  {step.action}
-                                </span>
-                                {step.target && (
-                                  <span className="text-gray-500 truncate max-w-xs" title={step.target}>
-                                    {step.target}
-                                  </span>
-                                )}
-                                {step.description && (
-                                  <span className="text-gray-400 truncate">{step.description}</span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {us.test_cases.length === 0 && (
-                      <p className="ml-6 mt-2 text-xs text-gray-400 italic">No test cases linked</p>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {/* Standalone test cases (flagged directly, not via user story) */}
-            {preview.standalone_test_cases.length > 0 && (
-              <div className="border border-gray-200 rounded-lg">
-                <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
-                  <span className="text-sm font-medium text-gray-700">
-                    Standalone Test Cases (flagged directly)
+                  <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                    {run.browser_engine === 'steel' ? 'Steel' : 'Playwright'}
+                  </span>
+                  <span className="rounded-md bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-800">
+                    {labelAuthMethod(run.auth_method)}
                   </span>
                 </div>
-                <div className="px-4 pb-3">
-                  {preview.standalone_test_cases.map((tc) => (
-                    <div key={`stc-${tc.id}`} className="mt-2">
-                      <button
-                        onClick={() => toggleTestCase(tc.id)}
-                        className="w-full flex items-center justify-between py-2 hover:bg-gray-50 rounded px-2 text-left"
-                      >
-                        <div className="flex items-center gap-2">
-                          {expandedTestCases.has(tc.id) ? (
-                            <ChevronDownIcon className="w-3.5 h-3.5 text-gray-400" />
-                          ) : (
-                            <ChevronRightIcon className="w-3.5 h-3.5 text-gray-400" />
-                          )}
-                          <ClipboardDocumentListIcon className="w-4 h-4 text-indigo-500" />
-                          <span className="text-sm text-gray-800">{tc.title}</span>
-                        </div>
-                        <span className="text-xs text-gray-400">
-                          {tc.steps.length} {tc.steps.length === 1 ? 'step' : 'steps'}
-                        </span>
-                      </button>
+                <p className="break-all text-sm font-medium text-gray-900" title={run.app_url}>
+                  {truncateUrl(run.app_url, 72)}
+                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                  <span>
+                    {run.test_cases_passed}/{run.test_cases_total} cases passed
+                  </span>
+                  {run.duration_ms != null && <span>{(run.duration_ms / 1000).toFixed(1)}s</span>}
+                  {run.created_at && (
+                    <span>{new Date(run.created_at).toLocaleString()}</span>
+                  )}
+                  {run.app_reachable != null && (
+                    <span className={run.app_reachable ? 'text-emerald-600' : 'text-red-600'}>
+                      Reachable: {run.app_reachable ? 'yes' : 'no'}
+                    </span>
+                  )}
+                  {run.login_successful != null && (
+                    <span className={run.login_successful ? 'text-emerald-600' : 'text-amber-700'}>
+                      Login: {run.login_successful ? 'ok' : 'failed'}
+                    </span>
+                  )}
+                </div>
+                {run.error && (
+                  <p className="rounded-lg bg-red-50 px-2 py-1.5 text-xs text-red-800">{run.error}</p>
+                )}
+              </div>
+              <div className="flex flex-shrink-0 flex-wrap gap-2 sm:flex-col sm:items-stretch">
+                {openHref ? (
+                  <a
+                    href={openHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-xs font-semibold text-primary-800 transition-colors hover:bg-primary-100"
+                  >
+                    <ArrowTopRightOnSquareIcon className="h-4 w-4" />
+                    Open app
+                  </a>
+                ) : (
+                  <span className="text-xs text-gray-400">Invalid app URL</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => copyUrl(run.app_url)}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  <ClipboardDocumentIcon className="h-4 w-4" />
+                  Copy URL
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onReuseUrl(run.app_url)
+                    toast.success('URL loaded on New Run')
+                  }}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  <ArrowPathIcon className="h-4 w-4" />
+                  Use for new run
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
-                      {expandedTestCases.has(tc.id) && tc.steps.length > 0 && (
-                        <div className="ml-8 mt-1 space-y-1">
-                          {tc.steps.map((step) => (
-                            <div
-                              key={step.step_number}
-                              className="flex items-center gap-2 text-xs text-gray-600 py-1 px-2 bg-gray-50 rounded"
-                            >
-                              <span className="text-gray-400 w-5 text-right">#{step.step_number}</span>
-                              <span className="px-1.5 py-0.5 rounded bg-white border border-gray-200 font-mono">
-                                {step.action}
-                              </span>
-                              {step.target && (
-                                <span className="text-gray-500 truncate max-w-xs" title={step.target}>
-                                  {step.target}
-                                </span>
-                              )}
-                              {step.description && (
-                                <span className="text-gray-400 truncate">{step.description}</span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+// ─── Main page ────────────────────────────────────────────────────────────────
+
+export default function IntegrityCheck() {
+  const { projectId } = useParams<{ projectId: string }>()
+  const pid = Number(projectId)
+  const { currentProject, fetchProject } = useProjectStore()
+  const [activeTab, setActiveTab] = useState<Tab>('run')
+  const [appUrl, setAppUrl] = useState('')
+  const [loginUrl, setLoginUrl] = useState('')
+  const [loginMode, setLoginMode] = useState<IntegrityLoginMode>('app_form')
+  const [browserEngine, setBrowserEngine] = useState<'playwright' | 'steel'>('steel')
+  const urlSeedRef = useRef<number | null>(null)
+
+  const { isRunning, result, error, runCheck } = useIntegrityCheck()
+  const auth = useAuthSession(pid)
+
+  useEffect(() => { if (projectId) fetchProject(projectId) }, [projectId])
+
+  useEffect(() => {
+    urlSeedRef.current = null
+  }, [projectId])
+
+  useEffect(() => {
+    if (!projectId || !currentProject) return
+    const id = Number(projectId)
+    if (currentProject.id !== id) return
+    if (urlSeedRef.current === id) return
+    urlSeedRef.current = id
+    if (currentProject.app_url) setAppUrl(currentProject.app_url)
+  }, [projectId, currentProject])
+
+  const handleRun = async () => {
+    if (!appUrl) { toast.error('Enter an application URL'); return }
+    if (auth.authMethod === 'credentials') {
+      if (!auth.username?.trim() || !auth.password) {
+        toast.error('Enter email and password, or choose Skip login')
+        return
+      }
+    }
+    await runCheck({
+      projectId: pid,
+      appUrl,
+      username: auth.username,
+      password: auth.password,
+      loginUrl: loginUrl.trim() || undefined,
+      loginMode,
+      browserEngine,
+    })
+  }
+
+  const filmstripItems = result ? buildScreenshotFilmstripItems(result) : []
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Build Integrity Check</h1>
+        <p className="text-gray-500 text-sm">Verify your application is ready for automated testing</p>
+        <p className="mt-2 max-w-3xl text-xs text-gray-500">
+          Use the Application URL for each run. With <strong className="font-medium text-gray-700">Steel</strong> and{' '}
+          <code className="rounded bg-gray-100 px-1">STEEL_SOLVE_CAPTCHA=true</code>, the backend may continue past
+          common CAPTCHA patterns so automated login can proceed (per your Steel plan).
+        </p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1 w-fit">
+        {(['run', 'history'] as Tab[]).map(t => (
+          <button key={t} onClick={() => setActiveTab(t)}
+            className={`rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-all ${
+              activeTab === t ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-600 hover:text-gray-800'
+            }`}>
+            {t === 'history' ? 'Run History' : 'New Run'}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'history' ? (
+        <Card>
+          <div className="mb-4 flex items-center gap-2">
+            <ArchiveBoxIcon className="h-5 w-5 text-primary-600" />
+            <CardTitle>Run history</CardTitle>
+          </div>
+          <HistoryTab
+            projectId={pid}
+            onReuseUrl={url => {
+              setAppUrl(url)
+              setActiveTab('run')
+            }}
+          />
+        </Card>
+      ) : (
+        <>
+          {/* Configuration */}
+          <Card>
+            <CardTitle>Configuration</CardTitle>
+            <div className="mt-4 space-y-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1">
+                  <Input label="Application URL" value={appUrl} onChange={e => setAppUrl(e.target.value)} placeholder="https://app.example.com" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => currentProject?.app_url && setAppUrl(currentProject.app_url)}
+                  disabled={!currentProject?.app_url}
+                  className="mb-0.5 shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Reset to project URL
+                </button>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-white to-slate-50/90 p-4 shadow-sm">
+                <label className="mb-1 block text-sm font-semibold text-gray-800">Login type</label>
+                <p className="mb-3 text-xs text-gray-500">
+                  Same email and password in Authentication below — either typed into your app’s form, or into Google’s
+                  sign-in after QAstra clicks “Sign in with Google” on your site.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {LOGIN_MODE_OPTIONS.map(({ value, label, hint, Icon }) => {
+                    const selected = loginMode === value
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        title={hint}
+                        onClick={() => setLoginMode(value)}
+                        className={`flex min-w-[10rem] flex-1 flex-col items-start gap-1 rounded-xl border-2 px-3 py-2.5 text-left shadow-sm transition-all sm:min-w-0 sm:flex-initial ${
+                          selected
+                            ? 'border-primary-500 bg-primary-50 text-primary-900 ring-1 ring-primary-200'
+                            : 'border-gray-200 bg-white text-gray-800 hover:border-primary-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2 text-sm font-semibold">
+                          <Icon className={`h-4 w-4 ${selected ? 'text-primary-600' : 'text-gray-500'}`} />
+                          {label}
+                        </span>
+                        <span className="text-[11px] leading-snug text-gray-500">{hint}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
+                <p className="text-sm font-semibold text-indigo-900">Seeing the browser</p>
+                <p className="mt-1 text-xs text-indigo-900/85">
+                  The backend runs Playwright with a visible session (<code className="rounded bg-white/80 px-1">headless=false</code>
+                  ). <strong className="font-medium">Playwright (local)</strong> shows Chromium on the machine that runs the API.
+                  <strong className="font-medium"> Steel</strong> runs Chromium remotely; use your{' '}
+                  <a
+                    href="https://steel.dev"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium underline decoration-indigo-400 hover:decoration-indigo-600"
+                  >
+                    Steel dashboard
+                  </a>{' '}
+                  for live session view when your plan includes it. Screenshots in this UI always reflect the run.
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">Browser engine</label>
+                <p className="mb-2 text-xs text-gray-500">
+                  Steel uses Playwright <code className="rounded bg-gray-100 px-1">connect_over_cdp</code> with optional CAPTCHA
+                  solving. Playwright (local) uses bundled Chromium on the server. Set{' '}
+                  <code className="rounded bg-gray-100 px-1">STEEL_USE_WITH_PLAYWRIGHT=false</code> if you want local Chromium when
+                  this option is selected.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {(['steel', 'playwright'] as const).map(eng => (
+                    <button key={eng} type="button" onClick={() => setBrowserEngine(eng)}
+                      className={`flex items-center gap-2 rounded-lg border-2 px-4 py-2 text-sm font-medium transition-all ${
+                        browserEngine === eng ? 'border-primary-500 bg-primary-50 text-primary-700'
+                          : 'border-gray-200 bg-white text-gray-700 hover:border-primary-300'
+                      }`}>
+                      <span>{eng === 'playwright' ? '🎭' : '⚡'}</span>
+                      <span className="capitalize">{eng === 'steel' ? 'Steel (cloud)' : 'Playwright (local)'}</span>
+                    </button>
                   ))}
                 </div>
               </div>
-            )}
-          </div>
-        )}
-      </Card>
-
-      {/* Error */}
-      {error && (
-        <Card>
-          <div className="flex items-center gap-4 p-4 bg-red-50 rounded-lg">
-            <XCircleIcon className="w-8 h-8 text-red-600" />
-            <div>
-              <h3 className="font-bold text-red-900">Check Failed</h3>
-              <p className="text-red-700">{error}</p>
             </div>
-          </div>
-        </Card>
-      )}
+          </Card>
 
-      {/* Results */}
-      {result && (
-        <Card>
-          <div className="flex items-center gap-4 mb-6">
-            <div className={`p-3 rounded-full ${result.status === 'passed' ? 'bg-green-100' : 'bg-red-100'}`}>
-              {result.status === 'passed' ? (
-                <ShieldCheckIcon className="w-8 h-8 text-green-600" />
-              ) : (
-                <XCircleIcon className="w-8 h-8 text-red-600" />
-              )}
+          {/* Auth */}
+          <Card>
+            <CardTitle>Authentication</CardTitle>
+            <div className="mt-4">
+              <AuthSessionPanel
+                authMethod={auth.authMethod}
+                onAuthMethodChange={auth.setAuthMethod}
+                username={auth.username}
+                onUsernameChange={auth.setUsername}
+                password={auth.password}
+                onPasswordChange={auth.setPassword}
+                loginUrl={loginUrl}
+                onLoginUrlChange={setLoginUrl}
+                savedSession={auth.savedSession}
+                isSaving={auth.isSaving}
+                appUrl={appUrl}
+                onSave={auth.saveSession}
+                onClear={auth.clearSession}
+              />
             </div>
-            <div>
-              <h3 className="text-xl font-bold text-gray-900">
-                {result.status === 'passed' ? 'All Checks Passed' : 'Some Checks Failed'}
-              </h3>
-              <p className="text-gray-600">
-                Completed in {formatDuration(result.duration_ms)} • {result.test_cases_total} test cases executed
-              </p>
-            </div>
-          </div>
+          </Card>
 
-          {/* Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <p className="text-sm text-gray-500">App Reachable</p>
-              <div className="flex items-center gap-2 mt-1">
-                {result.app_reachable ? (
-                  <CheckCircleIcon className="w-5 h-5 text-green-500" />
-                ) : (
-                  <XCircleIcon className="w-5 h-5 text-red-500" />
-                )}
-                <span className="font-medium">{result.app_reachable ? 'Yes' : 'No'}</span>
+          {/* Execution Preview */}
+          <PreviewSection projectId={pid} />
+
+          {/* Run button */}
+          <Button onClick={handleRun} isLoading={isRunning} disabled={!appUrl} className="w-full sm:w-auto">
+            <PlayIcon className="mr-2 h-4 w-4" />
+            {isRunning ? 'Running Integrity Check…' : 'Run Integrity Check'}
+          </Button>
+
+          {/* Live commentary when running */}
+          {isRunning && (
+            <Card>
+              <div className="flex items-center gap-3 mb-4">
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+                <CardTitle>Live Execution</CardTitle>
               </div>
-            </div>
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <p className="text-sm text-gray-500">Test Cases Passed</p>
-              <p className="font-medium text-lg">{result.test_cases_passed} / {result.test_cases_total}</p>
-            </div>
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <p className="text-sm text-gray-500">Test Cases Failed</p>
-              <p className={`font-medium text-lg ${result.test_cases_failed > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                {result.test_cases_failed}
-              </p>
-            </div>
-          </div>
+              <StepTimeline testCaseResults={[]} isRunning />
+            </Card>
+          )}
 
-          {/* Error message */}
-          {result.error && (
-            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <p className="text-yellow-800">{result.error}</p>
+          {/* Error */}
+          {error && !isRunning && (
+            <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+              <XCircleIcon className="h-5 w-5 flex-shrink-0 text-red-600" />
+              <p className="text-sm text-red-800">{error}</p>
             </div>
           )}
 
-          {/* Test Case Results */}
-          {result.test_case_results && result.test_case_results.length > 0 && (
-            <>
-              <CardTitle>Test Case Results</CardTitle>
-              <div className="mt-4 space-y-4">
-                {result.test_case_results.map((tc) => (
-                  <div
-                    key={tc.test_case_id}
-                    className={`p-4 rounded-lg border ${
-                      tc.status === 'passed' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        {tc.status === 'passed' ? (
-                          <CheckCircleIcon className="w-5 h-5 text-green-500" />
-                        ) : (
-                          <XCircleIcon className="w-5 h-5 text-red-500" />
-                        )}
-                        <span className="font-medium">{tc.title}</span>
-                      </div>
-                      <span className="text-sm text-gray-500">
-                        {tc.steps_passed}/{tc.steps_total} steps • {formatDuration(tc.duration_ms)}
-                      </span>
-                    </div>
-                    
-                    {/* Step Results */}
-                    <div className="ml-8 space-y-1">
-                      {tc.step_results.map((step) => (
-                        <div 
-                          key={step.step_number}
-                          className={`flex items-center justify-between text-sm p-2 rounded ${
-                            step.status === 'passed' ? 'bg-green-100/50' : 'bg-red-100/50'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="text-gray-500">#{step.step_number}</span>
-                            <span className="px-1.5 py-0.5 text-xs rounded bg-white">
-                              {step.action}
-                            </span>
-                            <span className="text-gray-600">{step.description || ''}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {step.error && (
-                              <span className="text-xs text-red-600">{step.error}</span>
-                            )}
-                            <span className="text-gray-400">{formatDuration(step.duration_ms)}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+          {/* Results */}
+          {result && !isRunning && (
+            <Card>
+              <RunSummaryBanner result={result} />
+
+              {result.test_case_results.length > 0 && (
+                <div className="mt-6 space-y-2">
+                  <CardTitle>Step-by-step Results</CardTitle>
+                  <div className="mt-3">
+                    <StepTimeline testCaseResults={result.test_case_results} isRunning={false} />
                   </div>
-                ))}
-              </div>
-            </>
-          )}
+                </div>
+              )}
 
-          {/* Screenshots */}
-          {result.screenshots && result.screenshots.length > 0 && (
-            <div className="mt-6">
-              <CardTitle>Screenshots</CardTitle>
-              <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-4">
-                {result.screenshots.map((screenshot, index) => (
-                  <a
-                    key={index}
-                    href={screenshot}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block border rounded-lg overflow-hidden hover:shadow-lg transition-shadow"
-                  >
-                    <img
-                      src={screenshot}
-                      alt={`Screenshot ${index + 1}`}
-                      className="w-full h-32 object-cover"
-                    />
-                  </a>
-                ))}
-              </div>
-            </div>
+              {filmstripItems.length > 0 && (
+                <div className="mt-6 space-y-2">
+                  <CardTitle>Run screenshots</CardTitle>
+                  <p className="text-xs text-gray-500">Chronological captures including navigation, login, and each test step.</p>
+                  <div className="mt-3">
+                    <ScreenshotFilmstrip screenshots={filmstripItems} />
+                  </div>
+                </div>
+              )}
+            </Card>
           )}
-        </Card>
+        </>
       )}
     </div>
   )

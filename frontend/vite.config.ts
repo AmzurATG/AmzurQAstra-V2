@@ -18,6 +18,11 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      // Integrity-check screenshots are served at backend root /screenshots (not under /api/v1)
+      '/screenshots': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 })

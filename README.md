@@ -43,9 +43,14 @@ You'll need **3 terminal windows** to run all services:
 cd backend
 python -m venv venv
 .\venv\Scripts\activate
-pip install -r requirements.txt
+# Install dependencies (use uv pip inside the venv; avoid global pip)
+uv pip install -r requirements.txt
+# Local Chromium only — skip if you use Steel for all browser runs
+playwright install chromium
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+**Steel (cloud browser):** No separate Steel CLI is required. Put `STEEL_API_KEY` in `backend/.env`. With `BROWSER_ENGINE=steel` (default), integrity checks use Playwright’s `connect_over_cdp` to `wss://connect.steel.dev`. The `steel-sdk` package (already in `requirements.txt`) creates “intelligent” sessions (proxy + CAPTCHA flags) when `STEEL_INTELLIGENT_SESSIONS=true`. CAPTCHA solving and residential proxy features depend on your [Steel](https://steel.dev) plan. To run **only** local Chromium, set `BROWSER_ENGINE=playwright` and `STEEL_USE_WITH_PLAYWRIGHT=false` (or unset `STEEL_API_KEY`).
 
 #### Terminal 2: MCP Server (Port 3001)
 

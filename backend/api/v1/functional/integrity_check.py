@@ -173,27 +173,30 @@ async def run_integrity_check(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Run build integrity check on an application.
-    
-    This verifies:
-    - App is reachable
-    - Login works with provided credentials
-    - Critical pages/endpoints are accessible
-    - Basic UI elements are present
+    Run a full integrity check on an application.
+
+    Flow:
+    1. Verify the app URL is reachable.
+    2. Login using saved credentials or the inline credentials supplied.
+    3. Execute every test case flagged for integrity check, step by step.
+    4. Capture a screenshot after each step; call Gemini LLM to diagnose failures.
+    5. Persist the run + all step results to the database.
     """
     service = IntegrityCheckService(db)
-    result = await service.run_check(request)
+    result = await service.run_check(request, triggered_by=current_user.id)
     return result
 
 
 @router.get("/history/{project_id}", response_model=list)
 async def get_integrity_check_history(
     project_id: int,
-    limit: int = 10,
+    limit: int = 20,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get integrity check history for a project."""
+    """
+    Return past integrity check runs for a project (newest first).
+    Each entry includes aggregated counts and run metadata.
+    """
     service = IntegrityCheckService(db)
-    history = await service.get_history(project_id, limit)
-    return history
+    return await service.get_history(project_id, limit)

@@ -144,6 +144,8 @@ export interface StepCheckResult {
   duration_ms: number
   error?: string
   screenshot_path?: string
+  // Populated by Gemini LLM when the step fails
+  llm_diagnosis?: string
 }
 
 export interface TestCaseCheckResult {
@@ -158,11 +160,16 @@ export interface TestCaseCheckResult {
   error?: string
 }
 
+/** How the integrity check signs in: app form vs in-page Google SSO (uses same email/password). */
+export type IntegrityLoginMode = 'app_form' | 'google_sso'
+
 export interface IntegrityCheckResult {
   project_id: number
   status: 'passed' | 'failed' | 'error'
   app_reachable: boolean
   login_successful?: boolean
+  login_error?: string
+  login_llm_diagnosis?: string
   // Test case results (new)
   test_cases_total: number
   test_cases_passed: number
@@ -227,6 +234,43 @@ export interface IntegrityCheckPreview {
   total_steps: number
 }
 
+
+// =============================================================================
+// Auth Session Types
+// =============================================================================
+
+export type AuthMethod = 'none' | 'credentials' | 'google_oauth'
+export type BrowserEngine = 'playwright' | 'steel'
+
+export interface AuthSession {
+  id: number
+  project_id: number
+  auth_type: AuthMethod
+  is_active: boolean
+  created_at?: string
+}
+
+// =============================================================================
+// Integrity Check Run History
+// =============================================================================
+
+export interface IntegrityCheckRun {
+  id: number
+  project_id: number
+  status: 'pending' | 'running' | 'passed' | 'failed' | 'error'
+  app_url: string
+  app_reachable?: boolean
+  login_successful?: boolean
+  browser_engine: BrowserEngine
+  /** Run-time login path; google_sso = automated Google button + Google account creds */
+  auth_method: AuthMethod | 'google_sso'
+  test_cases_total: number
+  test_cases_passed: number
+  test_cases_failed: number
+  duration_ms?: number
+  error?: string
+  created_at?: string
+}
 
 // =============================================================================
 // User Story Types

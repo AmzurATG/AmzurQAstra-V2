@@ -27,10 +27,12 @@ class LiteLLMClient(BaseLLMClient):
     Model format: provider/model-name or just model-name for OpenAI
     """
     
+    _UNSET = object()
+
     def __init__(
         self,
         api_key: Optional[str] = None,
-        api_base: Optional[str] = None,
+        api_base: Any = _UNSET,
         default_model: Optional[str] = None,
     ):
         """
@@ -38,11 +40,13 @@ class LiteLLMClient(BaseLLMClient):
         
         Args:
             api_key: API key for the LLM provider
-            api_base: Base URL for custom deployments (e.g., LiteLLM proxy)
+            api_base: Base URL for custom deployments (e.g., LiteLLM proxy).
+                      Pass None explicitly to skip the proxy and let litellm
+                      route directly to the provider (e.g. Gemini, Anthropic).
             default_model: Default model to use
         """
         self.api_key = api_key or settings.LITELLM_API_KEY
-        self.api_base = api_base or settings.LITELLM_API_BASE
+        self.api_base = settings.LITELLM_API_BASE if api_base is self._UNSET else api_base
         self.default_model = default_model or settings.LITELLM_MODEL
         
         # Configure LiteLLM
@@ -117,7 +121,55 @@ class LiteLLMClient(BaseLLMClient):
             model=model,
             usage=usage,
         )
-    
+
+    async def chat_with_text_and_image_b64(
+        self,
+        system_prompt: str,
+        user_text: str,
+        image_base64: str,
+        model: Optional[str] = None,
+        temperature: float = 0.3,
+        max_tokens: Optional[int] = None,
+    ) -> LLMResponse:
+        """
+        Multimodal chat (OpenAI-style content parts) for vision-capable models
+        (e.g. Gemini via LiteLLM).
+        """
+        model = model or self.default_model
+        user_content: List[Dict[str, Any]] = [
+            {"type": "text", "text": user_text},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{image_base64}"},
+            },
+        ]
+        messages_dict = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages_dict,
+            "temperature": temperature,
+        }
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+
+        response = await acompletion(**kwargs)
+        content = response.choices[0].message.content
+        usage = None
+        if hasattr(response, "usage") and response.usage:
+            usage = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+            }
+        return LLMResponse(content=content, model=model, usage=usage)
+
     async def generate(
         self,
         prompt: str,

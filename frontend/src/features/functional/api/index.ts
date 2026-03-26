@@ -129,14 +129,45 @@ export const testRunsApi = {
 
 // Integrity Check API
 export const integrityCheckApi = {
-  run: (data: { project_id: number; app_url: string; credentials?: { username?: string; password?: string } }) =>
+  run: (data: {
+    project_id: number
+    app_url: string
+    login_mode?: 'app_form' | 'google_sso'
+    browser_engine?: 'playwright' | 'steel'
+    credentials?: { username?: string; password?: string; login_url?: string }
+  }) =>
     apiClient.post<IntegrityCheckResult>(`/functional/integrity-check/`, data),
 
-  getHistory: (projectId: string) =>
-    apiClient.get<IntegrityCheckResult[]>(`/functional/integrity-check/history/${projectId}`),
+  getHistory: (projectId: number, limit = 20) =>
+    apiClient.get<import('../types').IntegrityCheckRun[]>(
+      `/functional/integrity-check/history/${projectId}`,
+      { params: { limit } },
+    ),
 
   getPreview: (projectId: number) =>
     apiClient.get<import('../types').IntegrityCheckPreview>(`/functional/integrity-check/preview/${projectId}`),
+}
+
+// Auth Sessions API
+export const authSessionsApi = {
+  get: (projectId: number) =>
+    apiClient.get<import('../types').AuthSession | null>(`/functional/auth-sessions/${projectId}`),
+
+  save: (projectId: number, username: string, password: string) =>
+    apiClient.post<import('../types').AuthSession>(
+      `/functional/auth-sessions/${projectId}`,
+      { username, password },
+    ),
+
+  captureGoogleOAuth: (projectId: number, loginUrl: string) =>
+    apiClient.post<import('../types').AuthSession>(
+      `/functional/auth-sessions/${projectId}/google-oauth`,
+      { login_url: loginUrl },
+      { timeout: 200_000 },
+    ),
+
+  delete: (projectId: number) =>
+    apiClient.delete(`/functional/auth-sessions/${projectId}`),
 }
 
 // User Stories API

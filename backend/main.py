@@ -2,8 +2,16 @@
 QAstra - AI-Powered QA Automation Platform
 Main FastAPI Application Entry Point
 """
+import sys
+import asyncio
 import logging
 from pathlib import Path
+
+# NOTE: uvicorn --reload overrides this with WindowsSelectorEventLoopPolicy
+# (see uvicorn/loops/asyncio.py). The actual fix lives in PlaywrightRunner
+# which spins up a ProactorEventLoop in a background thread when needed.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -75,7 +83,7 @@ def create_application() -> FastAPI:
     # Include API router
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
-    # Mount static files for screenshots
+    # Mount screenshots directory — stored outside backend/ to avoid uvicorn --reload triggers
     screenshots_path = Path(settings.SCREENSHOTS_DIR)
     screenshots_path.mkdir(parents=True, exist_ok=True)
     app.mount("/screenshots", StaticFiles(directory=str(screenshots_path)), name="screenshots")
