@@ -317,19 +317,7 @@ def upgrade() -> None:
                 EXECUTE FUNCTION update_updated_at_column();
         """)
 
-    # Seed default admin user (password: admin123)
-    op.execute("""
-        INSERT INTO users (email, hashed_password, full_name, role, is_active, is_superuser)
-        VALUES (
-            'admin@qastra.dev',
-            '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.V4IjD2BxvQJOhK',
-            'QAstra Admin',
-            'admin',
-            TRUE,
-            TRUE
-        )
-        ON CONFLICT (email) DO NOTHING;
-    """)
+    # Admin user is created separately via: python backend/database/create_admin.py
 
 
 def downgrade() -> None:

@@ -3,10 +3,14 @@ Alembic Environment Configuration for QAstra
 
 Reads the database URL from the application's Settings and configures
 Alembic to use the SQLAlchemy metadata from all registered models.
+
+If no .env file exists, prompts for database credentials interactively.
 """
+import getpass
 import sys
 from logging.config import fileConfig
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from sqlalchemy import engine_from_config, pool
 from alembic import context
@@ -15,7 +19,8 @@ from alembic import context
 # Ensure the backend package root is on sys.path so that ``config``,
 # ``common.*``, and ``features.*`` are importable.
 # ---------------------------------------------------------------------------
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+backend_dir = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(backend_dir))
 
 from config import settings  # noqa: E402
 from common.db.base import Base  # noqa: E402
@@ -39,14 +44,32 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # ---------------------------------------------------------------------------
-# Override sqlalchemy.url from application settings (sync driver required)
+# Resolve database URL — use .env if available, otherwise prompt
 # ---------------------------------------------------------------------------
+_env_file = backend_dir / ".env"
+_default_url = "postgresql://postgres:postgres@localhost:5432/qastra"
+
 db_url = settings.DATABASE_URL
-# Alembic needs a synchronous driver
+
+# Normalise to sync driver for Alembic
 if "asyncpg" in db_url:
     db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
-elif not db_url.startswith("postgresql://"):
-    db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+
+# If there is no .env file and the URL is still the hard-coded default,
+# prompt the user interactively for database credentials.
+if not _env_file.exists() and db_url == _default_url:
+    print()
+    print("=" * 55)
+    print("  No .env file found — enter database credentials")
+    print("=" * 55)
+    print()
+    db_user = input("  Database username [qastra]: ").strip() or "qastra"
+    db_pass = getpass.getpass("  Database password [qastra123]: ") or "qastra123"
+    db_host = input("  Database host [localhost]: ").strip() or "localhost"
+    db_port = input("  Database port [5432]: ").strip() or "5432"
+    db_name = input("  Database name [qastra]: ").strip() or "qastra"
+    db_url = f"postgresql://{quote_plus(db_user)}:{quote_plus(db_pass)}@{db_host}:{db_port}/{db_name}"
+    print()
 
 config.set_main_option("sqlalchemy.url", db_url)
 

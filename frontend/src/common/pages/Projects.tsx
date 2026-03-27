@@ -12,7 +12,7 @@ import toast from 'react-hot-toast'
 export default function Projects() {
   const { projects, isLoading, fetchProjects } = useProjectStore()
   const [showCreate, setShowCreate] = useState(false)
-  const [newProject, setNewProject] = useState({ name: '', description: '', app_url: '' })
+  const [newProject, setNewProject] = useState({ name: '', description: '', app_url: '', app_username: '', app_password: '' })
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
@@ -26,7 +26,7 @@ export default function Projects() {
       await projectsApi.create(newProject)
       toast.success('Project created!')
       setShowCreate(false)
-      setNewProject({ name: '', description: '', app_url: '' })
+      setNewProject({ name: '', description: '', app_url: '', app_username: '', app_password: '' })
       fetchProjects()
     } catch (error) {
       toast.error('Failed to create project')
@@ -72,6 +72,21 @@ export default function Projects() {
               onChange={(e) => setNewProject({ ...newProject, app_url: e.target.value })}
               placeholder="https://app.example.com"
             />
+            <div className="grid grid-cols-2 gap-4">
+              <Input
+                label="Application Username"
+                value={newProject.app_username}
+                onChange={(e) => setNewProject({ ...newProject, app_username: e.target.value })}
+                placeholder="Enter login username"
+              />
+              <Input
+                label="Application Password"
+                type="password"
+                value={newProject.app_password}
+                onChange={(e) => setNewProject({ ...newProject, app_password: e.target.value })}
+                placeholder="Enter login password"
+              />
+            </div>
             <div className="flex gap-2">
               <Button type="submit" isLoading={creating}>Create</Button>
               <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>

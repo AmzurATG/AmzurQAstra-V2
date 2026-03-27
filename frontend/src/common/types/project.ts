@@ -18,6 +18,8 @@ export interface ProjectCreate {
   name: string
   description?: string
   app_url?: string
+  app_username?: string
+  app_password?: string
 }
 
 export interface ProjectUpdate {

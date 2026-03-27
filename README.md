@@ -91,17 +91,21 @@ npm run dev
 
 ```powershell
 # First-time setup: create database and user (requires PostgreSQL superuser)
-cd database
+cd backend\database
 python database_setup_local.py
 
 # Run Alembic migrations to create all tables (from backend folder)
-cd ..\backend
+cd ..
 alembic upgrade head
+
+# Create the admin user (from backend/database folder)
+cd database
+python create_admin.py
 ```
 
 To clean the database (drop all objects):
 ```powershell
-cd database
+cd backend\database
 python database_clean.py
 ```
 

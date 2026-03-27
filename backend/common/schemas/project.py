@@ -15,7 +15,8 @@ class ProjectBase(BaseModel):
 
 class ProjectCreate(ProjectBase):
     """Schema for creating a project."""
-    pass
+    app_username: Optional[str] = None
+    app_password: Optional[str] = None
 
 
 class ProjectUpdate(BaseModel):

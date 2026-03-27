@@ -64,8 +64,17 @@ class ProjectService:
     
     async def create(self, project_data: ProjectCreate, owner_id: int) -> Project:
         """Create a new project."""
+        data = project_data.model_dump(exclude={'app_username', 'app_password'})
+        
+        # Store credentials in app_credentials JSONB if provided
+        if project_data.app_username or project_data.app_password:
+            data['app_credentials'] = {
+                'username': project_data.app_username,
+                'password': project_data.app_password,
+            }
+        
         project = Project(
-            **project_data.model_dump(),
+            **data,
             owner_id=owner_id,
         )
         self.db.add(project)

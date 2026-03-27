@@ -378,19 +378,7 @@ BEGIN
     END LOOP;
 END$$;
 
--- =====================================================
--- INSERT DEFAULT ADMIN USER (password: admin123)
--- =====================================================
-INSERT INTO users (email, hashed_password, full_name, role, is_active, is_superuser)
-VALUES (
-    'admin@qastra.dev',
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.V4IjD2BxvQJOhK',
-    'QAstra Admin',
-    'admin',
-    TRUE,
-    TRUE
-)
-ON CONFLICT (email) DO NOTHING;
+-- Admin user is created separately via: python backend/database/create_admin.py
 
 -- =====================================================
 -- VERIFICATION
