@@ -29,7 +29,7 @@ class TestRun(BaseModel):
     # Run details
     name = Column(String(255), nullable=True)
     description = Column(String(1000), nullable=True)
-    status = Column(Enum(TestRunStatus), default=TestRunStatus.PENDING)
+    status = Column(Enum(TestRunStatus, values_callable=lambda e: [x.value for x in e]), default=TestRunStatus.PENDING)
     
     # Execution info
     triggered_by = Column(Integer, ForeignKey("users.id"), nullable=True)

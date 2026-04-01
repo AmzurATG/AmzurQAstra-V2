@@ -76,9 +76,14 @@ class TestCaseGenerationService:
         """Internal method to generate test cases using LLM."""
         try:
             # Call LLM
-            response = await self.llm.chat_with_system(
-                system_prompt=TEST_CASE_GENERATION_PROMPT,
-                user_prompt=content,
+            import asyncio
+            from common.llm.base import Message
+            response = await asyncio.to_thread(
+                self.llm.chat_sync,
+                messages=[
+                    Message(role="system", content=TEST_CASE_GENERATION_PROMPT),
+                    Message(role="user", content=content)
+                ],
                 temperature=0.3,
             )
             
@@ -163,9 +168,14 @@ class TestCaseGenerationService:
         
         try:
             # Call LLM to generate test cases
-            response = await self.llm.chat_with_system(
-                system_prompt=TEST_CASE_GENERATION_PROMPT,
-                user_prompt=content,
+            import asyncio
+            from common.llm.base import Message
+            response = await asyncio.to_thread(
+                self.llm.chat_sync,
+                messages=[
+                    Message(role="system", content=TEST_CASE_GENERATION_PROMPT),
+                    Message(role="user", content=content)
+                ],
                 temperature=0.3,
             )
             

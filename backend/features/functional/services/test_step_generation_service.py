@@ -67,9 +67,14 @@ Category: {test_case.category.value}
             
             # Call LLM
             print(f"[TestStepGeneration] Calling LLM for test_case_id={test_case_id}")
-            response = await self.llm.chat_with_system(
-                system_prompt=TEST_STEP_GENERATION_PROMPT,
-                user_prompt=context,
+            import asyncio
+            from common.llm.base import Message
+            response = await asyncio.to_thread(
+                self.llm.chat_sync,
+                messages=[
+                    Message(role="system", content=TEST_STEP_GENERATION_PROMPT),
+                    Message(role="user", content=context)
+                ],
                 temperature=0.3,
             )
             print(f"[TestStepGeneration] LLM response received, length={len(response.content)} chars")
@@ -99,7 +104,6 @@ Category: {test_case.category.value}
                     value=step_data.get("value"),
                     description=step_data.get("description"),
                     expected_result=step_data.get("expected_result"),
-                    playwright_code=step_data.get("playwright_code"),
                 )
                 self.db.add(step)
                 created_steps.append(step)

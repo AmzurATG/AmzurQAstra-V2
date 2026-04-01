@@ -4,11 +4,12 @@ LiteLLM Client - Unified interface supporting 100+ LLM providers
 LiteLLM provides a unified API for OpenAI, Anthropic, Azure, Bedrock, 
 Vertex AI, and many other LLM providers.
 """
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import litellm
-from litellm import acompletion
+from litellm import acompletion, completion
 
 from common.llm.base import BaseLLMClient, Message, LLMResponse
+from common.utils.logger import logger
 from config import settings
 
 
@@ -97,9 +98,8 @@ class LiteLLMClient(BaseLLMClient):
         if self.api_base:
             kwargs["api_base"] = self.api_base
         
-        # Make async request
-        response = await acompletion(**kwargs)
-        
+        response, model_used = await self._acompletion_with_fallback(kwargs)
+
         # Extract response content
         content = response.choices[0].message.content
         
@@ -117,7 +117,49 @@ class LiteLLMClient(BaseLLMClient):
             model=model,
             usage=usage,
         )
-    
+
+    def chat_sync(
+        self,
+        messages: List[Message],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+    ) -> LLMResponse:
+        """
+        Send chat completion request via LiteLLM (synchronous).
+        """
+        model = model or self.default_model
+        messages_dict = [{"role": m.role, "content": m.content} for m in messages]
+        
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages_dict,
+            "temperature": temperature,
+        }
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        
+        response, model_used = self._completion_with_fallback(kwargs)
+
+        content = response.choices[0].message.content
+        usage = None
+        if hasattr(response, "usage") and response.usage:
+            usage = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+            }
+
+        return LLMResponse(
+            content=content,
+            model=model_used,
+            usage=usage,
+        )
+
     async def generate(
         self,
         prompt: str,
@@ -181,8 +223,8 @@ class LiteLLMClient(BaseLLMClient):
         if self.api_base:
             kwargs["api_base"] = self.api_base
         
-        response = await acompletion(**kwargs)
-        
+        response, model_used = await self._acompletion_with_fallback(kwargs)
+
         content = response.choices[0].message.content
         usage = None
         if hasattr(response, "usage") and response.usage:
@@ -191,9 +233,9 @@ class LiteLLMClient(BaseLLMClient):
                 "completion_tokens": response.usage.completion_tokens,
                 "total_tokens": response.usage.total_tokens,
             }
-        
+
         return LLMResponse(
             content=content,
-            model=model,
+            model=model_used,
             usage=usage,
         )

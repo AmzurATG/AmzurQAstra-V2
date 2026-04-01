@@ -2,6 +2,14 @@
 QAstra - AI-Powered QA Automation Platform
 Main FastAPI Application Entry Point
 """
+# Windows: browser-use launches Chrome via asyncio.create_subprocess_exec. The selector event loop
+# does not implement subprocess transport — use the Proactor policy (must run before the loop exists).
+import sys
+import asyncio
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 import logging
 from pathlib import Path
 

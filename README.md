@@ -1,62 +1,50 @@
 # AmzurQAstra-V2
 
-AI-Powered QA Automation Platform that leverages Playwright MCP (Model Context Protocol) to generate, manage, and execute functional tests using AI.
+AI-powered QA automation platform: generate and manage functional tests from requirements, run test workflows, and verify target apps with a **Build Integrity Check** powered by **browser-use**, **Playwright**, and **Google Gemini**.
 
 ## Features
 
-- **AI Test Generation**: Automatically generate test cases from requirement documents (PDF, Word, Markdown)
-- **Playwright Integration**: Execute tests using Playwright through MCP server
-- **Multi-Browser Support**: Test on Chromium, Firefox, and WebKit
-- **Build Integrity Check**: Verify application readiness before testing
-- **Flexible Document Storage**: Local filesystem, AWS S3, or Supabase storage
-- **Integrations**: Jira, Azure DevOps, Redmine for requirements import
-- **LLM Support**: OpenAI, Anthropic Claude, and LiteLLM proxy
+- **AI test generation**: Create test cases from requirement documents (PDF, Word, Markdown)
+- **Build Integrity Check**: Async browser run (headed Chrome) against your app URL — optional email/password or **Google Sign-In** mode, live progress, screenshots, and persisted results (Gemini-driven agent)
+- **Flexible document storage**: Local filesystem, AWS S3, or Supabase
+- **Integrations**: Jira, Azure DevOps, Redmine (where configured)
+- **LLM support**: OpenAI, Anthropic, LiteLLM proxy, and **Gemini** for the integrity agent
 
 ## Architecture
 
 ```
 AmzurQAstra-V2/
-├── backend/          # FastAPI backend (Python)
-├── frontend/         # React frontend (TypeScript)
-├── mcp-server/       # Playwright MCP server (Node.js)
-├── storage/          # Document storage (outside backend)
-├── logs/             # Application logs
-└── docker-compose.yml
+├── backend/          # FastAPI (Python), Alembic, integrity agent (browser-use)
+├── frontend/         # React + Vite + TypeScript
+├── storage/          # Document storage (outside backend; optional)
+└── logs/             # Application logs (outside backend)
 ```
 
-## Quick Start
+## Quick start
 
 ### Prerequisites
 
-- Node.js 18+
-- Python 3.11+
-- PostgreSQL 15+
-- Redis (optional, for caching)
+- **Node.js** 18+
+- **Python** 3.11+ (3.12 recommended)
+- **PostgreSQL** 15+
+- **Redis** (optional; used if configured)
 
-### Local Development Setup
+### Local development (two terminals)
 
-You'll need **3 terminal windows** to run all services:
+Use a virtual environment and install Python dependencies from `backend/requirements.txt` (e.g. `uv pip install -r requirements.txt` with your tool of choice).
 
-#### Terminal 1: Backend (Port 8000)
+#### Terminal 1 — Backend (port 8000)
 
 ```powershell
 cd backend
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# Create/activate venv, then:
+uv pip install -r requirements.txt
+uv run playwright install chromium
+alembic upgrade head
+uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-#### Terminal 2: MCP Server (Port 3001)
-
-```powershell
-cd mcp-server
-npm install
-npx playwright install
-npm run dev
-```
-
-#### Terminal 3: Frontend (Port 5173)
+#### Terminal 2 — Frontend (port 5173)
 
 ```powershell
 cd frontend
@@ -64,76 +52,83 @@ npm install
 npm run dev
 ```
 
-### Access the Application
+The Vite dev server proxies `/api` and `/screenshots` to the backend so API calls and integrity-check screenshots load correctly.
+
+### URLs
 
 | Service | URL |
-|---------|-----|
+|--------|-----|
 | Frontend | http://localhost:5173 |
 | Backend API | http://localhost:8000 |
-| API Docs (Swagger) | http://localhost:8000/docs |
-| API Docs (ReDoc) | http://localhost:8000/redoc |
-| MCP Server | http://localhost:3001 |
+| Swagger | http://localhost:8000/docs |
+| ReDoc | http://localhost:8000/redoc |
 
-### Environment Setup
+### Environment
 
-1. Copy environment file:
+1. Copy the example env file if present:
+
    ```powershell
    copy backend\.env.example backend\.env
    ```
 
-2. Edit `backend/.env` with your configuration:
-   - Database connection
-   - LLM API keys (OpenAI/Anthropic/LiteLLM)
-   - Storage configuration
-   - Integration credentials (optional)
+2. Edit `backend/.env` at minimum:
 
-### Database Setup
+   | Variable | Purpose |
+   |----------|---------|
+   | `DATABASE_URL` | PostgreSQL connection string |
+   | `GEMINI_API_KEY` | **Required for Build Integrity Check** (Gemini via browser-use) |
+   | `SECRET_KEY` / JWT | Auth |
+   | OpenAI / Anthropic / LiteLLM | Other AI features, as needed |
+   | `BROWSER_USE_DEFAULT_EXTENSIONS` | Optional (`true`/`false`); default extensions download to the user profile — disable on low disk space |
+
+3. Frontend (optional): set `VITE_API_URL` in `frontend/.env` (e.g. `http://localhost:8000/api/v1`) so screenshot URLs resolve to the API origin in production-like setups.
+
+### Database
 
 ```powershell
-# First-time setup: create database and user (requires PostgreSQL superuser)
+# First-time DB creation (if you use the repo script)
 cd database
 python database_setup_local.py
 
-# Run Alembic migrations to create all tables (from backend folder)
 cd ..\backend
 alembic upgrade head
 ```
 
-To clean the database (drop all objects):
-```powershell
-cd database
-python database_clean.py
-```
+Integrity Check results are stored after migration **`0002`** (table `integrity_check_results`).
 
-## Document Storage
+### Build Integrity Check — notes
 
-QAstra supports flexible document storage backends:
+- **Manual login**: Email/password are passed to the agent via browser-use **`sensitive_data`** placeholders; do not commit real secrets in code.
+- **Google Sign-In**: Use the UI toggle; the agent follows OAuth in the opened browser (MFA may require a human).
+- **Windows**: The backend runs the agent on a dedicated asyncio loop so Chrome can launch (`asyncio` subprocess support).
+- **Screenshots** are written under the configured screenshots directory and served at `/screenshots/...`. Do not commit generated PNGs (keep `backend/screenshots/` out of version control).
 
-| Type | Description | Config |
-|------|-------------|--------|
-| `local` | Local filesystem (default) | `STORAGE_LOCAL_PATH=../storage` |
-| `s3` | AWS S3 or S3-compatible | `STORAGE_S3_BUCKET`, `STORAGE_S3_REGION` |
-| `supabase` | Supabase Storage | `STORAGE_SUPABASE_URL`, `STORAGE_SUPABASE_BUCKET` |
+## Document storage
 
-Set `STORAGE_TYPE` in your `.env` file to switch between backends.
+| Type | Config |
+|------|--------|
+| `local` (default) | `STORAGE_LOCAL_PATH` |
+| `s3` | `STORAGE_S3_*` |
+| `supabase` | `STORAGE_SUPABASE_*` |
+
+Set `STORAGE_TYPE` in `backend/.env`.
 
 ## Workflow
 
-1. **Upload Requirements**: Upload PDF/Word documents or import from Jira/Azure DevOps
-2. **Generate Test Cases**: AI analyzes requirements and generates test cases
-3. **Review & Edit**: Refine test steps and add assertions
-4. **Run Integrity Check**: Verify the target application is testable
-5. **Execute Tests**: Run tests via Playwright MCP and view results
+1. Upload requirements or import from integrations  
+2. Generate and refine test cases  
+3. **Build Integrity Check**: open *Functional Testing → Integrity Check*, set URL and credentials or Google Sign-In, run and poll until complete  
+4. Execute functional test runs as configured in the product  
 
-## Tech Stack
+## Tech stack
 
 | Layer | Technologies |
-|-------|--------------|
-| Backend | Python, FastAPI, SQLAlchemy, PostgreSQL |
-| Frontend | React, TypeScript, Tailwind CSS, Zustand |
-| MCP Server | Node.js, TypeScript, Playwright |
-| AI | OpenAI GPT-4, Anthropic Claude, LiteLLM |
+|-------|----------------|
+| Backend | Python, FastAPI, SQLAlchemy, Alembic, PostgreSQL |
+| Frontend | React, TypeScript, Vite, Tailwind CSS |
+| Integrity agent | browser-use, Playwright (Chromium), Google Gemini |
+| Other AI | OpenAI, Anthropic, LiteLLM (features as configured) |
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License — see LICENSE if present.

@@ -111,29 +111,47 @@ export const testStepsApi = {
 
 // Test Runs API
 export const testRunsApi = {
-  list: (projectId: string) =>
-    apiClient.get<TestRun[]>(`/functional/test-runs/`, { params: { project_id: projectId } }),
+  list: (projectId: number) =>
+    apiClient.get<{ items: TestRun[]; total: number }>(`/functional/test-runs/`, {
+      params: { project_id: projectId },
+    }),
 
-  get: (id: string) =>
+  get: (id: number) =>
     apiClient.get<TestRun>(`/functional/test-runs/${id}`),
 
-  create: (data: { project_id: string; test_case_ids: string[]; browser?: string }) =>
-    apiClient.post<TestRun>(`/functional/test-runs`, data),
+  create: (data: import('../types').TestRunCreateRequest) =>
+    apiClient.post<import('../types').TestRunStartResponse>(`/functional/test-runs/`, data),
 
-  cancel: (id: string) =>
+  getLiveProgress: (id: number) =>
+    apiClient.get<import('../types').LiveProgressResponse>(`/functional/test-runs/${id}/live`),
+
+  cancel: (id: number) =>
     apiClient.post(`/functional/test-runs/${id}/cancel`),
 
-  getResults: (id: string) =>
+  getResults: (id: number) =>
     apiClient.get<TestResult[]>(`/functional/test-runs/${id}/results`),
+
+  syncStep: (resultId: number, stepNumber: number) =>
+    apiClient.post(`/functional/test-runs/results/${resultId}/steps/${stepNumber}/sync`),
 }
 
 // Integrity Check API
 export const integrityCheckApi = {
-  run: (data: { project_id: number; app_url: string; credentials?: { username?: string; password?: string } }) =>
-    apiClient.post<IntegrityCheckResult>(`/functional/integrity-check/`, data),
+  /** Start an async run — returns run_id immediately */
+  startRun: (data: {
+    project_id: number
+    app_url: string
+    credentials?: { username?: string; password?: string }
+    use_google_signin?: boolean
+  }) =>
+    apiClient.post<import('../types').RunStartResponse>(`/functional/integrity-check/run`, data),
+
+  /** Poll live progress by run_id */
+  getStatus: (runId: string) =>
+    apiClient.get<import('../types').RunStatusResponse>(`/functional/integrity-check/${runId}/status`),
 
   getHistory: (projectId: string) =>
-    apiClient.get<IntegrityCheckResult[]>(`/functional/integrity-check/history/${projectId}`),
+    apiClient.get<import('../types').RunStatusResponse[]>(`/functional/integrity-check/history/${projectId}`),
 
   getPreview: (projectId: number) =>
     apiClient.get<import('../types').IntegrityCheckPreview>(`/functional/integrity-check/preview/${projectId}`),

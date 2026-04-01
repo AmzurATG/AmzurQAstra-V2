@@ -28,3 +28,13 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-gray-400;
 }
+
+@keyframes progress {
+  0% { transform: scaleX(0); }
+  50% { transform: scaleX(0.7); }
+  100% { transform: scaleX(1); }
+}
+
+.animate-progress {
+  animation: progress 2s infinite linear;
+}

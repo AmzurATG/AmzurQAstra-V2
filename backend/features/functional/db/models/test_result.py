@@ -26,7 +26,7 @@ class TestResult(BaseModel):
     test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
     
     # Result
-    status = Column(Enum(TestResultStatus), nullable=False)
+    status = Column(Enum(TestResultStatus, values_callable=lambda e: [x.value for x in e]), nullable=False)
     duration_ms = Column(Integer, nullable=True)  # Execution time in milliseconds
     
     # Failure details
@@ -41,6 +41,8 @@ class TestResult(BaseModel):
     
     # Step-by-step results
     step_results = Column(JSONB, nullable=True)  # Array of step results
+    adapted_steps = Column(JSONB, nullable=True)  # Array of steps that were adapted by AI
+    original_steps = Column(JSONB, nullable=True)  # Array of original steps for comparison
     
     # Execution timestamps
     started_at = Column(DateTime(timezone=True), nullable=True)

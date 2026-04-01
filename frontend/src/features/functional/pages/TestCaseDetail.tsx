@@ -79,7 +79,6 @@ export default function TestCaseDetail() {
         value: editingStep.value,
         description: editingStep.description,
         expected_result: editingStep.expected_result,
-        playwright_code: editingStep.playwright_code,
       })
       toast.success('Step updated successfully')
       setIsEditModalOpen(false)
@@ -343,7 +342,7 @@ export default function TestCaseDetail() {
                   </div>
                   <div className="text-sm text-gray-600 space-x-2">
                     {step.target && (
-                      <span className="font-mono bg-gray-200 px-1.5 py-0.5 rounded text-xs">{step.target}</span>
+                      <span className="bg-gray-200 px-1.5 py-0.5 rounded text-xs">{step.target}</span>
                     )}
                     {step.value && (
                       <span>→ <span className="font-mono bg-blue-50 px-1.5 py-0.5 rounded text-xs">"{step.value}"</span></span>
@@ -352,13 +351,6 @@ export default function TestCaseDetail() {
                   {step.expected_result && (
                     <div className="mt-2 text-sm text-green-600">
                       Expected: {step.expected_result}
-                    </div>
-                  )}
-                  {step.playwright_code && (
-                    <div className="mt-2">
-                      <code className="block bg-gray-800 text-green-400 text-xs p-2 rounded font-mono overflow-x-auto">
-                        {step.playwright_code}
-                      </code>
                     </div>
                   )}
                 </div>
@@ -475,14 +467,14 @@ export default function TestCaseDetail() {
                       {/* Target */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Target (Selector)
+                          Target (Element / URL)
                         </label>
                         <input
                           type="text"
                           value={editingStep.target || ''}
                           onChange={(e) => setEditingStep({ ...editingStep, target: e.target.value })}
-                          className="w-full p-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-primary-500 focus:border-primary-500"
-                          placeholder="#element-id or .class-name"
+                          className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-primary-500 focus:border-primary-500"
+                          placeholder="e.g. the Login button, the Email input field"
                         />
                       </div>
 
@@ -514,19 +506,6 @@ export default function TestCaseDetail() {
                         />
                       </div>
 
-                      {/* Playwright Code */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Playwright Code
-                        </label>
-                        <textarea
-                          value={editingStep.playwright_code || ''}
-                          onChange={(e) => setEditingStep({ ...editingStep, playwright_code: e.target.value })}
-                          rows={3}
-                          className="w-full p-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-primary-500 focus:border-primary-500"
-                          placeholder="await page.click('#button')"
-                        />
-                      </div>
                     </div>
                   )}
 

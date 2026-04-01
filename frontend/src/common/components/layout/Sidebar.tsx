@@ -1,6 +1,7 @@
-import { NavLink, useLocation, useParams } from 'react-router-dom'
+import { NavLink, useLocation, useParams, useNavigate } from 'react-router-dom'
 import { useUIStore } from '@common/store/uiStore'
 import { useProjectStore } from '@common/store/projectStore'
+import { useEffect } from 'react'
 import {
   HomeIcon,
   FolderIcon,
@@ -46,11 +47,22 @@ export default function Sidebar() {
   const { sidebarOpen, toggleSidebar } = useUIStore()
   const { currentProject } = useProjectStore()
   const location = useLocation()
+  const navigate = useNavigate()
   const { projectId } = useParams()
   
   // Check if we're inside a project (URL has /projects/:id/...)
   const isInsideProject = location.pathname.match(/^\/projects\/\d+/)
   const currentProjectId = projectId || location.pathname.match(/^\/projects\/(\d+)/)?.[1]
+
+  // Fix for blank pages: if we are at /projects/:id/functional/settings, redirect to /projects/:id/settings
+  useEffect(() => {
+    if (location.pathname.includes('/functional/settings')) {
+      navigate(location.pathname.replace('/functional/settings', '/settings'), { replace: true })
+    }
+    if (location.pathname.includes('/functional/test-runs')) {
+      navigate(location.pathname.replace('/functional/test-runs', '/test-runs'), { replace: true })
+    }
+  }, [location.pathname, navigate])
 
   const linkClass = (isActive: boolean) =>
     `flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${

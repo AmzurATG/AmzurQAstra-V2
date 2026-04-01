@@ -89,40 +89,63 @@ export interface TestStep {
 }
 
 // Test Run Types
-export type TestRunStatus = 'pending' | 'running' | 'passed' | 'failed' | 'cancelled'
+export type TestRunStatus = 'pending' | 'running' | 'passed' | 'failed' | 'cancelled' | 'error'
 export type BrowserType = 'chromium' | 'firefox' | 'webkit'
 
 export interface TestRun {
-  id: string
-  project_id: string
+  id: number
+  project_id: number
   name: string
+  description?: string
   status: TestRunStatus
   browser: BrowserType
   total_tests: number
   passed_tests: number
   failed_tests: number
   skipped_tests: number
-  duration_ms?: number
+  triggered_by?: number
   started_at?: string
   completed_at?: string
   created_at: string
+  updated_at: string
+}
+
+export interface TestRunStartResponse {
+  run_id: number
+  status: string
+}
+
+export interface TestRunCreateRequest {
+  project_id: number
+  name?: string
+  description?: string
+  test_case_ids?: number[]
+  app_url?: string
+  credentials?: { username?: string; password?: string }
+  use_google_signin?: boolean
+  browser?: string
+  headless?: boolean
 }
 
 // Test Result Types
 export interface TestResult {
-  id: string
-  test_run_id: string
-  test_case_id: string
-  test_case_title: string
-  status: 'passed' | 'failed' | 'skipped'
+  id: number
+  test_run_id: number
+  test_case_id: number
+  status: 'passed' | 'failed' | 'skipped' | 'error'
   error_message?: string
-  error_stack?: string
+  failed_step?: number
   screenshot_path?: string
-  video_path?: string
-  step_results: StepResult[]
-  duration_ms: number
-  started_at: string
-  completed_at: string
+  step_results?: TestStepResult[]
+  duration_ms?: number
+  started_at?: string
+  completed_at?: string
+}
+
+export interface TestStepResult {
+  step_number: number
+  status: 'passed' | 'failed' | 'error'
+  actual_result?: string
 }
 
 export interface StepResult {
@@ -133,6 +156,38 @@ export interface StepResult {
   error_message?: string
   screenshot_path?: string
   duration_ms: number
+}
+
+// Live Progress (polling)
+export interface LogEntry {
+  timestamp: string
+  level: string
+  message: string
+  test_case_id?: number
+}
+
+export interface CompletedCaseResult {
+  test_case_id: number
+  title: string
+  status: string
+  steps_total: number
+  steps_passed: number
+  steps_failed: number
+  duration_ms: number
+  step_results?: TestStepResult[]
+}
+
+export interface LiveProgressResponse {
+  run_id: number
+  status: string
+  percentage: number
+  current_test_case_index: number
+  total_test_cases: number
+  current_test_case_title?: string
+  current_step_info?: string
+  completed_results: CompletedCaseResult[]
+  logs: LogEntry[]
+  error?: string
 }
 
 // Integrity Check Types
@@ -177,6 +232,37 @@ export interface IntegrityCheckResult {
   duration_ms: number
   checked_at: string
   error?: string
+}
+
+// ── Async run types ───────────────────────────────────────────────────────────
+
+export interface RunStartResponse {
+  run_id: string
+  status: 'pending'
+}
+
+export interface AgentStepData {
+  step_number: number
+  description?: string
+  screenshot_path?: string
+}
+
+export type RunStatus = 'pending' | 'running' | 'completed' | 'error' | 'not_found'
+
+export interface RunStatusResponse {
+  run_id: string
+  status: RunStatus
+  percentage: number
+  current_step?: string
+  overall_status?: 'passed' | 'failed' | 'error'
+  screenshots: string[]
+  steps: AgentStepData[]
+  steps_total: number
+  steps_passed: number
+  steps_failed: number
+  summary?: string
+  error?: string
+  duration_ms?: number
 }
 
 export interface PageCheckResult {

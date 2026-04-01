@@ -1,113 +1,126 @@
 """
-QAstra Configuration Settings
+Application settings loaded from environment / backend/.env.
 """
-from functools import lru_cache
-from typing import Optional, List
-from pydantic_settings import BaseSettings
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, List, Optional
+
+from pydantic import AliasChoices, Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_DIR = Path(__file__).resolve().parent
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
-    
-    # Server
-    HOST: str = "0.0.0.0"
-    PORT: int = 8000
-    
+    model_config = SettingsConfigDict(
+        env_file=str(_BACKEND_DIR / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     # App
     APP_NAME: str = "QAstra"
-    APP_VERSION: str = "1.0.0"
-    DEBUG: bool = False
+    APP_VERSION: str = "2.0.0"
     ENVIRONMENT: str = "development"
-    
-    # API
+    DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
-    
-    # Security
-    SECRET_KEY: str = "your-secret-key-change-in-production"
-    ENCRYPTION_KEY: str = "your-32-byte-encryption-key-here"  # Must be 32 bytes for Fernet
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    ALGORITHM: str = "HS256"
-    JWT_ALGORITHM: str = "HS256"
-    
-    # Logging — files are written outside backend/ so uvicorn --reload never triggers on log writes
-    LOG_LEVEL: str = "INFO"
-    LOG_DIR: str = "../logs"          # Resolves to QAstra/logs/ relative to backend/ CWD
-    LOG_MAX_BYTES: int = 10_485_760   # 10 MB per file before rotation
-    LOG_BACKUP_COUNT: int = 5         # Number of rotated copies to keep per log file
-    
+    HOST: str = "0.0.0.0"
+    PORT: int = 8000
+
+    CORS_ORIGINS: List[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+    )
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, v: Any) -> Any:
+        if v is None or v == "":
+            return [
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+            ]
+        if isinstance(v, list):
+            return v
+        s = str(v).strip()
+        if s.startswith("["):
+            return json.loads(s)
+        return [x.strip() for x in s.split(",") if x.strip()]
+
     # Database
-    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/qastra"
+    DATABASE_URL: str
     DB_ECHO: bool = False
-    
+
     # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
-    
-    # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:5173"]
-    
+    REDIS_URL: Optional[str] = None
+
+    # Security
+    SECRET_KEY: str
+    ENCRYPTION_KEY: str
+    ALGORITHM: str = Field(
+        default="HS256",
+        validation_alias=AliasChoices("JWT_ALGORITHM", "ALGORITHM"),
+    )
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
     # LLM
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
-    DEFAULT_LLM_PROVIDER: str = "litellm"  # openai, anthropic, or litellm
-    DEFAULT_LLM_MODEL: str = "gpt-4"
-    
-    # LiteLLM - Unified LLM Proxy
+    DEFAULT_LLM_PROVIDER: str = "litellm"
+    DEFAULT_LLM_MODEL: str = "gpt-4o"
+
     LITELLM_API_KEY: Optional[str] = None
-    LITELLM_API_BASE: Optional[str] = None  # e.g., http://localhost:4000 for LiteLLM proxy
-    LITELLM_MODEL: str = "gpt-4"  # Model format: provider/model or just model-name
-    
-    # MCP Server
-    MCP_SERVER_URL: str = "http://localhost:3001"
-    
-    # File Storage (Legacy - kept for backward compatibility)
-    UPLOAD_DIR: str = "./uploads"
+    LITELLM_API_BASE: Optional[str] = None
+    LITELLM_MODEL: str = "gpt-4o"
+    # Comma-separated list of proxy model ids to try if the primary model fails
+    LITELLM_FALLBACK_MODELS: Optional[str] = None
+
+    # Browser agent (browser-use)
+    # LLM backend: "litellm" uses ChatLiteLLM + LITELLM_* (default, same proxy as the app).
+    # "google" uses ChatGoogle + GEMINI_API_KEY (direct Gemini, no proxy).
+    BROWSER_USE_LLM_BACKEND: str = "litellm"
+    # If unset, browser uses LITELLM_MODEL (litellm) or gemini-2.0-flash (google).
+    BROWSER_USE_LLM_MODEL: Optional[str] = None
+    BROWSER_USE_LLM_TEMPERATURE: float = 0.15
+    GEMINI_API_KEY: Optional[str] = None  # only when BROWSER_USE_LLM_BACKEND=google
+    BROWSER_USE_DEFAULT_EXTENSIONS: bool = True
     SCREENSHOTS_DIR: str = "./screenshots"
-    MAX_UPLOAD_SIZE_MB: int = 50
-    
-    # Document Storage Configuration
-    # Type: 'local', 's3', or 'supabase'
+
+    # MCP (optional)
+    MCP_SERVER_URL: str = "http://localhost:3001"
+
+    # Integrations
+    SLACK_WEBHOOK_URL: Optional[str] = None
+
+    # Storage
     STORAGE_TYPE: str = "local"
-    
-    # Local Storage - Path should be outside backend folder to prevent uvicorn restart
-    # Default: ../storage (relative to backend folder, resolves to QAstra/storage/)
     STORAGE_LOCAL_PATH: str = "../storage"
-    
-    # AWS S3 Storage
     STORAGE_S3_BUCKET: Optional[str] = None
-    STORAGE_S3_REGION: str = "us-east-1"
+    STORAGE_S3_REGION: Optional[str] = None
     STORAGE_S3_ACCESS_KEY: Optional[str] = None
     STORAGE_S3_SECRET_KEY: Optional[str] = None
-    STORAGE_S3_ENDPOINT_URL: Optional[str] = None  # For S3-compatible services (MinIO, etc.)
-    STORAGE_S3_PREFIX: str = ""  # Optional prefix for all files
-    
-    # Supabase Storage
+    STORAGE_S3_ENDPOINT_URL: Optional[str] = None
+    STORAGE_S3_PREFIX: Optional[str] = None
     STORAGE_SUPABASE_URL: Optional[str] = None
     STORAGE_SUPABASE_KEY: Optional[str] = None
     STORAGE_SUPABASE_BUCKET: Optional[str] = None
-    STORAGE_SUPABASE_PREFIX: str = ""
-    
-    # Jira Integration
-    JIRA_BASE_URL: Optional[str] = None
-    JIRA_EMAIL: Optional[str] = None
-    JIRA_API_TOKEN: Optional[str] = None
-    
-    # Azure DevOps Integration
-    AZURE_DEVOPS_ORG_URL: Optional[str] = None
-    AZURE_DEVOPS_PAT: Optional[str] = None
-    
-    # Slack Integration
-    SLACK_WEBHOOK_URL: Optional[str] = None
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    STORAGE_SUPABASE_PREFIX: Optional[str] = None
+
+    UPLOAD_DIR: str = "./uploads"
+    MAX_UPLOAD_SIZE_MB: int = 50
+
+    # Logging
+    LOG_DIR: str = "./logs"
+    LOG_LEVEL: str = "INFO"
+    LOG_MAX_BYTES: int = 10_485_760
+    LOG_BACKUP_COUNT: int = 5
 
 
-@lru_cache()
-def get_settings() -> Settings:
-    """Get cached settings instance."""
-    return Settings()
-
-
-settings = get_settings()
+settings = Settings()

@@ -30,6 +30,8 @@ async def get_current_user(
     try:
         token = credentials.credentials
         payload = verify_token(token)
+        if payload.get("type") != "access":
+            raise credentials_exception
         user_id: str = payload.get("sub")
         if user_id is None:
             raise credentials_exception

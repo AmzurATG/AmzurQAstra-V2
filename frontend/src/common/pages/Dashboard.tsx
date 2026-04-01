@@ -23,9 +23,9 @@ export default function Dashboard() {
   // Mock stats - replace with real data
   const stats = [
     { name: 'Projects', value: projects.length, icon: FolderIcon, href: '/projects' },
-    { name: 'Test Cases', value: 156, icon: ClipboardDocumentListIcon, href: '/functional/test-cases' },
-    { name: 'Test Runs', value: 24, icon: PlayIcon, href: '/functional/test-runs' },
-    { name: 'Pass Rate', value: '94%', icon: CheckCircleIcon, href: '/functional/test-runs' },
+    { name: 'Test Cases', value: 156, icon: ClipboardDocumentListIcon, href: '/projects' },
+    { name: 'Test Runs', value: 24, icon: PlayIcon, href: '/projects' },
+    { name: 'Pass Rate', value: '94%', icon: CheckCircleIcon, href: '/projects' },
   ]
 
   return (

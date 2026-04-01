@@ -1,8 +1,13 @@
 """
 Integrity Check Endpoints
+POST  /run             — start async check, return run_id
+GET   /{run_id}/status — poll live progress
+GET   /preview/{pid}   — preview flagged test cases (unchanged)
+GET   /history/{pid}   — past runs
 """
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
@@ -14,59 +19,63 @@ from common.db.models.user_story import UserStory
 from common.api.deps import get_current_active_user
 from features.functional.schemas.integrity_check import (
     IntegrityCheckRequest,
-    IntegrityCheckResponse,
+    RunStartResponse,
+    RunStatusResponse,
+    IntegrityCheckPreviewResponse,
+    PreviewStepResponse,
+    PreviewTestCaseResponse,
+    PreviewUserStoryResponse,
 )
 from features.functional.services.integrity_check_service import IntegrityCheckService
 from features.functional.db.models.test_case import TestCase
 
-
 router = APIRouter()
 
 
-# =====================================================
-# PREVIEW SCHEMAS
-# =====================================================
+# ── Start run ─────────────────────────────────────────────────────────────────
 
-class PreviewStepResponse(BaseModel):
-    step_number: int
-    action: str
-    target: Optional[str] = None
-    value: Optional[str] = None
-    description: Optional[str] = None
-    expected_result: Optional[str] = None
-
-
-class PreviewTestCaseResponse(BaseModel):
-    id: int
-    title: str
-    description: Optional[str] = None
-    priority: Optional[str] = None
-    integrity_check: bool = False
-    steps: List[PreviewStepResponse] = []
+@router.post("/run", response_model=RunStartResponse)
+async def start_integrity_check(
+    request: IntegrityCheckRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Start an async integrity check.
+    Returns run_id immediately; poll /{run_id}/status for live progress.
+    """
+    service = IntegrityCheckService(db)
+    return await service.start_check(request, request.project_id)
 
 
-class PreviewUserStoryResponse(BaseModel):
-    id: int
-    title: str
-    external_key: Optional[str] = None
-    status: str
-    priority: str
-    item_type: str
-    integrity_check: bool = False
-    test_cases: List[PreviewTestCaseResponse] = []
+# ── Poll status ───────────────────────────────────────────────────────────────
+
+@router.get("/{run_id}/status", response_model=RunStatusResponse)
+async def get_run_status(
+    run_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Poll live progress or fetch historical result for a given run_id."""
+    service = IntegrityCheckService(db)
+    return await service.get_run_status(run_id)
 
 
-class IntegrityCheckPreviewResponse(BaseModel):
-    user_stories: List[PreviewUserStoryResponse] = []
-    standalone_test_cases: List[PreviewTestCaseResponse] = []
-    total_user_stories: int = 0
-    total_test_cases: int = 0
-    total_steps: int = 0
+# ── History ───────────────────────────────────────────────────────────────────
+
+@router.get("/history/{project_id}", response_model=list)
+async def get_integrity_check_history(
+    project_id: int,
+    limit: int = 10,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get past integrity check runs for a project."""
+    service = IntegrityCheckService(db)
+    return await service.get_history(project_id, limit)
 
 
-# =====================================================
-# ENDPOINTS
-# =====================================================
+# ── Preview ───────────────────────────────────────────────────────────────────
 
 @router.get("/preview/{project_id}", response_model=IntegrityCheckPreviewResponse)
 async def get_integrity_check_preview(
@@ -74,13 +83,7 @@ async def get_integrity_check_preview(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Preview what will be executed during an integrity check.
-
-    Returns user stories, test cases, and test steps that are
-    flagged for integrity check — without actually running anything.
-    """
-    # Get user stories flagged for integrity check
+    """Preview test cases flagged for integrity check without running them."""
     us_query = (
         select(UserStory)
         .where(UserStory.project_id == project_id)
@@ -88,10 +91,9 @@ async def get_integrity_check_preview(
         .order_by(UserStory.id)
     )
     us_result = await db.execute(us_query)
-    flagged_user_stories = list(us_result.scalars().all())
-    flagged_us_ids = [us.id for us in flagged_user_stories]
+    flagged_us = list(us_result.scalars().all())
+    flagged_us_ids = [us.id for us in flagged_us]
 
-    # Get test cases: directly flagged OR belonging to flagged user stories
     conditions = [TestCase.integrity_check == True]
     if flagged_us_ids:
         conditions.append(TestCase.user_story_id.in_(flagged_us_ids))
@@ -104,96 +106,51 @@ async def get_integrity_check_preview(
         .order_by(TestCase.id)
     )
     tc_result = await db.execute(tc_query)
-    all_test_cases = list(tc_result.scalars().all())
+    all_tcs = list(tc_result.scalars().all())
 
-    # Group test cases by user story
-    us_test_cases: dict[int, list] = {}
-    standalone_test_cases: list = []
-
-    for tc in all_test_cases:
+    us_tc_map: dict[int, list] = {}
+    standalone: list = []
+    for tc in all_tcs:
         if tc.user_story_id and tc.user_story_id in flagged_us_ids:
-            us_test_cases.setdefault(tc.user_story_id, []).append(tc)
+            us_tc_map.setdefault(tc.user_story_id, []).append(tc)
         else:
-            standalone_test_cases.append(tc)
+            standalone.append(tc)
 
-    def build_step(step):
+    def _step(s) -> PreviewStepResponse:
         return PreviewStepResponse(
-            step_number=step.step_number,
-            action=step.action.value if hasattr(step.action, 'value') else str(step.action),
-            target=step.target,
-            value=step.value,
-            description=step.description,
-            expected_result=step.expected_result,
+            step_number=s.step_number,
+            action=s.action.value if hasattr(s.action, "value") else str(s.action),
+            target=s.target,
+            value=s.value,
+            description=s.description,
+            expected_result=s.expected_result,
         )
 
-    def build_tc(tc):
+    def _tc(tc) -> PreviewTestCaseResponse:
         steps = sorted(tc.steps, key=lambda s: s.step_number)
+        priority = tc.priority.value if hasattr(tc.priority, "value") else str(tc.priority) if tc.priority else None
         return PreviewTestCaseResponse(
-            id=tc.id,
-            title=tc.title,
-            description=tc.description,
-            priority=tc.priority.value if hasattr(tc.priority, 'value') else str(tc.priority) if tc.priority else None,
-            integrity_check=tc.integrity_check or False,
-            steps=[build_step(s) for s in steps],
+            id=tc.id, title=tc.title, description=tc.description,
+            priority=priority, integrity_check=tc.integrity_check or False,
+            steps=[_step(s) for s in steps],
         )
 
-    # Build user story responses
-    user_story_responses = []
-    for us in flagged_user_stories:
-        tcs = us_test_cases.get(us.id, [])
-        user_story_responses.append(PreviewUserStoryResponse(
-            id=us.id,
-            title=us.title,
-            external_key=us.external_key,
-            status=us.status.value if hasattr(us.status, 'value') else str(us.status),
-            priority=us.priority.value if hasattr(us.priority, 'value') else str(us.priority),
-            item_type=us.item_type.value if hasattr(us.item_type, 'value') else str(us.item_type),
+    us_responses = [
+        PreviewUserStoryResponse(
+            id=us.id, title=us.title, external_key=us.external_key,
+            status=us.status.value if hasattr(us.status, "value") else str(us.status),
+            priority=us.priority.value if hasattr(us.priority, "value") else str(us.priority),
+            item_type=us.item_type.value if hasattr(us.item_type, "value") else str(us.item_type),
             integrity_check=us.integrity_check,
-            test_cases=[build_tc(tc) for tc in tcs],
-        ))
-
-    standalone_responses = [build_tc(tc) for tc in standalone_test_cases]
-
-    total_tcs = len(all_test_cases)
-    total_steps = sum(len(tc.steps) for tc in all_test_cases)
+            test_cases=[_tc(tc) for tc in us_tc_map.get(us.id, [])],
+        )
+        for us in flagged_us
+    ]
 
     return IntegrityCheckPreviewResponse(
-        user_stories=user_story_responses,
-        standalone_test_cases=standalone_responses,
-        total_user_stories=len(flagged_user_stories),
-        total_test_cases=total_tcs,
-        total_steps=total_steps,
+        user_stories=us_responses,
+        standalone_test_cases=[_tc(tc) for tc in standalone],
+        total_user_stories=len(flagged_us),
+        total_test_cases=len(all_tcs),
+        total_steps=sum(len(tc.steps) for tc in all_tcs),
     )
-
-
-@router.post("/", response_model=IntegrityCheckResponse)
-async def run_integrity_check(
-    request: IntegrityCheckRequest,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Run build integrity check on an application.
-    
-    This verifies:
-    - App is reachable
-    - Login works with provided credentials
-    - Critical pages/endpoints are accessible
-    - Basic UI elements are present
-    """
-    service = IntegrityCheckService(db)
-    result = await service.run_check(request)
-    return result
-
-
-@router.get("/history/{project_id}", response_model=list)
-async def get_integrity_check_history(
-    project_id: int,
-    limit: int = 10,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get integrity check history for a project."""
-    service = IntegrityCheckService(db)
-    history = await service.get_history(project_id, limit)
-    return history

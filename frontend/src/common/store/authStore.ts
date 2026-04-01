@@ -6,6 +6,7 @@ import { authApi } from '@common/api/auth'
 interface AuthState {
   user: User | null
   token: string | null
+  refreshToken: string | null
   isAuthenticated: boolean
   isLoading: boolean
   
@@ -13,6 +14,7 @@ interface AuthState {
   logout: () => void
   fetchUser: () => Promise<void>
   setToken: (token: string) => void
+  setTokens: (access: string, refresh: string) => void
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -20,6 +22,7 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       user: null,
       token: null,
+      refreshToken: null,
       isAuthenticated: false,
       isLoading: false,
 
@@ -29,6 +32,7 @@ export const useAuthStore = create<AuthState>()(
           const response = await authApi.login({ email, password })
           set({
             token: response.access_token,
+            refreshToken: response.refresh_token,
             isAuthenticated: true,
           })
           await get().fetchUser()
@@ -41,6 +45,7 @@ export const useAuthStore = create<AuthState>()(
         set({
           user: null,
           token: null,
+          refreshToken: null,
           isAuthenticated: false,
         })
       },
@@ -57,10 +62,18 @@ export const useAuthStore = create<AuthState>()(
       setToken: (token: string) => {
         set({ token, isAuthenticated: true })
       },
+
+      setTokens: (access: string, refresh: string) => {
+        set({ token: access, refreshToken: refresh, isAuthenticated: true })
+      },
     }),
     {
       name: 'qastra-auth',
-      partialize: (state) => ({ token: state.token, isAuthenticated: state.isAuthenticated }),
+      partialize: (state) => ({
+        token: state.token,
+        refreshToken: state.refreshToken,
+        isAuthenticated: state.isAuthenticated,
+      }),
     }
   )
 )

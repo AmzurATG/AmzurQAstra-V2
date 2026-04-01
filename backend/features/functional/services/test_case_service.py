@@ -52,14 +52,16 @@ class TestCaseService:
         category: Optional[str] = None,
         search: Optional[str] = None,
         pagination: Optional[PaginationParams] = None,
+        include_steps: bool = False,
     ) -> Tuple[List[TestCaseResponse], int]:
         """Get list of test cases with filters."""
         query = (
             select(TestCase)
             .options(selectinload(TestCase.user_story))
-            .options(selectinload(TestCase.steps))
             .where(TestCase.project_id == project_id)
         )
+        if include_steps:
+            query = query.options(selectinload(TestCase.steps))
         count_query = select(func.count(TestCase.id)).where(
             TestCase.project_id == project_id
         )
@@ -103,6 +105,18 @@ class TestCaseService:
         result = await self.db.execute(query)
         test_cases = result.scalars().all()
         
+        # Get steps count for all test cases in one query to avoid lazy loading
+        tc_ids = [tc.id for tc in test_cases]
+        counts_map = {}
+        if tc_ids:
+            counts_query = (
+                select(TestStep.test_case_id, func.count(TestStep.id))
+                .where(TestStep.test_case_id.in_(tc_ids))
+                .group_by(TestStep.test_case_id)
+            )
+            counts_result = await self.db.execute(counts_query)
+            counts_map = {row[0]: row[1] for row in counts_result.all()}
+        
         # Convert to response with user_story info
         responses = []
         for tc in test_cases:
@@ -134,7 +148,7 @@ class TestCaseService:
                 created_by=tc.created_by,
                 created_at=tc.created_at,
                 updated_at=tc.updated_at,
-                steps_count=len(tc.steps) if tc.steps else 0,
+                steps_count=counts_map.get(tc.id, 0),
             ))
         
         return responses, total

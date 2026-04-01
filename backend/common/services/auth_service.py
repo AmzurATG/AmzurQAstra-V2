@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from jose import JWTError
 
 from common.db.models.user import User
 from common.schemas.user import UserCreate, UserUpdate, Token
@@ -13,6 +14,7 @@ from common.utils.security import (
     verify_password,
     create_access_token,
     create_refresh_token,
+    verify_token,
 )
 from config import settings
 
@@ -68,6 +70,27 @@ class AuthService:
         return Token(
             access_token=access_token,
             refresh_token=refresh_token,
+            token_type="bearer",
+        )
+
+    async def refresh_tokens(self, refresh_token_str: str) -> Optional[Token]:
+        """Validate refresh JWT and return a new access + refresh pair."""
+        try:
+            payload = verify_token(refresh_token_str)
+        except JWTError:
+            return None
+        if payload.get("type") != "refresh":
+            return None
+        try:
+            user_id = int(payload.get("sub"))
+        except (TypeError, ValueError):
+            return None
+        user = await self.get_user_by_id(user_id)
+        if not user or not user.is_active:
+            return None
+        return Token(
+            access_token=create_access_token(subject=str(user.id)),
+            refresh_token=create_refresh_token(subject=str(user.id)),
             token_type="bearer",
         )
     

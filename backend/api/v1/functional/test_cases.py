@@ -31,6 +31,7 @@ async def list_test_cases(
     priority: Optional[str] = None,
     category: Optional[str] = None,
     search: Optional[str] = None,
+    include_steps: bool = Query(False),
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
@@ -46,6 +47,7 @@ async def list_test_cases(
         category=category,
         search=search,
         pagination=pagination,
+        include_steps=include_steps,
     )
     
     return PaginatedResponse.create(

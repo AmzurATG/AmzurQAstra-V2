@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.db.database import get_db
-from common.schemas.user import UserCreate, UserResponse, UserLogin, Token
+from common.schemas.user import UserCreate, UserResponse, UserLogin, Token, RefreshTokenRequest
 from common.services.auth_service import AuthService
 
 
@@ -53,10 +53,16 @@ async def login(
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
+    body: RefreshTokenRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Refresh access token. (TODO: Implement refresh logic)"""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Token refresh not implemented yet",
-    )
+    """Exchange a valid refresh JWT for new access and refresh tokens."""
+    auth_service = AuthService(db)
+    tokens = await auth_service.refresh_tokens(body.refresh_token)
+    if not tokens:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return tokens

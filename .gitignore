@@ -47,6 +47,9 @@ htmlcov/
 test-results/
 playwright-report/
 
+# Integrity check / runtime browser screenshots (served from backend static mount)
+backend/screenshots/
+
 # Misc
 *.bak
 *.tmp

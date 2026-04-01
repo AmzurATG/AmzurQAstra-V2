@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Outlet, useParams, useNavigate } from 'react-router-dom'
 import { useProjectStore } from '@common/store/projectStore'
 import { Loader } from '@common/components/ui/Loader'
+import { ErrorBoundary } from './ErrorBoundary'
 
 /**
  * ProjectLayout - Wrapper for project-scoped routes
@@ -43,6 +44,10 @@ export default function ProjectLayout() {
     )
   }
 
-  // Render child routes
-  return <Outlet />
+  // Render child routes with error boundary
+  return (
+    <ErrorBoundary>
+      <Outlet />
+    </ErrorBoundary>
+  )
 }

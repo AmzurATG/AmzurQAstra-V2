@@ -54,6 +54,11 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
+class RefreshTokenRequest(BaseModel):
+    """Body for POST /auth/refresh."""
+    refresh_token: str
+
+
 class TokenPayload(BaseModel):
     """JWT token payload."""
     sub: str

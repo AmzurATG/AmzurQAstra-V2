@@ -18,6 +18,11 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      // FastAPI mounts screenshots at /screenshots (not under /api)
+      '/screenshots': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 })
