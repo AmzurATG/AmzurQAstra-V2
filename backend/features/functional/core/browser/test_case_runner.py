@@ -4,25 +4,22 @@ Executes a single test case in a Chrome window via browser-use + LLM (LiteLLM pr
 reports per-step pass/fail, saves screenshots.
 """
 import asyncio
-import base64
 import json
 import re
 import sys
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from config import settings
 from common.utils.logger import logger
+from features.functional.core.browser.screenshot_file_store import save_screenshot_b64
+from features.functional.core.browser.runner_action_text import action_description_from_output
 from features.functional.core.llm_prompts.test_execution import (
     TEST_EXECUTION_PROMPT,
     build_auth_section,
     format_steps_for_prompt,
     should_inject_project_credentials,
 )
-
-_screenshots_dir = Path(settings.SCREENSHOTS_DIR)
-_screenshots_dir.mkdir(parents=True, exist_ok=True)
 
 # In-memory store for live polling — keyed by "{run_id}:{test_case_id}"
 _tc_progress: Dict[str, Dict[str, Any]] = {}
@@ -41,63 +38,6 @@ def cleanup_tc_progress(key: str) -> None:
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
-
-def _save_screenshot(b64: str, run_id: str, tc_id: int, step: int) -> Optional[str]:
-    try:
-        ts = datetime.utcnow().strftime("%H%M%S%f")
-        fname = f"tr_{run_id[:8]}_tc{tc_id}_s{step:02d}_{ts}.png"
-        (_screenshots_dir / fname).write_bytes(base64.b64decode(b64))
-        return f"/screenshots/{fname}"
-    except Exception as exc:
-        logger.warning(f"[TestCaseRunner] Screenshot save failed: {exc}")
-        return None
-
-
-def _humanize(d: dict) -> str:
-    """Turn browser-use action payload into plain language."""
-    if not d:
-        return "Working on the page…"
-    for key, val in d.items():
-        if not isinstance(val, dict):
-            continue
-        k = key.lower()
-        if k in ("click", "click_element"):
-            idx = val.get("index")
-            return f"Clicked item {idx}" if idx is not None else "Clicked an element"
-        if k in ("input", "input_text"):
-            idx = val.get("index")
-            return f"Typed into field {idx}" if idx is not None else "Entered text"
-        if k in ("navigate", "go_to_url", "goto"):
-            url = (val.get("url") or "")[:80]
-            return f"Opened: {url}" if url else "Opened a page"
-        if k in ("scroll", "scroll_down", "scroll_up"):
-            return "Scrolled the page"
-        if k in ("done", "complete"):
-            msg = (val.get("text") or val.get("message") or "")[:200]
-            return f"Finished — {msg}" if msg else "Finished"
-        if k in ("go_back",):
-            return "Went back"
-        if k in ("wait", "wait_for"):
-            return "Waited for the page"
-        if k in ("extract", "extract_content"):
-            return "Read content from the page"
-        if k == "send_keys":
-            return "Sent keyboard input"
-    return "Worked on the page"
-
-
-def _action_description(output: Any) -> str:
-    try:
-        if output and hasattr(output, "action") and output.action:
-            parts = []
-            for act in output.action:
-                dump = act.model_dump(exclude_none=True) if hasattr(act, "model_dump") else {}
-                parts.append(_humanize(dump))
-            return " · ".join(parts) if parts else "Working…"
-    except Exception:
-        pass
-    return "Working…"
-
 
 def _extract_balanced_json_object(text: str, start: int) -> Optional[str]:
     """Slice from `start` (index of '{') through the matching '}', respecting JSON strings."""
@@ -448,11 +388,11 @@ class TestCaseRunner:
             path: Optional[str] = None
             ss_b64 = getattr(state, "screenshot", None)
             if ss_b64:
-                path = _save_screenshot(ss_b64, run_id, test_case_id, step_num)
+                path = save_screenshot_b64(ss_b64, run_id, test_case_id, step_num)
                 if path:
                     screenshots.append(path)
 
-            desc = _action_description(output)
+            desc = action_description_from_output(output)
             # Log the intent/action for debugging
             logger.info(f"[TestCaseRunner] Step {step_num} Action: {desc}")
             

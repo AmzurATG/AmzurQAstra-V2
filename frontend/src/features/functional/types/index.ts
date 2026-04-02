@@ -110,6 +110,17 @@ export interface TestRun {
   updated_at: string
 }
 
+/** Project-wide aggregates from GET /functional/test-runs/summary */
+export interface TestRunSummary {
+  total: number
+  passed: number
+  failed: number
+  running: number
+  pending: number
+  cancelled: number
+  avg_pass_rate: number
+}
+
 export interface TestRunStartResponse {
   run_id: number
   status: string
@@ -137,6 +148,7 @@ export interface TestResult {
   failed_step?: number
   screenshot_path?: string
   step_results?: TestStepResult[]
+  agent_logs?: AgentLogEntry[]
   duration_ms?: number
   started_at?: string
   completed_at?: string
@@ -144,8 +156,18 @@ export interface TestResult {
 
 export interface TestStepResult {
   step_number: number
-  status: 'passed' | 'failed' | 'error'
+  status: 'passed' | 'failed' | 'error' | 'skipped'
   actual_result?: string
+  description?: string
+  adaptation?: string | null
+}
+
+export interface AgentLogEntry {
+  timestamp: string
+  agent_step: number
+  description: string
+  adaptation?: string | null
+  screenshot_path?: string | null
 }
 
 export interface StepResult {
@@ -167,6 +189,7 @@ export interface LogEntry {
 }
 
 export interface CompletedCaseResult {
+  test_result_id: number
   test_case_id: number
   title: string
   status: string
@@ -175,6 +198,11 @@ export interface CompletedCaseResult {
   steps_failed: number
   duration_ms: number
   step_results?: TestStepResult[]
+  adapted_steps?: TestStepResult[]
+  original_steps?: Record<string, unknown>[]
+  agent_logs?: AgentLogEntry[]
+  /** Stored as `/screenshots/<file>`; load via authenticated API */
+  screenshot_path?: string | null
 }
 
 export interface LiveProgressResponse {

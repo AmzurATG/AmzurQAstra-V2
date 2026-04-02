@@ -4,6 +4,7 @@ import type {
   TestCase,
   TestStep,
   TestRun,
+  TestRunSummary,
   TestResult,
   IntegrityCheckResult,
   UserStory,
@@ -15,6 +16,16 @@ import type {
   GenerateTestsRequest,
   GenerateTestsResponse,
 } from '../types'
+
+export interface PaginatedResponse<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+  has_next: boolean
+  has_prev: boolean
+}
 
 // Requirements API
 export const requirementsApi = {
@@ -59,6 +70,7 @@ export const testCasesApi = {
     category?: string
     user_story_id?: number
     search?: string
+    page?: number
     page_size?: number 
   }) =>
     apiClient.get<PaginatedResponse<TestCase>>(`/functional/test-cases/`, { 
@@ -111,8 +123,16 @@ export const testStepsApi = {
 
 // Test Runs API
 export const testRunsApi = {
-  list: (projectId: number) =>
-    apiClient.get<{ items: TestRun[]; total: number }>(`/functional/test-runs/`, {
+  list: (
+    projectId: number,
+    params?: { page?: number; page_size?: number; status_filter?: string }
+  ) =>
+    apiClient.get<PaginatedResponse<TestRun>>(`/functional/test-runs/`, {
+      params: { project_id: projectId, ...params },
+    }),
+
+  summary: (projectId: number) =>
+    apiClient.get<TestRunSummary>(`/functional/test-runs/summary`, {
       params: { project_id: projectId },
     }),
 
@@ -158,16 +178,6 @@ export const integrityCheckApi = {
 }
 
 // User Stories API
-export interface PaginatedResponse<T> {
-  items: T[]
-  total: number
-  page: number
-  page_size: number
-  total_pages: number
-  has_next: boolean
-  has_prev: boolean
-}
-
 export const userStoriesApi = {
   list: (projectId: number, params?: { status?: string; item_type?: string; search?: string }) =>
     apiClient.get<PaginatedResponse<UserStory>>(`/functional/user-stories/${projectId}`, { params }),

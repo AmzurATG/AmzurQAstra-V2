@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Card } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
+import { PaginationBar } from '@common/components/ui/PaginationBar'
 import { useProjectStore } from '@common/store/projectStore'
 import { PlusIcon, PlayIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
@@ -34,6 +35,9 @@ export default function TestCases() {
     setCategoryFilter,
     statusFilter,
     setStatusFilter,
+    page,
+    setPage,
+    pagination,
     loadTestCases
   } = useTestCaseFilters(projectId)
 
@@ -244,6 +248,13 @@ export default function TestCases() {
             progress={exec.progress}
           />
         )}
+        <PaginationBar
+          page={page}
+          totalPages={pagination.total_pages}
+          hasPrev={pagination.has_prev}
+          hasNext={pagination.has_next}
+          onPageChange={setPage}
+        />
       </Card>
 
       <TestCaseEditModal 

@@ -14,6 +14,7 @@ from features.functional.schemas.test_run import (
     TestRunStartResponse,
     TestRunResponse,
     TestRunDetailResponse,
+    TestRunSummaryResponse,
     TestResultResponse,
     LiveProgressResponse,
     LogEntry,
@@ -25,6 +26,7 @@ from features.functional.services.test_execution_service import (
     TestExecutionService,
 )
 from features.functional.services.run_progress_manager import RunProgressManager
+from features.functional.services.completed_result_builder import completed_case_dict_from_orm
 
 router = APIRouter()
 
@@ -43,6 +45,18 @@ async def list_test_runs(
         items=runs, total=total,
         page=pagination.page, page_size=pagination.page_size,
     )
+
+
+@router.get("/summary", response_model=TestRunSummaryResponse)
+async def test_runs_summary(
+    project_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aggregate run counts for the project (all statuses)."""
+    service = TestExecutionService(db)
+    data = await service.get_run_summary(project_id)
+    return TestRunSummaryResponse(**data)
 
 
 @router.post("/", response_model=TestRunStartResponse, status_code=status.HTTP_201_CREATED)
@@ -106,18 +120,9 @@ async def get_live_progress(
     completed = []
     for r in (run.test_results or []):
         if r.status != TestResultStatus.SKIPPED:
-            completed.append(CompletedCaseResult(
-                test_case_id=r.test_case_id,
-                title=f"Test Case #{r.test_case_id}",
-                status=r.status.value,
-                steps_total=len(r.step_results) if r.step_results else 0,
-                steps_passed=sum(1 for s in (r.step_results or []) if s.get("status") == "passed"),
-                steps_failed=sum(1 for s in (r.step_results or []) if s.get("status") != "passed"),
-                duration_ms=r.duration_ms or 0,
-                step_results=r.step_results,
-                adapted_steps=r.adapted_steps,
-                original_steps=r.original_steps,
-            ))
+            completed.append(
+                CompletedCaseResult(**completed_case_dict_from_orm(r))
+            )
 
     return LiveProgressResponse(
         run_id=run_id,
@@ -176,7 +181,25 @@ async def get_test_result_screenshot(
 ):
     from fastapi.responses import FileResponse
     service = TestExecutionService(db)
-    path = await service.get_screenshot_path(result_id)
-    if not path:
+    file_path = await service.get_primary_screenshot_file(run_id, result_id)
+    if not file_path:
         raise HTTPException(status_code=404, detail="Screenshot not found")
-    return FileResponse(path)
+    return FileResponse(file_path)
+
+
+@router.get("/{run_id}/results/{result_id}/screenshots/{filename}")
+async def get_test_result_screenshot_file(
+    run_id: int,
+    result_id: int,
+    filename: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve a screenshot file listed on agent_logs or screenshot_path (JWT required)."""
+    from fastapi.responses import FileResponse
+
+    service = TestExecutionService(db)
+    file_path = await service.get_authorized_screenshot_file(run_id, result_id, filename)
+    if not file_path:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    return FileResponse(file_path)

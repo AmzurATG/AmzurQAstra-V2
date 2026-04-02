@@ -34,6 +34,17 @@ class TestRunStartResponse(BaseModel):
     status: str
 
 
+class TestRunSummaryResponse(BaseModel):
+    """Project-wide run counts (not limited by pagination)."""
+    total: int
+    passed: int
+    failed: int
+    running: int
+    pending: int
+    cancelled: int
+    avg_pass_rate: int
+
+
 # ── Responses ────────────────────────────────────────────────────────────────
 
 class TestRunResponse(BaseModel):
@@ -70,6 +81,7 @@ class TestResultResponse(BaseModel):
     step_results: Optional[List[Dict[str, Any]]] = None
     adapted_steps: Optional[List[Dict[str, Any]]] = None
     original_steps: Optional[List[Dict[str, Any]]] = None
+    agent_logs: Optional[List[Dict[str, Any]]] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
@@ -91,6 +103,7 @@ class LogEntry(BaseModel):
 
 
 class CompletedCaseResult(BaseModel):
+    test_result_id: int
     test_case_id: int
     title: str
     status: str
@@ -101,6 +114,8 @@ class CompletedCaseResult(BaseModel):
     step_results: Optional[List[Dict[str, Any]]] = None
     adapted_steps: Optional[List[Dict[str, Any]]] = None
     original_steps: Optional[List[Dict[str, Any]]] = None
+    agent_logs: Optional[List[Dict[str, Any]]] = None
+    screenshot_path: Optional[str] = None
 
 
 class LiveProgressResponse(BaseModel):

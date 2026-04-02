@@ -43,6 +43,8 @@ class TestResult(BaseModel):
     step_results = Column(JSONB, nullable=True)  # Array of step results
     adapted_steps = Column(JSONB, nullable=True)  # Array of steps that were adapted by AI
     original_steps = Column(JSONB, nullable=True)  # Array of original steps for comparison
+    # Per browser-use agent iteration: timestamp, agent_step, description, adaptation, screenshot_path
+    agent_logs = Column(JSONB, nullable=True)
     
     # Execution timestamps
     started_at = Column(DateTime(timezone=True), nullable=True)

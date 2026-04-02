@@ -1,51 +1,47 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Card } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
-import { 
-  ClockIcon, 
-  ArrowPathIcon, 
-  CheckCircleIcon, 
-  XCircleIcon, 
+import { PaginationBar } from '@common/components/ui/PaginationBar'
+import {
+  ClockIcon,
+  ArrowPathIcon,
+  CheckCircleIcon,
+  XCircleIcon,
   XMarkIcon,
   ChevronRightIcon,
-  ChartBarIcon
+  ChartBarIcon,
 } from '@heroicons/react/24/outline'
-import { testRunsApi } from '../api'
+import { useTestRunsList } from '../hooks/useTestRunsList'
 import type { TestRun } from '../types'
 
-const STATUS_CFG: Record<string, { icon: any; color: string; bg: string }> = {
-  passed:    { icon: CheckCircleIcon, color: 'text-green-500', bg: 'bg-green-50' },
-  failed:    { icon: XCircleIcon,     color: 'text-red-500',   bg: 'bg-red-50' },
-  running:   { icon: ArrowPathIcon,   color: 'text-blue-500',  bg: 'bg-blue-50' },
-  pending:   { icon: ClockIcon,       color: 'text-gray-500',  bg: 'bg-gray-50' },
-  cancelled: { icon: XMarkIcon,       color: 'text-gray-500',  bg: 'bg-gray-50' },
-  error:     { icon: XCircleIcon,     color: 'text-red-500',   bg: 'bg-red-50' },
+const STATUS_CFG: Record<string, { icon: React.ComponentType<{ className?: string }>; color: string; bg: string }> = {
+  passed: { icon: CheckCircleIcon, color: 'text-green-500', bg: 'bg-green-50' },
+  failed: { icon: XCircleIcon, color: 'text-red-500', bg: 'bg-red-50' },
+  running: { icon: ArrowPathIcon, color: 'text-blue-500', bg: 'bg-blue-50' },
+  pending: { icon: ClockIcon, color: 'text-gray-500', bg: 'bg-gray-50' },
+  cancelled: { icon: XMarkIcon, color: 'text-gray-500', bg: 'bg-gray-50' },
+  error: { icon: XCircleIcon, color: 'text-red-500', bg: 'bg-red-50' },
 }
 
 export default function TestRuns() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
-  const [runs, setRuns] = useState<TestRun[]>([])
-  const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
 
-  useEffect(() => {
-    if (!projectId) return
-    setLoading(true)
-    testRunsApi.list(Number(projectId))
-      .then(r => setRuns(r.data.items || []))
-      .finally(() => setLoading(false))
-  }, [projectId])
+  const { runs, summary, loading, page, setPage, meta, reload } = useTestRunsList(
+    projectId,
+    filter
+  )
 
-  const filteredRuns = filter === 'all' ? runs : runs.filter(r => r.status === filter)
-
-  const stats = {
-    total: runs.length,
-    passed: runs.filter(r => r.status === 'passed').length,
-    failed: runs.filter(r => r.status === 'failed' || r.status === 'error').length,
-    avgPassRate: runs.length ? Math.round((runs.filter(r => r.status === 'passed').length / runs.length) * 100) : 0
-  }
+  const stats = summary
+    ? {
+        total: summary.total,
+        passed: summary.passed,
+        failed: summary.failed,
+        avgPassRate: summary.avg_pass_rate,
+      }
+    : { total: 0, passed: 0, failed: 0, avgPassRate: 0 }
 
   return (
     <div className="space-y-6">
@@ -54,38 +50,68 @@ export default function TestRuns() {
           <h1 className="text-2xl font-bold text-gray-900">Test Run History</h1>
           <p className="text-gray-600">View and analyze past execution reports</p>
         </div>
-        <Button onClick={() => navigate(`/projects/${projectId}/test-cases`)}>
-          Run New Tests
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => reload()}>
+            <ArrowPathIcon className="w-4 h-4 mr-1" /> Refresh
+          </Button>
+          <Button onClick={() => navigate(`/projects/${projectId}/test-cases`)}>
+            Run New Tests
+          </Button>
+        </div>
       </div>
 
-      {/* Stats Overview */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="p-4 flex items-center gap-4">
-          <div className="p-2 bg-blue-50 rounded-lg"><ChartBarIcon className="w-6 h-6 text-blue-600" /></div>
-          <div><p className="text-xs text-gray-500 uppercase">Total Runs</p><p className="text-xl font-bold">{stats.total}</p></div>
+          <div className="p-2 bg-blue-50 rounded-lg">
+            <ChartBarIcon className="w-6 h-6 text-blue-600" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 uppercase">Total Runs</p>
+            <p className="text-xl font-bold">{stats.total}</p>
+          </div>
         </Card>
         <Card className="p-4 flex items-center gap-4">
-          <div className="p-2 bg-green-50 rounded-lg"><CheckCircleIcon className="w-6 h-6 text-green-600" /></div>
-          <div><p className="text-xs text-gray-500 uppercase">Passed</p><p className="text-xl font-bold text-green-600">{stats.passed}</p></div>
+          <div className="p-2 bg-green-50 rounded-lg">
+            <CheckCircleIcon className="w-6 h-6 text-green-600" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 uppercase">Passed</p>
+            <p className="text-xl font-bold text-green-600">{stats.passed}</p>
+          </div>
         </Card>
         <Card className="p-4 flex items-center gap-4">
-          <div className="p-2 bg-red-50 rounded-lg"><XCircleIcon className="w-6 h-6 text-red-600" /></div>
-          <div><p className="text-xs text-gray-500 uppercase">Failed</p><p className="text-xl font-bold text-red-600">{stats.failed}</p></div>
+          <div className="p-2 bg-red-50 rounded-lg">
+            <XCircleIcon className="w-6 h-6 text-red-600" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 uppercase">Failed / Error</p>
+            <p className="text-xl font-bold text-red-600">{stats.failed}</p>
+          </div>
         </Card>
         <Card className="p-4 flex items-center gap-4">
-          <div className="p-2 bg-primary-50 rounded-lg"><div className="w-6 h-6 flex items-center justify-center font-bold text-primary-600 text-sm">{stats.avgPassRate}%</div></div>
-          <div><p className="text-xs text-gray-500 uppercase">Avg Pass Rate</p><p className="text-xl font-bold text-primary-600">{stats.avgPassRate}%</p></div>
+          <div className="p-2 bg-primary-50 rounded-lg">
+            <div className="w-6 h-6 flex items-center justify-center font-bold text-primary-600 text-sm">
+              {stats.avgPassRate}%
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 uppercase">Avg Pass Rate</p>
+            <p className="text-xl font-bold text-primary-600">{stats.avgPassRate}%</p>
+          </div>
         </Card>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-2">
-        {['all', 'passed', 'failed', 'running', 'cancelled'].map(f => (
+      <div className="flex gap-2 flex-wrap">
+        {['all', 'passed', 'failed', 'running', 'cancelled'].map((f) => (
           <button
             key={f}
+            type="button"
             onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filter === f ? 'bg-primary-600 text-white' : 'bg-white text-gray-600 border hover:bg-gray-50'}`}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              filter === f
+                ? 'bg-primary-600 text-white'
+                : 'bg-white text-gray-600 border hover:bg-gray-50'
+            }`}
           >
             {f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
@@ -94,60 +120,85 @@ export default function TestRuns() {
 
       <Card padding="none">
         {loading ? (
-          <div className="flex items-center justify-center py-20"><ArrowPathIcon className="w-8 h-8 animate-spin text-gray-300" /></div>
-        ) : filteredRuns.length === 0 ? (
-          <div className="text-center py-20 text-gray-500">No test runs found matching the filter.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead className="bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase">
-                <tr>
-                  <th className="px-6 py-3">Status</th>
-                  <th className="px-6 py-3">Run Name</th>
-                  <th className="px-6 py-3 text-center">Results</th>
-                  <th className="px-6 py-3">Started</th>
-                  <th className="px-6 py-3"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {filteredRuns.map(run => {
-                  const cfg = STATUS_CFG[run.status] || STATUS_CFG.pending
-                  const Icon = cfg.icon
-                  return (
-                    <tr 
-                      key={run.id} 
-                      className="hover:bg-gray-50 cursor-pointer group"
-                      onClick={() => navigate(`/projects/${projectId}/test-runs/${run.id}`)}
-                    >
-                      <td className="px-6 py-4">
-                        <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full ${cfg.bg}`}>
-                          <Icon className={`w-3 h-3 ${cfg.color} ${run.status === 'running' ? 'animate-spin' : ''}`} />
-                          <span className={`text-[10px] font-bold uppercase ${cfg.color}`}>{run.status}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="text-sm font-medium text-gray-900">{run.name}</p>
-                        <p className="text-xs text-gray-500">ID: #{run.id} · {run.browser}</p>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center justify-center gap-3">
-                          <span className="text-xs text-green-600 font-semibold">{run.passed_tests}✓</span>
-                          <span className="text-xs text-red-600 font-semibold">{run.failed_tests}✗</span>
-                          <span className="text-xs text-gray-400">{run.total_tests} total</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-xs text-gray-500">
-                        {run.started_at ? new Date(run.started_at).toLocaleString() : '-'}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <ChevronRightIcon className="w-4 h-4 text-gray-300 group-hover:text-primary-500 transition-colors" />
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+          <div className="flex items-center justify-center py-20">
+            <ArrowPathIcon className="w-8 h-8 animate-spin text-gray-300" />
           </div>
+        ) : runs.length === 0 ? (
+          <div className="text-center py-20 text-gray-500">
+            No test runs found matching the filter.
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase">
+                  <tr>
+                    <th className="px-6 py-3">Status</th>
+                    <th className="px-6 py-3">Run Name</th>
+                    <th className="px-6 py-3 text-center">Results</th>
+                    <th className="px-6 py-3">Started</th>
+                    <th className="px-6 py-3"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {runs.map((run: TestRun) => {
+                    const cfg = STATUS_CFG[run.status] || STATUS_CFG.pending
+                    const Icon = cfg.icon
+                    return (
+                      <tr
+                        key={run.id}
+                        className="hover:bg-gray-50 cursor-pointer group"
+                        onClick={() => navigate(`/projects/${projectId}/test-runs/${run.id}`)}
+                      >
+                        <td className="px-6 py-4">
+                          <div
+                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full ${cfg.bg}`}
+                          >
+                            <Icon
+                              className={`w-3 h-3 ${cfg.color} ${run.status === 'running' ? 'animate-spin' : ''}`}
+                            />
+                            <span className={`text-[10px] font-bold uppercase ${cfg.color}`}>
+                              {run.status}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <p className="text-sm font-medium text-gray-900">{run.name}</p>
+                          <p className="text-xs text-gray-500">
+                            ID: #{run.id} · {run.browser}
+                          </p>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center justify-center gap-3">
+                            <span className="text-xs text-green-600 font-semibold">
+                              {run.passed_tests}✓
+                            </span>
+                            <span className="text-xs text-red-600 font-semibold">
+                              {run.failed_tests}✗
+                            </span>
+                            <span className="text-xs text-gray-400">{run.total_tests} total</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-xs text-gray-500">
+                          {run.started_at ? new Date(run.started_at).toLocaleString() : '-'}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <ChevronRightIcon className="w-4 h-4 text-gray-300 group-hover:text-primary-500 transition-colors" />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <PaginationBar
+              page={page}
+              totalPages={meta.total_pages}
+              hasPrev={meta.has_prev}
+              hasNext={meta.has_next}
+              onPageChange={setPage}
+            />
+          </>
         )}
       </Card>
     </div>

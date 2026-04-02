@@ -91,7 +91,8 @@ class Settings(BaseSettings):
     BROWSER_USE_LLM_TEMPERATURE: float = 0.15
     GEMINI_API_KEY: Optional[str] = None  # only when BROWSER_USE_LLM_BACKEND=google
     BROWSER_USE_DEFAULT_EXTENSIONS: bool = True
-    SCREENSHOTS_DIR: str = "./screenshots"
+    # Always under the backend package so paths match regardless of process cwd.
+    SCREENSHOTS_DIR: str = str(_BACKEND_DIR / "screenshots")
 
     # MCP (optional)
     MCP_SERVER_URL: str = "http://localhost:3001"

@@ -7,6 +7,7 @@ import asyncio
 import sys
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,9 @@ from features.functional.core.browser.test_case_runner import (
     cleanup_tc_progress,
 )
 from features.functional.services.run_progress_manager import RunProgressManager
+from features.functional.services.completed_result_builder import completed_case_dict
+from features.functional.services.test_run_stats import fetch_test_run_summary
+from features.functional.services import test_result_evidence
 
 class TestExecutionService:
     """Manages test run lifecycle: create → execute (background) → poll → results."""
@@ -42,9 +46,21 @@ class TestExecutionService:
         query = select(TestRun).where(TestRun.project_id == project_id)
         count_q = select(func.count(TestRun.id)).where(TestRun.project_id == project_id)
 
-        if status:
-            query = query.where(TestRun.status == status)
-            count_q = count_q.where(TestRun.status == status)
+        if status == "failed":
+            query = query.where(
+                TestRun.status.in_((TestRunStatus.FAILED, TestRunStatus.ERROR))
+            )
+            count_q = count_q.where(
+                TestRun.status.in_((TestRunStatus.FAILED, TestRunStatus.ERROR))
+            )
+        elif status:
+            try:
+                st = TestRunStatus(status)
+            except ValueError:
+                st = None
+            if st is not None:
+                query = query.where(TestRun.status == st)
+                count_q = count_q.where(TestRun.status == st)
 
         total = (await self.db.execute(count_q)).scalar() or 0
 
@@ -54,10 +70,15 @@ class TestExecutionService:
 
         return list((await self.db.execute(query)).scalars().all()), total
 
+    async def get_run_summary(self, project_id: int) -> Dict[str, Any]:
+        return await fetch_test_run_summary(self.db, project_id)
+
     async def get_run_with_results(self, run_id: int) -> Optional[TestRun]:
         result = await self.db.execute(
             select(TestRun)
-            .options(selectinload(TestRun.test_results))
+            .options(
+                selectinload(TestRun.test_results).selectinload(TestResult.test_case),
+            )
             .where(TestRun.id == run_id)
         )
         return result.scalar_one_or_none()
@@ -303,18 +324,23 @@ class TestExecutionService:
                             test_result.completed_at = datetime.utcnow()
                             await db.commit()
                             failed += 1
-                            completed_results.append({
-                                "test_case_id": test_result.test_case_id,
-                                "title": f"Missing case #{test_result.test_case_id}",
-                                "status": "error",
-                                "steps_total": 0,
-                                "steps_passed": 0,
-                                "steps_failed": 0,
-                                "duration_ms": 0,
-                                "step_results": [],
-                                "adapted_steps": [],
-                                "original_steps": [],
-                            })
+                            completed_results.append(
+                                completed_case_dict(
+                                    test_result_id=test_result.id,
+                                    test_case_id=test_result.test_case_id,
+                                    title=f"Missing case #{test_result.test_case_id}",
+                                    status="error",
+                                    steps_total=0,
+                                    steps_passed=0,
+                                    steps_failed=0,
+                                    duration_ms=0,
+                                    step_results=[],
+                                    adapted_steps=[],
+                                    original_steps=[],
+                                    agent_logs=None,
+                                    screenshot_path=None,
+                                )
+                            )
                             self.progress_manager.set(run_id, {
                                 "status": "running",
                                 "percentage": int(((idx + 1) / total) * 100),
@@ -386,18 +412,23 @@ class TestExecutionService:
                             test_result.step_results = []
                             await db.commit()
                             failed += 1
-                            completed_results.append({
-                                "test_case_id": tc.id,
-                                "title": tc_title,
-                                "status": "error",
-                                "steps_total": 0,
-                                "steps_passed": 0,
-                                "steps_failed": 0,
-                                "duration_ms": 0,
-                                "step_results": [],
-                                "adapted_steps": [],
-                                "original_steps": [],
-                            })
+                            completed_results.append(
+                                completed_case_dict(
+                                    test_result_id=test_result.id,
+                                    test_case_id=tc.id,
+                                    title=tc_title,
+                                    status="error",
+                                    steps_total=0,
+                                    steps_passed=0,
+                                    steps_failed=0,
+                                    duration_ms=0,
+                                    step_results=[],
+                                    adapted_steps=[],
+                                    original_steps=[],
+                                    agent_logs=None,
+                                    screenshot_path=None,
+                                )
+                            )
                             continue
 
                         result = await runner.run(
@@ -444,7 +475,9 @@ class TestExecutionService:
                         test_result.step_results = final_step_results
                         test_result.adapted_steps = [s for s in final_step_results if s.get("adaptation")]
                         test_result.original_steps = steps_data
+                        # First screenshot for legacy consumers; full trail in agent_logs
                         test_result.screenshot_path = (result.get("screenshots") or [None])[0]
+                        test_result.agent_logs = result.get("logs")
                         test_result.error_message = result.get("error")
                         test_result.failed_step = next(
                             (s["step_number"] for s in final_step_results if s.get("status") != "passed"),
@@ -459,18 +492,24 @@ class TestExecutionService:
                             failed += 1
                             _log(f"✗ {tc_title} — {tc_status.upper()} ({duration}ms)", tc.id)
 
-                        completed_results.append({
-                            "test_case_id": tc.id,
-                            "title": tc_title,
-                            "status": tc_status,
-                            "steps_total": result.get("steps_total", 0),
-                            "steps_passed": result.get("steps_passed", 0),
-                            "steps_failed": result.get("steps_failed", 0),
-                            "duration_ms": duration,
-                            "step_results": final_step_results,
-                            "adapted_steps": [s for s in final_step_results if s.get("adaptation")],
-                            "original_steps": steps_data,
-                        })
+                        agent_logs = result.get("logs")
+                        completed_results.append(
+                            completed_case_dict(
+                                test_result_id=test_result.id,
+                                test_case_id=tc.id,
+                                title=tc_title,
+                                status=tc_status,
+                                steps_total=result.get("steps_total", 0),
+                                steps_passed=result.get("steps_passed", 0),
+                                steps_failed=result.get("steps_failed", 0),
+                                duration_ms=duration,
+                                step_results=final_step_results,
+                                adapted_steps=[s for s in final_step_results if s.get("adaptation")],
+                                original_steps=steps_data,
+                                agent_logs=agent_logs,
+                                screenshot_path=test_result.screenshot_path,
+                            )
+                        )
                         cleanup_tc_progress(f"{run_uuid}:{tc.id}")
 
                 run.status = TestRunStatus.PASSED if failed == 0 else TestRunStatus.FAILED
@@ -571,9 +610,16 @@ class TestExecutionService:
             
         return False
 
-    async def get_screenshot_path(self, result_id: int) -> Optional[str]:
-        result = await self.db.execute(
-            select(TestResult).where(TestResult.id == result_id)
+    async def get_primary_screenshot_file(
+        self, run_id: int, result_id: int
+    ) -> Optional[Path]:
+        return await test_result_evidence.get_primary_screenshot_file(
+            self.db, run_id, result_id
         )
-        tr = result.scalar_one_or_none()
-        return tr.screenshot_path if tr and tr.screenshot_path else None
+
+    async def get_authorized_screenshot_file(
+        self, run_id: int, result_id: int, filename: str
+    ) -> Optional[Path]:
+        return await test_result_evidence.get_authorized_screenshot_file(
+            self.db, run_id, result_id, filename
+        )
