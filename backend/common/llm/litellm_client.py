@@ -54,7 +54,64 @@ class LiteLLMClient(BaseLLMClient):
         
         # Enable verbose logging in debug mode
         litellm.set_verbose = settings.DEBUG
-    
+
+    def _model_attempts(self, primary: str) -> List[str]:
+        """Ordered list: primary model, then comma-separated LITELLM_FALLBACK_MODELS (no duplicates)."""
+        seen: set[str] = set()
+        out: List[str] = []
+        for m in [primary] + (
+            [x.strip() for x in settings.LITELLM_FALLBACK_MODELS.split(",")]
+            if settings.LITELLM_FALLBACK_MODELS
+            else []
+        ):
+            if not m or m in seen:
+                continue
+            seen.add(m)
+            out.append(m)
+        return out
+
+    def _completion_with_fallback(self, kwargs: Dict[str, Any]) -> Tuple[Any, str]:
+        primary = kwargs.get("model") or self.default_model
+        last_exc: Optional[Exception] = None
+        for model in self._model_attempts(primary):
+            attempt = {**kwargs, "model": model}
+            try:
+                response = completion(**attempt)
+                if model != primary:
+                    logger.info("LiteLLM completion succeeded with fallback model=%s", model)
+                return response, model
+            except Exception as e:
+                last_exc = e
+                logger.warning(
+                    "LiteLLM completion failed for model=%s: %s",
+                    model,
+                    e,
+                )
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("LiteLLM completion failed with no model attempts")
+
+    async def _acompletion_with_fallback(self, kwargs: Dict[str, Any]) -> Tuple[Any, str]:
+        primary = kwargs.get("model") or self.default_model
+        last_exc: Optional[Exception] = None
+        for model in self._model_attempts(primary):
+            attempt = {**kwargs, "model": model}
+            try:
+                response = await acompletion(**attempt)
+                if model != primary:
+                    logger.info("LiteLLM acompletion succeeded with fallback model=%s", model)
+                return response, model
+            except Exception as e:
+                last_exc = e
+                logger.warning(
+                    "LiteLLM acompletion failed for model=%s: %s",
+                    model,
+                    e,
+                )
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("LiteLLM acompletion failed with no model attempts")
+
     async def chat(
         self,
         messages: List[Message],
@@ -114,7 +171,7 @@ class LiteLLMClient(BaseLLMClient):
         
         return LLMResponse(
             content=content,
-            model=model,
+            model=model_used,
             usage=usage,
         )
 
