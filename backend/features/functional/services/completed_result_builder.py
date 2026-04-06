@@ -7,6 +7,42 @@ from typing import Any, Dict, List, Optional
 
 from features.functional.db.models.test_result import TestResult
 
+LITE_STRIP_KEYS = ("step_results", "adapted_steps", "original_steps", "agent_logs")
+
+
+def _count_agent_screenshots(agent_logs: Optional[List[Dict[str, Any]]]) -> int:
+    if not agent_logs:
+        return 0
+    return sum(
+        1 for e in agent_logs if isinstance(e, dict) and e.get("screenshot_path")
+    )
+
+
+def completed_case_to_lite(d: Dict[str, Any]) -> Dict[str, Any]:
+    """Shrink one completed-case dict for fast /live polling (no heavy JSON blobs)."""
+    n = d.get("agent_screenshot_count")
+    if n is None:
+        n = _count_agent_screenshots(d.get("agent_logs"))
+    has_adapt = bool(d.get("adapted_steps"))
+    out = {k: v for k, v in d.items() if k not in LITE_STRIP_KEYS}
+    for k in LITE_STRIP_KEYS:
+        out[k] = None
+    out["agent_screenshot_count"] = int(n) if n is not None else 0
+    out["has_adaptations"] = has_adapt
+    return out
+
+
+def live_progress_to_lite(body: Dict[str, Any], *, log_cap: int = 200) -> Dict[str, Any]:
+    """Trim completed_results and logs for low-latency polling."""
+    cr = body.get("completed_results") or []
+    lite_results = [
+        completed_case_to_lite(x) if isinstance(x, dict) else x for x in cr
+    ]
+    logs = body.get("logs") or []
+    if log_cap > 0 and len(logs) > log_cap:
+        logs = logs[-log_cap:]
+    return {**body, "completed_results": lite_results, "logs": logs}
+
 
 def completed_case_dict(
     *,
@@ -38,6 +74,7 @@ def completed_case_dict(
         "original_steps": original_steps,
         "agent_logs": agent_logs,
         "screenshot_path": screenshot_path,
+        "agent_screenshot_count": _count_agent_screenshots(agent_logs),
     }
 
 

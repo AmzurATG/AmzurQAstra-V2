@@ -22,19 +22,13 @@ export default function TestRunDetail() {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({})
   const [syncing, setSyncing] = useState<Record<string, boolean>>({})
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const logEndRef = useRef<HTMLDivElement>(null)
-  const expandOnceRef = useRef(false)
 
   const numRunId = Number(runId)
-
-  useEffect(() => {
-    expandOnceRef.current = false
-  }, [numRunId])
   const isDone = progress ? TERMINAL_STATES.includes(progress.status) : false
 
   const poll = useCallback(async () => {
     try {
-      const res = await testRunsApi.getLiveProgress(numRunId)
+      const res = await testRunsApi.getLiveProgress(numRunId, { lite: true })
       setProgress(res.data)
       if (TERMINAL_STATES.includes(res.data.status) && pollRef.current) {
         clearInterval(pollRef.current)
@@ -54,30 +48,6 @@ export default function TestRunDetail() {
       if (pollRef.current) clearInterval(pollRef.current)
     }
   }, [poll, isDone])
-
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [progress?.logs?.length])
-
-  /** Open rows that have screenshots (or failures) so evidence is visible without an extra click. */
-  useEffect(() => {
-    if (!progress || !isDone || expandOnceRef.current) return
-    const list = progress.completed_results
-    if (list.length === 0) return
-    expandOnceRef.current = true
-    setExpanded((prev) => {
-      const next = { ...prev }
-      for (const r of list) {
-        const hasShots =
-          !!r.screenshot_path ||
-          (r.agent_logs ?? []).some((l) => !!l.screenshot_path)
-        if (hasShots || r.status !== 'passed') {
-          next[r.test_result_id] = true
-        }
-      }
-      return next
-    })
-  }, [progress, isDone])
 
   const handleCancel = async () => {
     try {
@@ -132,6 +102,10 @@ export default function TestRunDetail() {
                 ? `Completed — ${passed} passed, ${failed} failed`
                 : progress.current_test_case_title || 'Starting…'}
             </p>
+            <p className="text-gray-400 text-xs font-mono mt-0.5">
+              Run ID {numRunId}
+              {projectId ? ` · Project ${projectId}` : ''}
+            </p>
           </div>
         </div>
         {!isDone && (
@@ -179,57 +153,49 @@ export default function TestRunDetail() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        <div className="lg:col-span-3 space-y-2">
-          <CardTitle>Test Case Results</CardTitle>
-          {progress.completed_results.length === 0 && !isDone && (
-            <p className="text-sm text-gray-400 py-4">Waiting for first test case to complete…</p>
-          )}
-          {progress.completed_results.map((r) => (
-            <TestRunCaseAccordion
-              key={r.test_result_id}
-              runId={numRunId}
-              result={r}
-              isExpanded={!!expanded[r.test_result_id]}
-              onToggle={() =>
-                setExpanded((prev) => ({
-                  ...prev,
-                  [r.test_result_id]: !prev[r.test_result_id],
-                }))
-              }
-              onSync={handleSyncStep}
-              syncing={syncing}
-            />
-          ))}
-        </div>
-
-        <div className="lg:col-span-2">
-          <CardTitle>Execution Log</CardTitle>
-          <div className="bg-gray-900 rounded-lg p-4 h-[500px] overflow-y-auto font-mono text-[10px] leading-relaxed shadow-xl border border-gray-800">
-            {progress.logs.length === 0 && (
-              <span className="text-gray-500 italic">Waiting for logs…</span>
-            )}
-            {progress.logs.map((l, i) => {
-              const ts = l.timestamp.split('T')[1]?.slice(0, 8) || ''
-              const color = l.message.startsWith('✓')
-                ? 'text-green-400'
-                : l.message.startsWith('✗')
-                  ? 'text-red-400'
-                  : l.message.startsWith('▶')
-                    ? 'text-blue-400'
-                    : l.message.includes('⚠')
-                      ? 'text-yellow-400'
-                      : 'text-gray-300'
-              return (
-                <div key={i} className="flex gap-2 mb-0.5">
-                  <span className="text-gray-600 shrink-0 select-none">[{ts}]</span>
-                  <span className={color}>{l.message}</span>
-                </div>
-              )
-            })}
-            <div ref={logEndRef} />
+      <div className="space-y-3">
+        <CardTitle>Test Case Results</CardTitle>
+        {progress.completed_results.length === 0 && !isDone && (
+          <p className="text-sm text-gray-400 py-4">Waiting for first test case to complete…</p>
+        )}
+        {progress.completed_results.length > 0 && (
+          <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+            <table className="w-full text-left min-w-[56rem]">
+              <thead className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                <tr>
+                  <th className="px-3 py-3 w-12 text-center">#</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Run ID</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Case #</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Result #</th>
+                  <th className="px-3 py-3 w-14">Status</th>
+                  <th className="px-3 py-3">Title</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Steps</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Duration</th>
+                  <th className="px-3 py-3 w-10" aria-label="Expand" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {progress.completed_results.map((r, index) => (
+                  <TestRunCaseAccordion
+                    key={r.test_result_id}
+                    runId={numRunId}
+                    result={r}
+                    rowNumber={index + 1}
+                    isExpanded={!!expanded[r.test_result_id]}
+                    onToggle={() =>
+                      setExpanded((prev) => ({
+                        ...prev,
+                        [r.test_result_id]: !prev[r.test_result_id],
+                      }))
+                    }
+                    onSync={handleSyncStep}
+                    syncing={syncing}
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
+        )}
       </div>
     </div>
   )

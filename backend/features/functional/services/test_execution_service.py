@@ -572,6 +572,15 @@ class TestExecutionService:
         )
         return list(result.scalars().all())
 
+    async def get_result_for_run(self, run_id: int, result_id: int) -> Optional[TestResult]:
+        row = await self.db.execute(
+            select(TestResult).where(
+                TestResult.id == result_id,
+                TestResult.test_run_id == run_id,
+            )
+        )
+        return row.scalar_one_or_none()
+
     async def sync_adapted_step(self, result_id: int, step_number: int) -> bool:
         """Sync an AI-adapted step back to the original test case."""
         result = await self.db.execute(

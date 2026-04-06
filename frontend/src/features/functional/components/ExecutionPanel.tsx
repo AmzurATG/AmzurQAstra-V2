@@ -23,14 +23,6 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
   onCancel,
   onViewDetails
 }) => {
-  const logEndRef = React.useRef<HTMLDivElement>(null)
-
-  React.useEffect(() => {
-    if (logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [progress?.logs?.length])
-
   if (!progress && !isCreating && !error) return null
 
   if (error) {
@@ -63,7 +55,7 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
   if (isError) {
     return (
       <Card className="border-red-200 bg-red-50">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-red-700">
             Execution Error: {progress?.error || 'Unknown error'}
           </span>
@@ -71,16 +63,6 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
             Reset
           </Button>
         </div>
-        {progress?.logs && progress.logs.length > 0 && (
-          <div className="bg-gray-900 rounded-lg p-3 h-[120px] overflow-y-auto font-mono text-[10px] leading-relaxed shadow-inner border border-gray-800">
-            {progress.logs.map((l, i) => (
-              <div key={i} className="flex gap-2 mb-0.5">
-                <span className="text-gray-600 shrink-0 select-none">[{l.timestamp.split('T')[1]?.slice(0, 8)}]</span>
-                <span className={l.message.startsWith('✗') ? 'text-red-400' : 'text-gray-300'}>{l.message}</span>
-              </div>
-            ))}
-          </div>
-        )}
       </Card>
     )
   }
@@ -114,31 +96,11 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
           )}
         </div>
       </div>
-      <div className="w-full bg-gray-200 rounded-full h-2.5 mb-3">
+      <div className="w-full bg-gray-200 rounded-full h-2.5">
         <div
           className={`h-2.5 rounded-full transition-all duration-500 ${isDone && failedCount > 0 ? 'bg-red-500' : isDone ? 'bg-green-500' : 'bg-primary-500'}`}
           style={{ width: `${pct}%` }}
         />
-      </div>
-      
-      {/* Terminal Log */}
-      <div className="bg-gray-900 rounded-lg p-3 h-[180px] overflow-y-auto font-mono text-[10px] leading-relaxed shadow-inner border border-gray-800">
-        {progress.logs.length === 0 && <span className="text-gray-500 italic">Waiting for execution logs…</span>}
-        {progress.logs.map((l, i) => {
-          const ts = l.timestamp.split('T')[1]?.slice(0, 8) || ''
-          const color = l.message.startsWith('✓') ? 'text-green-400'
-            : l.message.startsWith('✗') ? 'text-red-400'
-            : l.message.startsWith('▶') ? 'text-blue-400'
-            : l.message.includes('⚠') ? 'text-yellow-400'
-            : 'text-gray-300'
-          return (
-            <div key={i} className="flex gap-2 mb-0.5">
-              <span className="text-gray-600 shrink-0 select-none">[{ts}]</span>
-              <span className={color}>{l.message}</span>
-            </div>
-          )
-        })}
-        <div ref={logEndRef} />
       </div>
     </Card>
   )

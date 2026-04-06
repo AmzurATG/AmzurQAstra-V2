@@ -142,8 +142,13 @@ export const testRunsApi = {
   create: (data: import('../types').TestRunCreateRequest) =>
     apiClient.post<import('../types').TestRunStartResponse>(`/functional/test-runs/`, data),
 
-  getLiveProgress: (id: number) =>
-    apiClient.get<import('../types').LiveProgressResponse>(`/functional/test-runs/${id}/live`),
+  getLiveProgress: (id: number, params?: { lite?: boolean }) =>
+    apiClient.get<import('../types').LiveProgressResponse>(`/functional/test-runs/${id}/live`, {
+      params: { lite: params?.lite !== false },
+    }),
+
+  getResult: (runId: number, resultId: number) =>
+    apiClient.get<TestResult>(`/functional/test-runs/${runId}/results/${resultId}`),
 
   cancel: (id: number) =>
     apiClient.post(`/functional/test-runs/${id}/cancel`),

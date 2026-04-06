@@ -203,6 +203,10 @@ export interface CompletedCaseResult {
   agent_logs?: AgentLogEntry[]
   /** Stored as `/screenshots/<file>`; load via authenticated API */
   screenshot_path?: string | null
+  /** From lite /live when agent_logs omitted */
+  agent_screenshot_count?: number | null
+  /** From lite /live when adapted_steps omitted */
+  has_adaptations?: boolean | null
 }
 
 export interface LiveProgressResponse {

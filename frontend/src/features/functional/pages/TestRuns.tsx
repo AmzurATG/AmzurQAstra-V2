@@ -29,7 +29,7 @@ export default function TestRuns() {
   const navigate = useNavigate()
   const [filter, setFilter] = useState('all')
 
-  const { runs, summary, loading, page, setPage, meta, reload } = useTestRunsList(
+  const { runs, summary, loading, page, setPage, meta, pageSize, reload } = useTestRunsList(
     projectId,
     filter
   )
@@ -133,6 +133,8 @@ export default function TestRuns() {
               <table className="w-full text-left">
                 <thead className="bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase">
                   <tr>
+                    <th className="px-4 py-3 w-14 text-center">#</th>
+                    <th className="px-4 py-3 w-24">Run ID</th>
                     <th className="px-6 py-3">Status</th>
                     <th className="px-6 py-3">Run Name</th>
                     <th className="px-6 py-3 text-center">Results</th>
@@ -141,15 +143,24 @@ export default function TestRuns() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {runs.map((run: TestRun) => {
+                  {runs.map((run: TestRun, index: number) => {
                     const cfg = STATUS_CFG[run.status] || STATUS_CFG.pending
                     const Icon = cfg.icon
+                    const rowNum = (page - 1) * pageSize + index + 1
                     return (
                       <tr
                         key={run.id}
                         className="hover:bg-gray-50 cursor-pointer group"
                         onClick={() => navigate(`/projects/${projectId}/test-runs/${run.id}`)}
                       >
+                        <td className="px-4 py-4 text-center text-sm font-medium text-gray-500 tabular-nums">
+                          {rowNum}
+                        </td>
+                        <td className="px-4 py-4">
+                          <span className="inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded-md bg-gray-100 text-sm font-bold text-gray-900 tabular-nums">
+                            #{run.id}
+                          </span>
+                        </td>
                         <td className="px-6 py-4">
                           <div
                             className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full ${cfg.bg}`}
@@ -164,9 +175,7 @@ export default function TestRuns() {
                         </td>
                         <td className="px-6 py-4">
                           <p className="text-sm font-medium text-gray-900">{run.name}</p>
-                          <p className="text-xs text-gray-500">
-                            ID: #{run.id} · {run.browser}
-                          </p>
+                          <p className="text-xs text-gray-500 capitalize">{run.browser}</p>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center justify-center gap-3">

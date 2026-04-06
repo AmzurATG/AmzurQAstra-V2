@@ -108,6 +108,9 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
             />
           </th>
           <th className="w-8 px-4 py-3"></th>
+          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-24">
+            Case #
+          </th>
           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User Story</th>
@@ -147,6 +150,11 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
                       <ChevronRightIcon className="w-4 h-4 text-gray-500" />
                     )}
                   </button>
+                </td>
+                <td className="px-3 py-4">
+                  <span className="inline-flex items-center justify-center min-w-[2.25rem] px-2 py-1 rounded-md bg-gray-100 text-sm font-bold text-gray-900 tabular-nums">
+                    #{tc.id}
+                  </span>
                 </td>
                 <td className="px-4 py-4">
                   {isCurrentlyRunning ? (
@@ -233,7 +241,7 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
             
             {expandedRows.has(tc.id) && (
               <tr className="bg-gray-50">
-                <td colSpan={9} className="px-4 py-4">
+                <td colSpan={10} className="px-4 py-4">
                   {loadingSteps.has(tc.id) ? (
                     <div className="flex items-center justify-center py-4">
                       <ArrowPathIcon className="w-5 h-5 animate-spin text-primary-500 mr-2" />

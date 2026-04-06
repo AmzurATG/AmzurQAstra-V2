@@ -30,7 +30,7 @@ export function useTestRunExecution(): UseTestRunExecutionReturn {
 
   const poll = useCallback(async (id: number) => {
     try {
-      const res = await testRunsApi.getLiveProgress(id)
+      const res = await testRunsApi.getLiveProgress(id, { lite: true })
       const data = res.data
       setProgress(data)
 

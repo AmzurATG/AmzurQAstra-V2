@@ -2,7 +2,7 @@
 Test Runs Endpoints
 """
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.db.database import get_db
@@ -26,7 +26,11 @@ from features.functional.services.test_execution_service import (
     TestExecutionService,
 )
 from features.functional.services.run_progress_manager import RunProgressManager
-from features.functional.services.completed_result_builder import completed_case_dict_from_orm
+from features.functional.services.completed_result_builder import (
+    completed_case_dict_from_orm,
+    completed_case_to_lite,
+    live_progress_to_lite,
+)
 
 router = APIRouter()
 
@@ -88,6 +92,10 @@ async def get_test_run(
 @router.get("/{run_id}/live", response_model=LiveProgressResponse)
 async def get_live_progress(
     run_id: int,
+    lite: bool = Query(
+        True,
+        description="Omit heavy fields (step_results, agent_logs, …) and trim logs for faster polling.",
+    ),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -95,19 +103,32 @@ async def get_live_progress(
     progress_manager = RunProgressManager()
     progress = progress_manager.get(run_id)
     if progress:
+        body = {
+            "status": progress.get("status", "running"),
+            "percentage": progress.get("percentage", 0),
+            "current_test_case_index": progress.get("current_test_case_index", 0),
+            "total_test_cases": progress.get("total_test_cases", 0),
+            "current_test_case_title": progress.get("current_test_case_title"),
+            "current_step_info": progress.get("current_step_info"),
+            "completed_results": list(progress.get("completed_results", [])),
+            "logs": list(progress.get("logs", [])),
+            "error": progress.get("error"),
+        }
+        if lite:
+            body = live_progress_to_lite(body)
         return LiveProgressResponse(
             run_id=run_id,
-            status=progress.get("status", "running"),
-            percentage=progress.get("percentage", 0),
-            current_test_case_index=progress.get("current_test_case_index", 0),
-            total_test_cases=progress.get("total_test_cases", 0),
-            current_test_case_title=progress.get("current_test_case_title"),
-            current_step_info=progress.get("current_step_info"),
+            status=body["status"],
+            percentage=body["percentage"],
+            current_test_case_index=body["current_test_case_index"],
+            total_test_cases=body["total_test_cases"],
+            current_test_case_title=body.get("current_test_case_title"),
+            current_step_info=body.get("current_step_info"),
             completed_results=[
-                CompletedCaseResult(**r) for r in progress.get("completed_results", [])
+                CompletedCaseResult(**r) for r in body["completed_results"]
             ],
-            logs=[LogEntry(**l) for l in progress.get("logs", [])],
-            error=progress.get("error"),
+            logs=[LogEntry(**l) for l in body["logs"]],
+            error=body.get("error"),
         )
 
     # Fallback: load from DB
@@ -117,12 +138,13 @@ async def get_live_progress(
         return LiveProgressResponse(run_id=run_id, status="not_found")
 
     pct = 100 if run.status in (TestRunStatus.PASSED, TestRunStatus.FAILED, TestRunStatus.ERROR) else 0
-    completed = []
+    completed_raw = []
     for r in (run.test_results or []):
         if r.status != TestResultStatus.SKIPPED:
-            completed.append(
-                CompletedCaseResult(**completed_case_dict_from_orm(r))
-            )
+            d = completed_case_dict_from_orm(r)
+            if lite:
+                d = completed_case_to_lite(d)
+            completed_raw.append(CompletedCaseResult(**d))
 
     return LiveProgressResponse(
         run_id=run_id,
@@ -130,7 +152,7 @@ async def get_live_progress(
         percentage=pct,
         total_test_cases=run.total_tests,
         current_test_case_index=run.total_tests if pct == 100 else 0,
-        completed_results=completed,
+        completed_results=completed_raw,
     )
 
 
@@ -145,6 +167,21 @@ async def cancel_test_run(
     if not run:
         raise HTTPException(status_code=404, detail="Test run not found")
     return run
+
+
+@router.get("/{run_id}/results/{result_id}", response_model=TestResultResponse)
+async def get_test_run_result(
+    run_id: int,
+    result_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Full test result (steps, agent_logs, …) for one case — fetch when expanding a row."""
+    service = TestExecutionService(db)
+    tr = await service.get_result_for_run(run_id, result_id)
+    if not tr:
+        raise HTTPException(status_code=404, detail="Test result not found")
+    return tr
 
 
 @router.get("/{run_id}/results", response_model=List[TestResultResponse])

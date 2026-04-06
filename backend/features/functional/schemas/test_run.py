@@ -116,6 +116,8 @@ class CompletedCaseResult(BaseModel):
     original_steps: Optional[List[Dict[str, Any]]] = None
     agent_logs: Optional[List[Dict[str, Any]]] = None
     screenshot_path: Optional[str] = None
+    agent_screenshot_count: Optional[int] = None
+    has_adaptations: Optional[bool] = None
 
 
 class LiveProgressResponse(BaseModel):

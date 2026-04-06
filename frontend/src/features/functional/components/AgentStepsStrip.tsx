@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PhotoIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import type { AgentLogEntry } from '../types'
 import { fetchScreenshotBlobUrl } from '../utils/screenshotFetch'
@@ -8,12 +8,92 @@ function screenshotBasename(path: string): string {
   return i >= 0 ? path.slice(i + 1) : path
 }
 
+function LazyAgentThumb({
+  runId,
+  testResultId,
+  entry,
+  onLoaded,
+  onOpen,
+  blobUrl,
+}: {
+  runId: number
+  testResultId: number
+  entry: AgentLogEntry
+  onLoaded: (step: number, url: string) => void
+  onOpen: (entry: AgentLogEntry) => void
+  blobUrl: string | undefined
+}) {
+  const ref = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (blobUrl) return
+    const el = ref.current
+    if (!el) return
+    const raw = entry.screenshot_path
+    if (!raw) return
+    const filename = screenshotBasename(raw)
+    if (!filename) return
+
+    let cancelled = false
+    const ob = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting || cancelled) return
+        ob.disconnect()
+        ;(async () => {
+          try {
+            const u = await fetchScreenshotBlobUrl(runId, testResultId, filename)
+            if (cancelled) {
+              URL.revokeObjectURL(u)
+              return
+            }
+            created = u
+            onLoaded(entry.agent_step, u)
+          } catch {
+            /* ignore */
+          }
+        })()
+      },
+      { root: null, rootMargin: '120px', threshold: 0.01 }
+    )
+    ob.observe(el)
+    return () => {
+      cancelled = true
+      ob.disconnect()
+    }
+  }, [runId, testResultId, entry.agent_step, entry.screenshot_path, blobUrl, onLoaded])
+
+  return (
+    <button
+      ref={ref}
+      type="button"
+      onClick={() => onOpen(entry)}
+      className="shrink-0 w-24 rounded-lg border border-gray-200 overflow-hidden bg-gray-50 hover:ring-2 hover:ring-primary-400 transition-shadow text-left"
+    >
+      <div className="aspect-video bg-gray-200 flex items-center justify-center">
+        {blobUrl ? (
+          <img src={blobUrl} alt="" className="w-full h-full object-cover object-top" />
+        ) : (
+          <span className="text-[9px] text-gray-400 px-1">…</span>
+        )}
+      </div>
+      <div
+        className="px-1 py-0.5 text-[9px] text-gray-600 truncate"
+        title={entry.description}
+      >
+        #{entry.agent_step}
+      </div>
+    </button>
+  )
+}
+
 interface AgentStepsStripProps {
   runId: number
   testResultId: number
   agentLogs?: AgentLogEntry[] | null
   /** First / summary screenshot from test_result.screenshot_path (JWT-backed fetch). */
   primaryScreenshotPath?: string | null
+  /** When false, render nothing (row collapsed). */
+  enabled?: boolean
 }
 
 export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
@@ -21,6 +101,7 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
   testResultId,
   agentLogs,
   primaryScreenshotPath,
+  enabled = true,
 }) => {
   const logs = agentLogs ?? []
   const withShots = useMemo(
@@ -31,11 +112,46 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
   const [primaryBlobUrl, setPrimaryBlobUrl] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<AgentLogEntry | null>(null)
   const [primaryLightbox, setPrimaryLightbox] = useState(false)
+  const [lightboxLoading, setLightboxLoading] = useState(false)
+  const blobsRef = useRef<Record<number, string>>({})
+  useEffect(() => {
+    blobsRef.current = blobByStep
+  }, [blobByStep])
 
   const primaryName = primaryScreenshotPath ? screenshotBasename(primaryScreenshotPath) : ''
 
+  const onThumbLoaded = useCallback((step: number, url: string) => {
+    setBlobByStep((prev) => (prev[step] ? prev : { ...prev, [step]: url }))
+  }, [])
+
+  const openAgentLightbox = useCallback(
+    async (entry: AgentLogEntry) => {
+      setLightbox(entry)
+      const step = entry.agent_step
+      if (blobsRef.current[step]) return
+      const fn = entry.screenshot_path ? screenshotBasename(entry.screenshot_path) : ''
+      if (!fn) return
+      setLightboxLoading(true)
+      try {
+        const u = await fetchScreenshotBlobUrl(runId, testResultId, fn)
+        setBlobByStep((prev) => {
+          if (prev[entry.agent_step]) {
+            URL.revokeObjectURL(u)
+            return prev
+          }
+          return { ...prev, [entry.agent_step]: u }
+        })
+      } catch {
+        /* ignore */
+      } finally {
+        setLightboxLoading(false)
+      }
+    },
+    [runId, testResultId]
+  )
+
   useEffect(() => {
-    if (!primaryName) {
+    if (!enabled || !primaryName) {
       setPrimaryBlobUrl(null)
       return
     }
@@ -58,38 +174,11 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
       cancelled = true
       if (url) URL.revokeObjectURL(url)
     }
-  }, [runId, testResultId, primaryName])
+  }, [enabled, runId, testResultId, primaryName])
 
-  useEffect(() => {
-    if (withShots.length === 0) return
-    let cancelled = false
-    const created: string[] = []
-
-    ;(async () => {
-      for (const entry of withShots) {
-        const raw = entry.screenshot_path
-        if (!raw || cancelled) continue
-        const filename = screenshotBasename(raw)
-        if (!filename) continue
-        try {
-          const u = await fetchScreenshotBlobUrl(runId, testResultId, filename)
-          if (cancelled) {
-            URL.revokeObjectURL(u)
-            continue
-          }
-          created.push(u)
-          setBlobByStep((prev) => ({ ...prev, [entry.agent_step]: u }))
-        } catch {
-          /* ignore */
-        }
-      }
-    })()
-
-    return () => {
-      cancelled = true
-      created.forEach((u) => URL.revokeObjectURL(u))
-    }
-  }, [runId, testResultId, withShots])
+  if (!enabled) {
+    return null
+  }
 
   if (!primaryName && logs.length === 0) {
     return (
@@ -129,34 +218,20 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
       {withShots.length > 0 && (
         <div>
           <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
-            <PhotoIcon className="w-3.5 h-3.5" /> Agent steps (screenshots)
+            <PhotoIcon className="w-3.5 h-3.5" /> Agent steps (screenshots load as you scroll)
           </p>
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {withShots.map((entry) => {
-              const src = blobByStep[entry.agent_step]
-              return (
-                <button
-                  key={`${entry.agent_step}-${entry.timestamp}`}
-                  type="button"
-                  onClick={() => setLightbox(entry)}
-                  className="shrink-0 w-24 rounded-lg border border-gray-200 overflow-hidden bg-gray-50 hover:ring-2 hover:ring-primary-400 transition-shadow text-left"
-                >
-                  <div className="aspect-video bg-gray-200 flex items-center justify-center">
-                    {src ? (
-                      <img src={src} alt="" className="w-full h-full object-cover object-top" />
-                    ) : (
-                      <span className="text-[9px] text-gray-400 px-1">load</span>
-                    )}
-                  </div>
-                  <div
-                    className="px-1 py-0.5 text-[9px] text-gray-600 truncate"
-                    title={entry.description}
-                  >
-                    #{entry.agent_step}
-                  </div>
-                </button>
-              )
-            })}
+            {withShots.map((entry) => (
+              <LazyAgentThumb
+                key={`${entry.agent_step}-${entry.timestamp}`}
+                runId={runId}
+                testResultId={testResultId}
+                entry={entry}
+                blobUrl={blobByStep[entry.agent_step]}
+                onLoaded={onThumbLoaded}
+                onOpen={openAgentLightbox}
+              />
+            ))}
           </div>
         </div>
       )}
@@ -204,12 +279,16 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
             <XMarkIcon className="w-6 h-6" />
           </button>
           <div className="max-w-4xl max-h-[90vh] flex flex-col gap-2 bg-white rounded-lg overflow-hidden shadow-xl">
-            {lightbox.screenshot_path && blobByStep[lightbox.agent_step] && (
+            {lightboxLoading && !blobByStep[lightbox.agent_step] ? (
+              <div className="p-16 text-gray-500 text-sm">Loading image…</div>
+            ) : blobByStep[lightbox.agent_step] ? (
               <img
                 src={blobByStep[lightbox.agent_step]}
                 alt=""
                 className="max-h-[70vh] w-full object-contain bg-gray-900"
               />
+            ) : (
+              <div className="p-16 text-gray-500 text-sm">Could not load image.</div>
             )}
             <div className="p-4 text-sm">
               <p className="font-semibold text-gray-900">Agent step {lightbox.agent_step}</p>
