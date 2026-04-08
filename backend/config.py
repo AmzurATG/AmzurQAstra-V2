@@ -91,8 +91,8 @@ class Settings(BaseSettings):
     BROWSER_USE_LLM_TEMPERATURE: float = 0.15
     GEMINI_API_KEY: Optional[str] = None  # only when BROWSER_USE_LLM_BACKEND=google
     BROWSER_USE_DEFAULT_EXTENSIONS: bool = True
-    # Always under the backend package so paths match regardless of process cwd.
-    SCREENSHOTS_DIR: str = str(_BACKEND_DIR / "screenshots")
+    # Outside backend/ to prevent uvicorn --reload restarts when screenshots are written.
+    SCREENSHOTS_DIR: str = str(_BACKEND_DIR.parent / "screenshots")
 
     # MCP (optional)
     MCP_SERVER_URL: str = "http://localhost:3001"
@@ -117,8 +117,8 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
     MAX_UPLOAD_SIZE_MB: int = 50
 
-    # Logging
-    LOG_DIR: str = "./logs"
+    # Logging (outside backend/ to prevent uvicorn restart)
+    LOG_DIR: str = str(_BACKEND_DIR.parent / "logs")
     LOG_LEVEL: str = "INFO"
     LOG_MAX_BYTES: int = 10_485_760
     LOG_BACKUP_COUNT: int = 5
