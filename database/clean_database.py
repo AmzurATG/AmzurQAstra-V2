@@ -10,9 +10,21 @@ Usage:
 """
 
 import getpass
+import os
 import sys
+from pathlib import Path
 
 import psycopg2
+from dotenv import load_dotenv
+
+# Load .env from the backend directory
+load_dotenv(Path(__file__).resolve().parent.parent / "backend" / ".env")
+
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = int(os.getenv("DB_PORT"))
 
 
 def get_credentials() -> tuple[str, str]:
@@ -21,7 +33,7 @@ def get_credentials() -> tuple[str, str]:
     print("  QAstra Database Cleanup")
     print("=" * 50)
     print()
-    print("This will DROP all objects in the 'qastra' database.")
+    print(f"This will DROP all objects in the '{DB_NAME}' database.")
     print("You need PostgreSQL superuser credentials.")
     print()
     username = input("PostgreSQL superuser username: ").strip()
@@ -37,9 +49,9 @@ def clean_database(username: str, password: str) -> None:
     conn = None
     try:
         conn = psycopg2.connect(
-            host="localhost",
-            port=5432,
-            dbname="qastra",
+            host=DB_HOST,
+            port=DB_PORT,
+            dbname=DB_NAME,
             user=username,
             password=password,
         )
@@ -47,7 +59,7 @@ def clean_database(username: str, password: str) -> None:
         cur = conn.cursor()
 
         print()
-        print("Connected to 'qastra' database.")
+        print(f"Connected to '{DB_NAME}' database.")
         print("Dropping all objects...")
         print()
 
@@ -145,7 +157,7 @@ def clean_database(username: str, password: str) -> None:
 def main() -> None:
     username, password = get_credentials()
 
-    confirm = input("\nAre you sure you want to DROP ALL objects in 'qastra'? (yes/no): ").strip().lower()
+    confirm = input(f"\nAre you sure you want to DROP ALL objects in '{DB_NAME}'? (yes/no): ").strip().lower()
     if confirm != "yes":
         print("Aborted.")
         sys.exit(0)

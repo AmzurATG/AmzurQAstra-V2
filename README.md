@@ -37,7 +37,11 @@ Use a virtual environment and install Python dependencies from `backend/requirem
 
 ```powershell
 cd backend
-# Create/activate venv, then:
+# Create and activate virtual environment
+python -m venv venv
+.\venv\Scripts\Activate.ps1    # PowerShell
+# or: venv\Scripts\activate.bat   # CMD
+
 uv pip install -r requirements.txt
 uv run playwright install chromium
 alembic upgrade head

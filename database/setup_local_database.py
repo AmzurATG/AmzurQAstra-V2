@@ -10,16 +10,23 @@ Usage:
 """
 
 import getpass
+import os
 import sys
+from pathlib import Path
 
 import psycopg2
+from dotenv import load_dotenv
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
+# Load .env from the backend directory
+load_dotenv(Path(__file__).resolve().parent.parent / "backend" / ".env")
 
-# Application database / user defaults
-APP_DB = "qastra"
-APP_USER = "qastra"
-APP_PASSWORD = "qastra123"
+# Application database / user defaults (from .env)
+APP_DB = os.getenv("DB_NAME")
+APP_USER = os.getenv("DB_USER")
+APP_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = int(os.getenv("DB_PORT"))
 
 
 def get_credentials() -> tuple[str, str]:
@@ -45,8 +52,8 @@ def setup_database(su_user: str, su_password: str) -> None:
     try:
         # Connect to the default 'postgres' database as superuser
         conn = psycopg2.connect(
-            host="localhost",
-            port=5432,
+            host=DB_HOST,
+            port=DB_PORT,
             dbname="postgres",
             user=su_user,
             password=su_password,
@@ -86,8 +93,8 @@ def setup_database(su_user: str, su_password: str) -> None:
 
         # 4. Connect to the new database and grant schema privileges
         conn = psycopg2.connect(
-            host="localhost",
-            port=5432,
+            host=DB_HOST,
+            port=DB_PORT,
             dbname=APP_DB,
             user=su_user,
             password=su_password,

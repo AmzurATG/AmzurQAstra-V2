@@ -55,6 +55,19 @@ class LiteLLMClient(BaseLLMClient):
         # Enable verbose logging in debug mode
         litellm.set_verbose = settings.DEBUG
 
+    @staticmethod
+    def _proxy_model_name(model: str, api_base: Optional[str]) -> str:
+        """Prefix model with 'openai/' when routing through a LiteLLM proxy.
+
+        When api_base is set (proxy mode), litellm's client-side routing
+        sees prefixes like 'gemini/' and tries to call provider APIs directly
+        instead of the proxy. Adding 'openai/' forces OpenAI-compatible
+        routing through the proxy, which handles provider dispatch itself.
+        """
+        if api_base and not model.startswith("openai/"):
+            return f"openai/{model}"
+        return model
+
     def _model_attempts(self, primary: str) -> List[str]:
         """Ordered list: primary model, then comma-separated LITELLM_FALLBACK_MODELS (no duplicates)."""
         seen: set[str] = set()
@@ -72,9 +85,10 @@ class LiteLLMClient(BaseLLMClient):
 
     def _completion_with_fallback(self, kwargs: Dict[str, Any]) -> Tuple[Any, str]:
         primary = kwargs.get("model") or self.default_model
+        api_base = kwargs.get("api_base") or self.api_base
         last_exc: Optional[Exception] = None
         for model in self._model_attempts(primary):
-            attempt = {**kwargs, "model": model}
+            attempt = {**kwargs, "model": self._proxy_model_name(model, api_base)}
             try:
                 response = completion(**attempt)
                 if model != primary:
@@ -93,9 +107,10 @@ class LiteLLMClient(BaseLLMClient):
 
     async def _acompletion_with_fallback(self, kwargs: Dict[str, Any]) -> Tuple[Any, str]:
         primary = kwargs.get("model") or self.default_model
+        api_base = kwargs.get("api_base") or self.api_base
         last_exc: Optional[Exception] = None
         for model in self._model_attempts(primary):
-            attempt = {**kwargs, "model": model}
+            attempt = {**kwargs, "model": self._proxy_model_name(model, api_base)}
             try:
                 response = await acompletion(**attempt)
                 if model != primary:
