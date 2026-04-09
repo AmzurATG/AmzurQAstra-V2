@@ -121,6 +121,46 @@ export interface TestRunSummary {
   avg_pass_rate: number
 }
 
+/** GET /functional/dashboard/overview */
+export interface DashboardRecentRun {
+  id: number
+  project_id: number
+  project_name: string
+  name?: string | null
+  description?: string | null
+  status: string
+  created_at: string
+}
+
+export interface DashboardRecentProject {
+  id: number
+  name: string
+  description?: string | null
+  updated_at: string
+}
+
+export interface DashboardActivityDay {
+  date: string
+  passed: number
+  failed: number
+  other: number
+}
+
+export interface DashboardOverview {
+  project_count: number
+  test_cases_total: number
+  runs_total: number
+  runs_passed: number
+  runs_failed: number
+  runs_running: number
+  runs_pending: number
+  runs_cancelled: number
+  avg_pass_rate: number
+  recent_runs: DashboardRecentRun[]
+  recent_projects: DashboardRecentProject[]
+  activity_by_day: DashboardActivityDay[]
+}
+
 export interface TestRunStartResponse {
   run_id: number
   status: string

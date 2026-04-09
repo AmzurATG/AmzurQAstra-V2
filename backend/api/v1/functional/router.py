@@ -10,6 +10,7 @@ from api.v1.functional.test_runs import router as test_runs_router
 from api.v1.functional.integrity_check import router as integrity_check_router
 from api.v1.functional.integrations import router as integrations_router
 from api.v1.functional.user_stories import router as user_stories_router
+from api.v1.functional.dashboard import router as dashboard_router
 
 
 router = APIRouter()
@@ -48,4 +49,9 @@ router.include_router(
     user_stories_router,
     prefix="/user-stories",
     tags=["Functional - User Stories"],
+)
+router.include_router(
+    dashboard_router,
+    prefix="/dashboard",
+    tags=["Functional - Dashboard"],
 )

@@ -15,6 +15,7 @@ import type {
   ProjectIntegrationInfo,
   GenerateTestsRequest,
   GenerateTestsResponse,
+  DashboardOverview,
 } from '../types'
 
 export interface PaginatedResponse<T> {
@@ -25,6 +26,14 @@ export interface PaginatedResponse<T> {
   total_pages: number
   has_next: boolean
   has_prev: boolean
+}
+
+// Dashboard (cross-project aggregates)
+export const dashboardApi = {
+  overview: async (): Promise<DashboardOverview> => {
+    const response = await apiClient.get<DashboardOverview>('/functional/dashboard/overview')
+    return response.data
+  },
 }
 
 // Requirements API
