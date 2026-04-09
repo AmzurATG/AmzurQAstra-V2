@@ -1,6 +1,8 @@
+import { useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { Card, CardTitle } from '@common/components/ui/Card'
 import { useProjectStore } from '@common/store/projectStore'
+import { useProjectOverviewStats } from '../hooks/useProjectOverviewStats'
 import {
   DocumentTextIcon,
   ClipboardDocumentListIcon,
@@ -15,90 +17,94 @@ import {
 export default function ProjectOverview() {
   const { projectId } = useParams<{ projectId: string }>()
   const { currentProject } = useProjectStore()
+  const { labels, loading } = useProjectOverviewStats(projectId)
 
-  const features = [
-    {
-      name: 'User Stories',
-      description: 'Import and manage user stories from Jira or Redmine',
-      icon: BookOpenIcon,
-      href: `/projects/${projectId}/user-stories`,
-      stats: '5 stories',
-    },
-    {
-      name: 'Requirements',
-      description: 'Upload requirement documents to generate test cases',
-      icon: DocumentTextIcon,
-      href: `/projects/${projectId}/requirements`,
-      stats: '12 documents',
-    },
-    {
-      name: 'Test Cases',
-      description: 'AI-generated and manual test cases',
-      icon: ClipboardDocumentListIcon,
-      href: `/projects/${projectId}/test-cases`,
-      stats: '156 cases',
-    },
-    {
-      name: 'Test Runs',
-      description: 'Execute tests via Playwright MCP',
-      icon: PlayIcon,
-      href: `/projects/${projectId}/test-runs`,
-      stats: '24 runs',
-    },
-    {
-      name: 'Integrity Check',
-      description: 'Verify your app is ready for testing',
-      icon: ShieldCheckIcon,
-      href: `/projects/${projectId}/integrity-check`,
-      stats: 'Last: 2h ago',
-    },
-    {
-      name: 'Integrations',
-      description: 'Connect to Jira, Azure DevOps, and more',
-      icon: LinkIcon,
-      href: `/projects/${projectId}/integrations`,
-      stats: '2 connected',
-    },
-  ]
+  const features = useMemo(
+    () => [
+      {
+        name: 'User Stories',
+        description: 'Import and manage user stories from Jira or Redmine',
+        icon: BookOpenIcon,
+        href: `/projects/${projectId}/user-stories`,
+        statKey: 'userStories' as const,
+      },
+      {
+        name: 'Requirements',
+        description: 'Upload requirement documents to generate test cases',
+        icon: DocumentTextIcon,
+        href: `/projects/${projectId}/requirements`,
+        statKey: 'requirements' as const,
+      },
+      {
+        name: 'Test Cases',
+        description: 'AI-generated and manual test cases',
+        icon: ClipboardDocumentListIcon,
+        href: `/projects/${projectId}/test-cases`,
+        statKey: 'testCases' as const,
+      },
+      {
+        name: 'Test Runs',
+        description: 'Execute tests via Playwright MCP',
+        icon: PlayIcon,
+        href: `/projects/${projectId}/test-runs`,
+        statKey: 'testRuns' as const,
+      },
+      {
+        name: 'Integrity Check',
+        description: 'Verify your app is ready for testing',
+        icon: ShieldCheckIcon,
+        href: `/projects/${projectId}/integrity-check`,
+        statKey: 'integrity' as const,
+      },
+      {
+        name: 'Integrations',
+        description: 'Connect to Jira, Azure DevOps, and more',
+        icon: LinkIcon,
+        href: `/projects/${projectId}/integrations`,
+        statKey: 'integrations' as const,
+      },
+    ],
+    [projectId]
+  )
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="min-w-0 space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-bold text-gray-900">
             {currentProject?.name || 'Project Overview'}
           </h1>
-          <p className="text-gray-600">
+          <p className="break-words text-gray-600">
             {currentProject?.description || 'AI-powered test generation and automation'}
           </p>
         </div>
         <Link
           to={`/projects/${projectId}/settings`}
-          className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+          className="flex shrink-0 items-center gap-2 self-start rounded-lg px-4 py-2 text-gray-600 hover:bg-gray-100"
         >
-          <Cog6ToothIcon className="w-5 h-5" />
+          <Cog6ToothIcon className="h-5 w-5 shrink-0" />
           Settings
         </Link>
       </div>
 
-      {/* Project Info */}
       {currentProject?.app_url && (
-        <Card className="bg-gradient-to-r from-primary-50 to-primary-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-primary-600 font-medium">Target Application</p>
+        <Card className="min-w-0 bg-gradient-to-r from-primary-50 to-primary-100">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-primary-600">Target Application</p>
               <a
                 href={currentProject.app_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-lg font-semibold text-primary-700 hover:underline"
+                className="break-all text-lg font-semibold text-primary-700 hover:underline"
+                title={currentProject.app_url}
               >
                 {currentProject.app_url}
               </a>
             </div>
             <Link
               to={`/projects/${projectId}/integrity-check`}
-              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+              className="shrink-0 rounded-lg bg-primary-600 px-4 py-2 text-center text-white hover:bg-primary-700"
             >
               Run Integrity Check
             </Link>
@@ -106,56 +112,66 @@ export default function ProjectOverview() {
         </Card>
       )}
 
-      {/* Quick Start */}
-      <Card className="bg-gradient-to-r from-primary-500 to-primary-600 text-white">
-        <div className="flex items-center gap-4">
-          <SparklesIcon className="w-12 h-12" />
-          <div>
+      <Card className="min-w-0 bg-gradient-to-r from-primary-500 to-primary-600 text-white">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <SparklesIcon className="h-12 w-12 shrink-0" />
+          <div className="min-w-0">
             <h2 className="text-xl font-bold">Get Started with AI Testing</h2>
-            <p className="opacity-90 mt-1">
+            <p className="mt-1 opacity-90">
               Upload a requirement document or connect to Jira to auto-generate test cases
             </p>
           </div>
         </div>
       </Card>
 
-      {/* Feature Cards - 3 columns, 2 rows */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {features.map((feature) => (
-          <Link key={feature.name} to={feature.href}>
-            <Card className="hover:shadow-md transition-shadow h-full">
-              <div className="flex items-start gap-4">
-                <div className="p-3 bg-primary-100 rounded-lg">
-                  <feature.icon className="w-6 h-6 text-primary-600" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-gray-900">{feature.name}</h3>
-                    <span className="text-sm text-primary-600">{feature.stats}</span>
+      <div className="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {features.map((feature) => {
+          const statText =
+            loading || !labels
+              ? '…'
+              : labels[feature.statKey] ?? '—'
+
+          return (
+            <Link key={feature.name} to={feature.href} className="min-w-0">
+              <Card className="h-full min-w-0 transition-shadow hover:shadow-md">
+                <div className="flex items-start gap-4">
+                  <div className="shrink-0 rounded-lg bg-primary-100 p-3">
+                    <feature.icon className="h-6 w-6 text-primary-600" />
                   </div>
-                  <p className="text-sm text-gray-500 mt-1">{feature.description}</p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="font-semibold text-gray-900">{feature.name}</h3>
+                      <span
+                        className={`shrink-0 text-right text-sm text-primary-600 ${
+                          loading ? 'animate-pulse text-primary-300' : ''
+                        }`}
+                      >
+                        {statText}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-gray-500">{feature.description}</p>
+                  </div>
                 </div>
-              </div>
-            </Card>
-          </Link>
-        ))}
+              </Card>
+            </Link>
+          )
+        })}
       </div>
 
-      {/* Workflow Overview */}
-      <Card>
+      <Card className="min-w-0">
         <CardTitle>How It Works</CardTitle>
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="mt-4 grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {[
             { step: 1, title: 'Upload Requirements', desc: 'PDF, Word, or from Jira' },
             { step: 2, title: 'Generate Tests', desc: 'AI creates test cases' },
             { step: 3, title: 'Review & Edit', desc: 'Refine test steps' },
             { step: 4, title: 'Execute', desc: 'Run via Playwright' },
           ].map((item) => (
-            <div key={item.step} className="text-center">
-              <div className="w-10 h-10 bg-primary-100 text-primary-600 rounded-full flex items-center justify-center mx-auto font-bold">
+            <div key={item.step} className="min-w-0 text-center">
+              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-primary-100 font-bold text-primary-600">
                 {item.step}
               </div>
-              <h4 className="font-medium mt-2">{item.title}</h4>
+              <h4 className="mt-2 font-medium">{item.title}</h4>
               <p className="text-sm text-gray-500">{item.desc}</p>
             </div>
           ))}

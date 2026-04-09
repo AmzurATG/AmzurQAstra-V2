@@ -38,9 +38,12 @@ export const dashboardApi = {
 
 // Requirements API
 export const requirementsApi = {
-  list: (projectId: string) =>
-    apiClient.get<{ items: Requirement[]; total: number }>(`/functional/requirements`, { 
-      params: { project_id: projectId } 
+  list: (
+    projectId: string,
+    params?: { page?: number; page_size?: number }
+  ) =>
+    apiClient.get<PaginatedResponse<Requirement>>(`/functional/requirements`, {
+      params: { project_id: projectId, ...params },
     }),
 
   get: (id: string) =>
@@ -184,8 +187,10 @@ export const integrityCheckApi = {
   getStatus: (runId: string) =>
     apiClient.get<import('../types').RunStatusResponse>(`/functional/integrity-check/${runId}/status`),
 
-  getHistory: (projectId: string) =>
-    apiClient.get<import('../types').RunStatusResponse[]>(`/functional/integrity-check/history/${projectId}`),
+  getHistory: (projectId: string, params?: { limit?: number }) =>
+    apiClient.get<Array<{ created_at?: string | null }>>(`/functional/integrity-check/history/${projectId}`, {
+      params,
+    }),
 
   getPreview: (projectId: number) =>
     apiClient.get<import('../types').IntegrityCheckPreview>(`/functional/integrity-check/preview/${projectId}`),
