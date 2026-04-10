@@ -117,6 +117,17 @@ export function useProjectOverviewStats(projectId: string | undefined) {
     load()
   }, [load])
 
+  // Refresh when returning to the tab or after navigating away (e.g. saved integration, new test cases).
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && projectId) {
+        load()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [load, projectId])
+
   const labels = stats
     ? {
         userStories: plural(stats.userStories, 'story', 'stories'),

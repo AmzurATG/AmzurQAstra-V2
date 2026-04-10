@@ -19,6 +19,7 @@ import IntegrityCheck from '@features/functional/pages/IntegrityCheck'
 import ProjectSettings from '@features/functional/pages/ProjectSettings'
 import ProjectIntegrations from '@features/functional/pages/ProjectIntegrations'
 import UserStories from '@features/functional/pages/UserStories'
+import UserStoryDetail from '@features/functional/pages/UserStoryDetail'
 import JiraIntegration from '@features/functional/pages/JiraIntegration'
 import AzureDevOpsIntegration from '@features/functional/pages/AzureDevOpsIntegration'
 import NotFound from '@common/pages/NotFound'
@@ -50,6 +51,7 @@ function App() {
           {/* Project-Scoped Routes */}
           <Route path="projects/:projectId" element={<ProjectLayout />}>
             <Route index element={<ProjectOverview />} />
+            <Route path="user-stories/:storyId" element={<UserStoryDetail />} />
             <Route path="user-stories" element={<UserStories />} />
             <Route path="requirements" element={<Requirements />} />
             <Route path="test-cases" element={<TestCases />} />

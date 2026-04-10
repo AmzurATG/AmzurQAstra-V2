@@ -19,6 +19,51 @@ export interface Requirement {
   updated_at: string
 }
 
+// Gap analysis (BRD vs user stories)
+export type GapAnalysisRunStatus = 'pending' | 'completed' | 'failed'
+
+export interface GapAnalysisGapItem {
+  type?: string
+  detail?: string
+  related_story_key?: string | null
+}
+
+export interface GapAnalysisSuggestedStory {
+  title: string
+  description?: string
+  acceptance_criteria?: string
+  rationale?: string
+}
+
+export interface GapAnalysisResultJson {
+  summary?: string
+  coverage_estimate_percent?: number | null
+  gaps?: GapAnalysisGapItem[]
+  suggested_user_stories?: GapAnalysisSuggestedStory[]
+  notes?: string
+  _export_warnings?: string[]
+}
+
+export interface GapAnalysisRun {
+  id: number
+  project_id: number
+  requirement_id: number
+  created_by?: number | null
+  status: GapAnalysisRunStatus
+  result_json?: GapAnalysisResultJson | null
+  error_message?: string | null
+  pdf_path?: string | null
+  requirement_title?: string | null
+  requirement_file_name?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AcceptGapSuggestionsResponse {
+  created: number
+  errors: string[]
+}
+
 // Test Case Types
 export type TestCasePriority = 'critical' | 'high' | 'medium' | 'low'
 export type TestCaseCategory = 'smoke' | 'regression' | 'e2e' | 'integration' | 'sanity'

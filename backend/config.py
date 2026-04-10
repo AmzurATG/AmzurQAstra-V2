@@ -116,6 +116,8 @@ class Settings(BaseSettings):
 
     UPLOAD_DIR: str = "./uploads"
     MAX_UPLOAD_SIZE_MB: int = 50
+    # Requirement document uploads (5 MiB); enforced in RequirementService
+    REQUIREMENT_UPLOAD_MAX_BYTES: int = 5 * 1024 * 1024
 
     # Logging (outside backend/ to prevent uvicorn restart)
     LOG_DIR: str = str(_BACKEND_DIR.parent / "logs")

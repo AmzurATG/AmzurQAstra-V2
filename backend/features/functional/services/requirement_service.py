@@ -5,9 +5,10 @@ from typing import List, Optional, Tuple, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile, status
 
 from common.api.pagination import PaginationParams
+from config import settings
 from features.functional.db.models.requirement import Requirement, RequirementSourceType
 from features.functional.schemas.requirement import RequirementCreate, RequirementUpdate
 from features.functional.core.document_parser import get_document_parser
@@ -101,14 +102,23 @@ class RequirementService:
         """Create a requirement from an uploaded document."""
         # Read file content
         file_content = await file.read()
+        max_b = settings.REQUIREMENT_UPLOAD_MAX_BYTES
+        n = len(file_content)
+        if n > max_b:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=(
+                    f"File size is {n:,} bytes; maximum allowed is {max_b:,} bytes (5 MiB)."
+                ),
+            )
         await file.seek(0)  # Reset for parsing
-        
-        # Save file using storage adapter
+
+        # storage/Requirements/{project_id}/ under STORAGE_LOCAL_PATH (../storage)
         storage_file = await self._storage.save(
             file_content=file_content,
             filename=file.filename or "document",
             content_type=file.content_type or "application/octet-stream",
-            subdirectory=f"requirements/{project_id}",
+            subdirectory=f"Requirements/{project_id}",
         )
         
         # Parse document
@@ -130,7 +140,33 @@ class RequirementService:
         await self.db.flush()
         await self.db.refresh(requirement)
         return requirement
-    
+
+    async def get_file_bytes(self, requirement_id: int) -> Tuple[bytes, str, str]:
+        """Return raw file bytes, original filename, and Content-Type for HTTP serving."""
+        requirement = await self.get_by_id(requirement_id)
+        if not requirement:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Requirement not found",
+            )
+        if not requirement.file_path:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No file is attached to this requirement",
+            )
+        path_key = requirement.file_path.replace("\\", "/")
+        raw = await self._storage.get(path_key)
+        if raw is None:
+            raw = await self._storage.get(requirement.file_path)
+        if raw is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found in storage",
+            )
+        filename = requirement.file_name or "document"
+        media = requirement.file_type or "application/octet-stream"
+        return raw, filename, media
+
     async def update(
         self, requirement_id: int, requirement_data: RequirementUpdate
     ) -> Optional[Requirement]:

@@ -11,6 +11,7 @@ from api.v1.functional.integrity_check import router as integrity_check_router
 from api.v1.functional.integrations import router as integrations_router
 from api.v1.functional.user_stories import router as user_stories_router
 from api.v1.functional.dashboard import router as dashboard_router
+from api.v1.functional.gap_analysis import router as gap_analysis_router
 
 
 router = APIRouter()
@@ -54,4 +55,9 @@ router.include_router(
     dashboard_router,
     prefix="/dashboard",
     tags=["Functional - Dashboard"],
+)
+router.include_router(
+    gap_analysis_router,
+    prefix="/gap-analysis",
+    tags=["Functional - Gap analysis"],
 )

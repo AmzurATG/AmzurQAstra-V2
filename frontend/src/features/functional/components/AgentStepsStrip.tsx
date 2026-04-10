@@ -46,7 +46,6 @@ function LazyAgentThumb({
               URL.revokeObjectURL(u)
               return
             }
-            created = u
             onLoaded(entry.agent_step, u)
           } catch {
             /* ignore */
