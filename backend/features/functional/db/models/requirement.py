@@ -27,15 +27,23 @@ class Requirement(BaseModel):
     title = Column(String(500), nullable=False)
     content = Column(Text, nullable=True)  # Parsed content
     
-    # Source information
-    source_type = Column(Enum(RequirementSourceType), default=RequirementSourceType.MANUAL)
+    # Source information (persist enum .value to match PostgreSQL requirementsourcetype)
+    source_type = Column(
+        Enum(
+            RequirementSourceType,
+            name="requirementsourcetype",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        default=RequirementSourceType.MANUAL,
+    )
     source_url = Column(String(1000), nullable=True)  # Jira link, file path, etc.
     source_id = Column(String(100), nullable=True)  # Jira issue key, etc.
     
     # File storage
     file_path = Column(String(500), nullable=True)
     file_name = Column(String(255), nullable=True)
-    file_type = Column(String(50), nullable=True)
+    file_type = Column(String(255), nullable=True)  # MIME types can exceed 50 chars (e.g. OOXML)
     
     # Relationships
     test_cases = relationship("TestCase", back_populates="requirement")

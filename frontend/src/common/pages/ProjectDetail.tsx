@@ -24,7 +24,6 @@ export default function ProjectDetail() {
   if (isLoading || !currentProject) return <PageLoader />
 
   const quickActions = [
-  const quickActions = [
     { name: 'Requirements', description: 'Upload and manage requirements', icon: DocumentTextIcon, href: `/projects/${projectId}/requirements` },
     { name: 'Test Cases', description: 'View and create test cases', icon: ClipboardDocumentListIcon, href: `/projects/${projectId}/test-cases` },
     { name: 'Test Runs', description: 'Run tests and view results', icon: PlayIcon, href: `/projects/${projectId}/test-runs` },

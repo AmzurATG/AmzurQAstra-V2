@@ -1,8 +1,12 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import { formatDistanceToNow } from 'date-fns'
 import { Card } from '@common/components/ui/Card'
-import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline'
+import { Loader } from '@common/components/ui/Loader'
+import { CheckCircleIcon, XCircleIcon, PauseCircleIcon } from '@heroicons/react/24/outline'
+import { getProjectIntegrations, type IntegrationResponse } from '@common/api/integrations'
 
-// Integration card data
+// Integration card data (routes use these ids — must match App.tsx paths)
 const integrations = [
   {
     id: 'jira',
@@ -56,16 +60,52 @@ const integrations = [
     features: ['Import pages', 'Parse requirements', 'Link documentation'],
     comingSoon: true,
   },
-]
+] as const
+
+/** Backend `integration_type` → card `id` (see IntegrationType enum). */
+const API_TYPE_TO_CARD_ID: Record<string, string> = {
+  jira: 'jira',
+  azure_devops: 'azure-devops',
+  redmine: 'redmine',
+  github: 'github',
+  slack: 'slack',
+  confluence: 'confluence',
+}
 
 export default function ProjectIntegrations() {
   const { projectId } = useParams<{ projectId: string }>()
+  const [rows, setRows] = useState<IntegrationResponse[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Mock configured integrations - replace with actual API call
-  const configuredIntegrations: Record<string, boolean> = {
-    jira: false,
-    'azure-devops': false,
-  }
+  const load = useCallback(async () => {
+    if (!projectId) return
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await getProjectIntegrations(Number(projectId))
+      setRows(Array.isArray(data) ? data : [])
+    } catch (e) {
+      console.error(e)
+      setError('Could not load integration status.')
+      setRows([])
+    } finally {
+      setLoading(false)
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const byCardId = useMemo(() => {
+    const m = new Map<string, IntegrationResponse>()
+    for (const r of rows) {
+      const cardId = API_TYPE_TO_CARD_ID[r.integration_type]
+      if (cardId) m.set(cardId, r)
+    }
+    return m
+  }, [rows])
 
   return (
     <div className="space-y-6">
@@ -76,11 +116,27 @@ export default function ProjectIntegrations() {
         </p>
       </div>
 
+      {error && (
+        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+          {error}{' '}
+          <button type="button" className="underline font-medium" onClick={() => load()}>
+            Retry
+          </button>
+        </p>
+      )}
+
       {/* Integration Cards Grid */}
+      {loading ? (
+        <div className="flex justify-center py-16">
+          <Loader size="lg" />
+        </div>
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {integrations.map((integration) => {
-          const isConfigured = configuredIntegrations[integration.id]
+          const remote = byCardId.get(integration.id)
           const isComingSoon = integration.comingSoon
+          const isConfigured = Boolean(remote)
+          const isActive = Boolean(remote?.is_enabled)
 
           return (
             <div key={integration.id} className="relative">
@@ -91,7 +147,7 @@ export default function ProjectIntegrations() {
                   </span>
                 </div>
               )}
-              
+
               <Card
                 className={`h-full transition-all ${
                   isComingSoon
@@ -106,13 +162,17 @@ export default function ProjectIntegrations() {
                   >
                     <IntegrationCardContent
                       integration={integration}
+                      remote={remote}
                       isConfigured={isConfigured}
+                      isActive={isActive}
                     />
                   </Link>
                 ) : (
                   <IntegrationCardContent
                     integration={integration}
+                    remote={undefined}
                     isConfigured={false}
+                    isActive={false}
                   />
                 )}
               </Card>
@@ -120,56 +180,75 @@ export default function ProjectIntegrations() {
           )
         })}
       </div>
+      )}
     </div>
   )
 }
 
 function IntegrationCardContent({
   integration,
+  remote,
   isConfigured,
+  isActive,
 }: {
-  integration: typeof integrations[0]
+  integration: (typeof integrations)[number]
+  remote: IntegrationResponse | undefined
   isConfigured: boolean
+  isActive: boolean
 }) {
   return (
     <>
-      {/* Header */}
       <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           <div
-            className={`w-12 h-12 ${integration.color} rounded-lg flex items-center justify-center text-2xl`}
+            className={`w-12 h-12 ${integration.color} rounded-lg flex items-center justify-center text-2xl shrink-0`}
           >
             {integration.logo}
           </div>
-          <div>
+          <div className="min-w-0">
             <h3 className="font-semibold text-gray-900">{integration.name}</h3>
             {isConfigured ? (
-              <span className="flex items-center gap-1 text-xs text-green-600">
-                <CheckCircleIcon className="w-3 h-3" />
-                Connected
-              </span>
+              isActive ? (
+                <span className="flex items-center gap-1 text-xs text-green-600">
+                  <CheckCircleIcon className="w-3 h-3 shrink-0" />
+                  Connected
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-xs text-amber-600">
+                  <PauseCircleIcon className="w-3 h-3 shrink-0" />
+                  Disabled
+                </span>
+              )
             ) : (
               <span className="flex items-center gap-1 text-xs text-gray-400">
-                <XCircleIcon className="w-3 h-3" />
+                <XCircleIcon className="w-3 h-3 shrink-0" />
                 Not configured
               </span>
+            )}
+            {remote?.last_sync_at && isActive && (
+              <p className="text-xs text-gray-500 mt-0.5 truncate" title={remote.last_sync_at}>
+                Last sync{' '}
+                {formatDistanceToNow(new Date(remote.last_sync_at), { addSuffix: true })}
+              </p>
             )}
           </div>
         </div>
       </div>
 
-      {/* Description */}
       <p className="text-sm text-gray-600 mb-4">{integration.description}</p>
 
-      {/* Features */}
       <div className="space-y-1">
         {integration.features.map((feature, idx) => (
           <div key={idx} className="flex items-center gap-2 text-sm text-gray-500">
-            <span className="w-1 h-1 bg-gray-400 rounded-full" />
+            <span className="w-1 h-1 bg-gray-400 rounded-full shrink-0" />
             {feature}
           </div>
         ))}
       </div>
+
+      {isConfigured && isActive && (
+        <p className="mt-4 text-xs font-medium text-primary-600">Open to manage →</p>
+      )}
     </>
   )
 }

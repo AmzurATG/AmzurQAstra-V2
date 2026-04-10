@@ -2,7 +2,10 @@
 Requirements Endpoints
 """
 from typing import List, Optional
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.db.database import get_db
@@ -20,7 +23,7 @@ from features.functional.services.requirement_service import RequirementService
 router = APIRouter()
 
 
-@router.get("/", response_model=PaginatedResponse[RequirementResponse])
+@router.get("", response_model=PaginatedResponse[RequirementResponse])
 async def list_requirements(
     project_id: int,
     pagination: PaginationParams = Depends(),
@@ -39,7 +42,7 @@ async def list_requirements(
     )
 
 
-@router.post("/", response_model=RequirementResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=RequirementResponse, status_code=status.HTTP_201_CREATED)
 async def create_requirement(
     requirement_data: RequirementCreate,
     current_user: User = Depends(get_current_active_user),
@@ -67,6 +70,23 @@ async def upload_requirement_document(
         file=file,
     )
     return requirement
+
+
+@router.get("/{requirement_id}/file")
+async def get_requirement_file(
+    requirement_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream the stored requirement file (for preview or download)."""
+    service = RequirementService(db)
+    data, filename, media_type = await service.get_file_bytes(requirement_id)
+    disposition = f"inline; filename*=UTF-8''{quote(filename)}"
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={"Content-Disposition": disposition},
+    )
 
 
 @router.get("/{requirement_id}", response_model=RequirementResponse)

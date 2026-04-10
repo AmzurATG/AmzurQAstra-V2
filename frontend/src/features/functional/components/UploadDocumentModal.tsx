@@ -1,9 +1,16 @@
 import { useState, useCallback, Fragment } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
-import { XMarkIcon, DocumentArrowUpIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
+import {
+  XMarkIcon,
+  DocumentArrowUpIcon,
+  CheckCircleIcon,
+  ServerIcon,
+  CloudIcon,
+} from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
 import { Input } from '@common/components/ui/Input'
 import { requirementsApi } from '../api'
+import { REQUIREMENT_UPLOAD_MAX_BYTES } from '../constants/requirementUpload'
 import toast from 'react-hot-toast'
 
 interface UploadDocumentModalProps {
@@ -14,7 +21,10 @@ interface UploadDocumentModalProps {
 }
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.md', '.txt']
-const MAX_FILE_SIZE_MB = 50
+
+function formatBytes(n: number): string {
+  return n.toLocaleString('en-US')
+}
 
 export default function UploadDocumentModal({
   isOpen,
@@ -41,17 +51,17 @@ export default function UploadDocumentModal({
     }
   }
 
-  const validateFile = (file: File): string | null => {
-    // Check extension
-    const ext = '.' + file.name.split('.').pop()?.toLowerCase()
+  const validateFile = (f: File): string | null => {
+    const ext = '.' + f.name.split('.').pop()?.toLowerCase()
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
       return `Invalid file type. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`
     }
 
-    // Check size
-    const sizeMB = file.size / (1024 * 1024)
-    if (sizeMB > MAX_FILE_SIZE_MB) {
-      return `File too large. Maximum size: ${MAX_FILE_SIZE_MB}MB`
+    if (f.size > REQUIREMENT_UPLOAD_MAX_BYTES) {
+      return (
+        `File size is ${formatBytes(f.size)} bytes; maximum allowed is ` +
+        `${formatBytes(REQUIREMENT_UPLOAD_MAX_BYTES)} bytes (5 MiB).`
+      )
     }
 
     return null
@@ -67,7 +77,6 @@ export default function UploadDocumentModal({
     setFile(selectedFile)
     setError(null)
 
-    // Auto-fill title from filename if empty
     if (!title) {
       const nameWithoutExt = selectedFile.name.replace(/\.[^/.]+$/, '')
       setTitle(nameWithoutExt)
@@ -122,14 +131,20 @@ export default function UploadDocumentModal({
       formData.append('project_id', projectId)
 
       await requirementsApi.upload(formData)
-      
+
       toast.success('Document uploaded successfully!')
       resetForm()
       onUploadComplete()
       onClose()
     } catch (err: any) {
       console.error('Upload failed:', err)
-      const message = err.response?.data?.detail || 'Failed to upload document'
+      const raw = err.response?.data?.detail
+      const message =
+        typeof raw === 'string'
+          ? raw
+          : Array.isArray(raw)
+            ? raw.map((x: { msg?: string }) => x.msg).filter(Boolean).join(' ')
+            : 'Failed to upload document'
       setError(message)
       toast.error(message)
     } finally {
@@ -140,7 +155,7 @@ export default function UploadDocumentModal({
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
   }
 
   return (
@@ -170,12 +185,12 @@ export default function UploadDocumentModal({
               leaveTo="opacity-0 scale-95"
             >
               <Dialog.Panel className="w-full max-w-lg transform overflow-hidden rounded-xl bg-white p-6 shadow-xl transition-all">
-                {/* Header */}
                 <div className="flex items-center justify-between mb-6">
                   <Dialog.Title className="text-lg font-semibold text-gray-900">
                     Upload Requirement Document
                   </Dialog.Title>
                   <button
+                    type="button"
                     onClick={handleClose}
                     disabled={isUploading}
                     className="text-gray-400 hover:text-gray-600 disabled:opacity-50"
@@ -184,9 +199,44 @@ export default function UploadDocumentModal({
                   </button>
                 </div>
 
-                {/* Content */}
                 <div className="space-y-4">
-                  {/* Title Input */}
+                  <div>
+                    <p className="block text-sm font-medium text-gray-700 mb-2">Storage destination</p>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      <div
+                        className="rounded-lg border-2 border-primary-500 bg-primary-50 p-3 text-left"
+                        role="status"
+                        aria-current="true"
+                      >
+                        <div className="flex items-center gap-2 text-primary-800">
+                          <ServerIcon className="h-5 w-5 shrink-0" />
+                          <span className="text-sm font-semibold">Local</span>
+                        </div>
+                        <p className="mt-1 text-xs text-primary-700">Upload from this device</p>
+                      </div>
+                      <div
+                        className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-left opacity-60"
+                        aria-disabled="true"
+                      >
+                        <div className="flex items-center gap-2 text-gray-600">
+                          <CloudIcon className="h-5 w-5 shrink-0" />
+                          <span className="text-sm font-medium">Amazon S3</span>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">Coming soon</p>
+                      </div>
+                      <div
+                        className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-left opacity-60"
+                        aria-disabled="true"
+                      >
+                        <div className="flex items-center gap-2 text-gray-600">
+                          <CloudIcon className="h-5 w-5 shrink-0" />
+                          <span className="text-sm font-medium">Supabase</span>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">Coming soon</p>
+                      </div>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Document Title
@@ -200,7 +250,6 @@ export default function UploadDocumentModal({
                     />
                   </div>
 
-                  {/* Drop Zone */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Document File
@@ -211,11 +260,12 @@ export default function UploadDocumentModal({
                       onDragLeave={handleDragLeave}
                       className={`
                         relative rounded-lg border-2 border-dashed p-6 text-center transition-colors
-                        ${isDragging 
-                          ? 'border-primary-500 bg-primary-50' 
-                          : file 
-                            ? 'border-green-300 bg-green-50' 
-                            : 'border-gray-300 hover:border-gray-400'
+                        ${
+                          isDragging
+                            ? 'border-primary-500 bg-primary-50'
+                            : file
+                              ? 'border-green-300 bg-green-50'
+                              : 'border-gray-300 hover:border-gray-400'
                         }
                         ${isUploading ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
                       `}
@@ -233,7 +283,7 @@ export default function UploadDocumentModal({
                           <CheckCircleIcon className="h-10 w-10 text-green-500 mb-2" />
                           <p className="text-sm font-medium text-gray-900">{file.name}</p>
                           <p className="text-xs text-gray-500 mt-1">
-                            {formatFileSize(file.size)}
+                            {formatFileSize(file.size)} ({formatBytes(file.size)} bytes)
                           </p>
                           <button
                             type="button"
@@ -250,25 +300,22 @@ export default function UploadDocumentModal({
                         <div className="flex flex-col items-center">
                           <DocumentArrowUpIcon className="h-10 w-10 text-gray-400 mb-2" />
                           <p className="text-sm text-gray-600">
-                            <span className="text-primary-600 font-medium">Click to upload</span>
-                            {' '}or drag and drop
+                            <span className="text-primary-600 font-medium">Click to upload</span>{' '}
+                            or drag and drop
                           </p>
                           <p className="text-xs text-gray-500 mt-1">
-                            PDF, Word, Markdown, or Text (max {MAX_FILE_SIZE_MB}MB)
+                            PDF, Word, Markdown, or Text — max {formatBytes(REQUIREMENT_UPLOAD_MAX_BYTES)}{' '}
+                            bytes (5 MiB)
                           </p>
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Error Message */}
                   {error && (
-                    <div className="bg-red-50 text-red-700 px-3 py-2 rounded-lg text-sm">
-                      {error}
-                    </div>
+                    <div className="bg-red-50 text-red-700 px-3 py-2 rounded-lg text-sm">{error}</div>
                   )}
 
-                  {/* Info */}
                   <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600">
                     <p className="font-medium mb-1">Supported formats:</p>
                     <ul className="list-disc list-inside space-y-0.5">
@@ -280,13 +327,8 @@ export default function UploadDocumentModal({
                   </div>
                 </div>
 
-                {/* Footer */}
                 <div className="flex justify-end gap-3 mt-6">
-                  <Button
-                    variant="outline"
-                    onClick={handleClose}
-                    disabled={isUploading}
-                  >
+                  <Button variant="outline" onClick={handleClose} disabled={isUploading}>
                     Cancel
                   </Button>
                   <Button

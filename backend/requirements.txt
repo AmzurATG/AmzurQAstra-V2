@@ -41,6 +41,9 @@ playwright>=1.40.0
 huggingface_hub==1.7.1
 tokenizers==0.22.2
 
+# PDF generation (gap analysis reports)
+fpdf2==2.8.2
+
 # Document Parsing
 pypdf2==3.0.1
 python-docx==1.2.0

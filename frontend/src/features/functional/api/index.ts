@@ -6,7 +6,6 @@ import type {
   TestRun,
   TestRunSummary,
   TestResult,
-  IntegrityCheckResult,
   UserStory,
   UserStoryStats,
   SyncRequest,
@@ -15,6 +14,9 @@ import type {
   ProjectIntegrationInfo,
   GenerateTestsRequest,
   GenerateTestsResponse,
+  DashboardOverview,
+  GapAnalysisRun,
+  AcceptGapSuggestionsResponse,
 } from '../types'
 
 export interface PaginatedResponse<T> {
@@ -27,15 +29,32 @@ export interface PaginatedResponse<T> {
   has_prev: boolean
 }
 
+// Dashboard (cross-project aggregates)
+export const dashboardApi = {
+  overview: async (): Promise<DashboardOverview> => {
+    const response = await apiClient.get<DashboardOverview>('/functional/dashboard/overview')
+    return response.data
+  },
+}
+
 // Requirements API
 export const requirementsApi = {
-  list: (projectId: string) =>
-    apiClient.get<{ items: Requirement[]; total: number }>(`/functional/requirements`, { 
-      params: { project_id: projectId } 
+  list: (
+    projectId: string,
+    params?: { page?: number; page_size?: number }
+  ) =>
+    apiClient.get<PaginatedResponse<Requirement>>(`/functional/requirements`, {
+      params: { project_id: projectId, ...params },
     }),
 
   get: (id: string) =>
     apiClient.get<Requirement>(`/functional/requirements/${id}`),
+
+  /** Binary file stream (auth via axios); use with responseType blob for preview/download. */
+  getFile: (id: string) =>
+    apiClient.get<Blob>(`/functional/requirements/${id}/file`, {
+      responseType: 'blob',
+    }),
 
   upload: (data: FormData) =>
     apiClient.post<Requirement>(`/functional/requirements/upload`, data, {
@@ -50,16 +69,48 @@ export const requirementsApi = {
   delete: (id: string) =>
     apiClient.delete(`/functional/requirements/${id}`),
 
-  generateTestCases: (requirementId: string) =>
-    apiClient.post<{ test_cases_created: number }>(
-      `/functional/requirements/${requirementId}/generate-test-cases`
-    ),
-
   importFromJira: (projectId: string, issueKey: string) =>
     apiClient.post<Requirement>(`/functional/requirements/import-jira`, {
       project_id: projectId,
       issue_key: issueKey,
     }),
+}
+
+export const gapAnalysisApi = {
+  createRun: (projectId: number, requirementId: number) =>
+    apiClient.post<GapAnalysisRun>(`/functional/gap-analysis/runs`, {
+      project_id: projectId,
+      requirement_id: requirementId,
+    }),
+
+  listRuns: (
+    projectId: string,
+    params?: { page?: number; page_size?: number }
+  ) =>
+    apiClient.get<PaginatedResponse<GapAnalysisRun>>(`/functional/gap-analysis/runs`, {
+      params: { project_id: projectId, ...params },
+    }),
+
+  getRun: (runId: number, projectId: string) =>
+    apiClient.get<GapAnalysisRun>(`/functional/gap-analysis/runs/${runId}`, {
+      params: { project_id: projectId },
+    }),
+
+  getPdf: (runId: number, projectId: string, download?: boolean) =>
+    apiClient.get<Blob>(`/functional/gap-analysis/runs/${runId}/pdf`, {
+      params: {
+        project_id: projectId,
+        ...(download ? { download: true } : {}),
+      },
+      responseType: 'blob',
+    }),
+
+  acceptSuggestions: (runId: number, projectId: string, indices: number[]) =>
+    apiClient.post<AcceptGapSuggestionsResponse>(
+      `/functional/gap-analysis/runs/${runId}/accept-suggestions`,
+      { indices },
+      { params: { project_id: projectId } }
+    ),
 }
 
 // Test Cases API  
@@ -175,8 +226,10 @@ export const integrityCheckApi = {
   getStatus: (runId: string) =>
     apiClient.get<import('../types').RunStatusResponse>(`/functional/integrity-check/${runId}/status`),
 
-  getHistory: (projectId: string) =>
-    apiClient.get<import('../types').RunStatusResponse[]>(`/functional/integrity-check/history/${projectId}`),
+  getHistory: (projectId: string, params?: { limit?: number }) =>
+    apiClient.get<Array<{ created_at?: string | null }>>(`/functional/integrity-check/history/${projectId}`, {
+      params,
+    }),
 
   getPreview: (projectId: number) =>
     apiClient.get<import('../types').IntegrityCheckPreview>(`/functional/integrity-check/preview/${projectId}`),
@@ -184,8 +237,16 @@ export const integrityCheckApi = {
 
 // User Stories API
 export const userStoriesApi = {
-  list: (projectId: number, params?: { status?: string; item_type?: string; search?: string }) =>
-    apiClient.get<PaginatedResponse<UserStory>>(`/functional/user-stories/${projectId}`, { params }),
+  list: (
+    projectId: number,
+    params?: {
+      status?: string
+      item_type?: string
+      search?: string
+      page?: number
+      page_size?: number
+    }
+  ) => apiClient.get<PaginatedResponse<UserStory>>(`/functional/user-stories/${projectId}`, { params }),
 
   get: (projectId: number, storyId: number) =>
     apiClient.get<UserStory>(`/functional/user-stories/${projectId}/${storyId}`),

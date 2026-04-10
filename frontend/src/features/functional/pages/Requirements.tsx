@@ -1,29 +1,49 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { Card } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
 import { Loader } from '@common/components/ui/Loader'
-import { 
-  DocumentTextIcon, 
-  ArrowUpTrayIcon, 
+import {
+  DocumentTextIcon,
+  ArrowUpTrayIcon,
   TrashIcon,
-  SparklesIcon,
-  ExclamationTriangleIcon 
+  DocumentMagnifyingGlassIcon,
+  ExclamationTriangleIcon,
+  EyeIcon,
+  ArrowDownTrayIcon,
 } from '@heroicons/react/24/outline'
-import { requirementsApi } from '../api'
-import { UploadDocumentModal } from '../components'
-import type { Requirement } from '../types'
+import { requirementsApi, gapAnalysisApi, userStoriesApi } from '../api'
+import { UploadDocumentModal, RequirementPreviewModal, GapAnalysisRunModal } from '../components'
+import type { Requirement, GapAnalysisRun } from '../types'
 import toast from 'react-hot-toast'
+
+function formatApiError(err: unknown): string {
+  const e = err as { response?: { data?: { detail?: unknown } } }
+  const detail = e.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join(' ')
+  }
+  return 'Request failed'
+}
 
 export default function Requirements() {
   const { projectId } = useParams<{ projectId: string }>()
-  
+
   const [requirements, setRequirements] = useState<Requirement[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
-  const [generatingId, setGeneratingId] = useState<string | null>(null)
+  const [gapAnalyzingId, setGapAnalyzingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [previewRequirement, setPreviewRequirement] = useState<Requirement | null>(null)
+  const [userStoryTotal, setUserStoryTotal] = useState<number | null>(null)
+  const [gapRuns, setGapRuns] = useState<GapAnalysisRun[]>([])
+  const [gapRunsLoading, setGapRunsLoading] = useState(false)
+  const [gapModal, setGapModal] = useState<{
+    runId: number
+    tab: 'summary' | 'pdf'
+  } | null>(null)
 
   const fetchRequirements = async () => {
     if (!projectId) return
@@ -33,29 +53,88 @@ export default function Requirements() {
     try {
       const response = await requirementsApi.list(projectId)
       setRequirements(response.data.items || [])
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to fetch requirements:', err)
-      setError('Failed to load requirements')
+      setError(formatApiError(err) || 'Failed to load requirements')
     } finally {
       setIsLoading(false)
     }
   }
 
+  const fetchGapRuns = useCallback(async () => {
+    if (!projectId) return
+    setGapRunsLoading(true)
+    try {
+      const res = await gapAnalysisApi.listRuns(projectId, { page: 1, page_size: 50 })
+      setGapRuns(res.data.items || [])
+    } catch (err) {
+      console.error('Failed to fetch gap analysis runs:', err)
+    } finally {
+      setGapRunsLoading(false)
+    }
+  }, [projectId])
+
   useEffect(() => {
     fetchRequirements()
   }, [projectId])
 
-  const handleGenerateTests = async (requirement: Requirement) => {
-    setGeneratingId(requirement.id)
+  useEffect(() => {
+    if (!projectId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const stats = await userStoriesApi.getStats(Number(projectId))
+        if (!cancelled) setUserStoryTotal(stats.data.total)
+      } catch {
+        if (!cancelled) setUserStoryTotal(0)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    fetchGapRuns()
+  }, [fetchGapRuns])
+
+  const handleGapAnalysis = async (requirement: Requirement) => {
+    if (!projectId) return
+    setGapAnalyzingId(requirement.id)
     try {
-      const response = await requirementsApi.generateTestCases(requirement.id)
-      toast.success(`Generated ${response.data.test_cases_created} test cases!`)
-      fetchRequirements()
-    } catch (err: any) {
-      console.error('Failed to generate tests:', err)
-      toast.error(err.response?.data?.detail || 'Failed to generate test cases')
+      const res = await gapAnalysisApi.createRun(Number(projectId), Number(requirement.id))
+      if (res.data.status === 'failed') {
+        toast.error(res.data.error_message || 'Gap analysis failed')
+      } else {
+        toast.success('Gap analysis completed')
+      }
+      await fetchGapRuns()
+      setGapModal({ runId: res.data.id, tab: 'summary' })
+    } catch (err: unknown) {
+      console.error('Gap analysis failed:', err)
+      toast.error(formatApiError(err) || 'Gap analysis failed')
     } finally {
-      setGeneratingId(null)
+      setGapAnalyzingId(null)
+    }
+  }
+
+  const handleDownloadGapPdf = async (run: GapAnalysisRun) => {
+    if (!projectId) return
+    try {
+      const response = await gapAnalysisApi.getPdf(run.id, projectId, true)
+      const url = URL.createObjectURL(response.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `gap-analysis-${run.id}.pdf`
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast.success('Download started')
+    } catch (e) {
+      console.error(e)
+      toast.error(formatApiError(e) || 'Download failed')
     }
   }
 
@@ -69,9 +148,9 @@ export default function Requirements() {
       await requirementsApi.delete(requirement.id)
       toast.success('Requirement deleted')
       fetchRequirements()
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to delete requirement:', err)
-      toast.error(err.response?.data?.detail || 'Failed to delete requirement')
+      toast.error(formatApiError(err) || 'Failed to delete requirement')
     } finally {
       setDeletingId(null)
     }
@@ -82,6 +161,13 @@ export default function Requirements() {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
+    })
+  }
+
+  const formatDateTime = (dateString: string) => {
+    return new Date(dateString).toLocaleString(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
     })
   }
 
@@ -96,6 +182,18 @@ export default function Requirements() {
       default:
         return 'bg-gray-100 text-gray-700'
     }
+  }
+
+  const rowActionBusy = gapAnalyzingId !== null || deletingId !== null
+
+  const requirementHasParsedContent = (req: Requirement) =>
+    !!(req.content && req.content.trim().length > 0)
+
+  const gapAnalysisDisabledFor = (req: Requirement) => {
+    if (!requirementHasParsedContent(req)) return true
+    if (userStoryTotal === null) return true
+    if (userStoryTotal === 0) return true
+    return false
   }
 
   return (
@@ -135,7 +233,7 @@ export default function Requirements() {
           <DocumentTextIcon className="w-12 h-12 mx-auto text-gray-400 mb-3" />
           <h3 className="text-lg font-medium text-gray-900 mb-1">No requirements yet</h3>
           <p className="text-gray-500 mb-4">
-            Upload a requirement document to get started with AI-powered test generation.
+            Upload a requirement document to get started with gap analysis and test generation.
           </p>
           <Button onClick={() => setIsUploadModalOpen(true)}>
             <ArrowUpTrayIcon className="w-4 h-4 mr-2" />
@@ -179,41 +277,56 @@ export default function Requirements() {
                       {req.source}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-gray-600">
-                    {req.test_cases_count} cases
-                  </td>
+                  <td className="px-6 py-4 text-gray-600">{req.test_cases_count} cases</td>
                   <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs rounded ${
-                      req.status === 'processed' 
-                        ? 'bg-green-100 text-green-700'
-                        : req.status === 'error'
-                        ? 'bg-red-100 text-red-700'
-                        : 'bg-yellow-100 text-yellow-700'
-                    }`}>
+                    <span
+                      className={`px-2 py-1 text-xs rounded ${
+                        req.status === 'processed'
+                          ? 'bg-green-100 text-green-700'
+                          : req.status === 'error'
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-yellow-100 text-yellow-700'
+                      }`}
+                    >
                       {req.status}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-gray-600 text-sm">
-                    {formatDate(req.created_at)}
-                  </td>
+                  <td className="px-6 py-4 text-gray-600 text-sm">{formatDate(req.created_at)}</td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <Button 
-                        variant="ghost" 
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Button
+                        variant="ghost"
                         size="sm"
-                        onClick={() => handleGenerateTests(req)}
-                        isLoading={generatingId === req.id}
-                        disabled={generatingId !== null || deletingId !== null}
+                        onClick={() => setPreviewRequirement(req)}
+                        disabled={rowActionBusy}
+                        title="Preview document"
                       >
-                        <SparklesIcon className="w-4 h-4 mr-1" />
-                        Generate
+                        <EyeIcon className="w-4 h-4 mr-1" />
+                        Preview
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleGapAnalysis(req)}
+                        isLoading={gapAnalyzingId === req.id}
+                        disabled={rowActionBusy || gapAnalysisDisabledFor(req)}
+                        title={
+                          !requirementHasParsedContent(req)
+                            ? 'Upload and process a document first'
+                            : userStoryTotal === 0
+                              ? 'Import or create user stories before running gap analysis'
+                              : 'Run gap analysis (BRD vs user stories)'
+                        }
+                      >
+                        <DocumentMagnifyingGlassIcon className="w-4 h-4 mr-1" />
+                        Gap analysis
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => handleDelete(req)}
                         isLoading={deletingId === req.id}
-                        disabled={generatingId !== null || deletingId !== null}
+                        disabled={rowActionBusy}
                         className="text-red-600 hover:text-red-700 hover:bg-red-50"
                       >
                         <TrashIcon className="w-4 h-4" />
@@ -227,12 +340,148 @@ export default function Requirements() {
         </Card>
       )}
 
+      {/* Gap analysis history */}
+      {!isLoading && !error && projectId && (
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Gap analysis reports</h2>
+              <p className="text-sm text-gray-500">
+                Compare requirement documents with user stories. Preview the PDF or accept suggested
+                stories into User Stories.
+              </p>
+            </div>
+          </div>
+          {gapRunsLoading ? (
+            <div className="flex justify-center py-8">
+              <Loader />
+            </div>
+          ) : gapRuns.length === 0 ? (
+            <p className="text-sm text-gray-500 text-center py-6">
+              No gap analysis runs yet. Use <strong>Gap analysis</strong> on a requirement row above.
+            </p>
+          ) : (
+            <div className="overflow-x-auto -mx-6 px-6">
+              <table className="w-full min-w-[640px]">
+                <thead className="bg-gray-50 border-y border-gray-200">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-12">
+                      S.No.
+                    </th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                      BRD / document
+                    </th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                      Run date
+                    </th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                      Status
+                    </th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {gapRuns.map((run, idx) => (
+                    <tr key={run.id} className="hover:bg-gray-50/80">
+                      <td className="px-4 py-3 text-sm text-gray-600">{idx + 1}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className="font-medium text-gray-900">
+                          {run.requirement_title || run.requirement_file_name || `Requirement #${run.requirement_id}`}
+                        </span>
+                        {run.requirement_file_name && run.requirement_title && (
+                          <p className="text-xs text-gray-500 truncate max-w-xs mt-0.5">
+                            {run.requirement_file_name}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">
+                        {formatDateTime(run.created_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`px-2 py-0.5 text-xs rounded ${
+                            run.status === 'completed'
+                              ? 'bg-green-100 text-green-800'
+                              : run.status === 'failed'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-yellow-100 text-yellow-800'
+                          }`}
+                        >
+                          {run.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1 flex-wrap">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setGapModal({ runId: run.id, tab: 'summary' })}
+                          >
+                            Details
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={!run.pdf_path}
+                            onClick={() => setGapModal({ runId: run.id, tab: 'pdf' })}
+                            title={run.pdf_path ? 'Preview PDF' : 'PDF not available'}
+                          >
+                            Preview PDF
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={!run.pdf_path}
+                            onClick={() => handleDownloadGapPdf(run)}
+                          >
+                            <ArrowDownTrayIcon className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* Upload Modal */}
       <UploadDocumentModal
         isOpen={isUploadModalOpen}
         onClose={() => setIsUploadModalOpen(false)}
         projectId={projectId || ''}
-        onUploadComplete={fetchRequirements}
+        onUploadComplete={() => {
+          fetchRequirements()
+          fetchGapRuns()
+        }}
+      />
+
+      <RequirementPreviewModal
+        isOpen={previewRequirement !== null}
+        onClose={() => setPreviewRequirement(null)}
+        requirement={previewRequirement}
+      />
+
+      <GapAnalysisRunModal
+        isOpen={gapModal !== null}
+        onClose={() => setGapModal(null)}
+        projectId={projectId || ''}
+        runId={gapModal?.runId ?? null}
+        initialTab={gapModal?.tab ?? 'summary'}
+        onAccepted={async () => {
+          await fetchGapRuns()
+          if (!projectId) return
+          try {
+            const stats = await userStoriesApi.getStats(Number(projectId))
+            setUserStoryTotal(stats.data.total)
+          } catch {
+            /* ignore */
+          }
+        }}
       />
     </div>
   )
