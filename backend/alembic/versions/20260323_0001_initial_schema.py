@@ -5,9 +5,12 @@ Revises:
 Create Date: 2026-03-23
 
 """
+import os
 from typing import Sequence, Union
 
+import bcrypt
 from alembic import op
+from dotenv import load_dotenv
 
 # revision identifiers, used by Alembic.
 revision: str = "0001"
@@ -317,19 +320,28 @@ def upgrade() -> None:
                 EXECUTE FUNCTION update_updated_at_column();
         """)
 
-    # Seed default admin user (password: admin123)
-    op.execute("""
+    # Seed default admin user from .env
+    from pathlib import Path
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+
+    admin_email = os.environ["ADMIN_EMAIL"]
+    admin_password = os.environ["ADMIN_PASSWORD"]
+    hashed = bcrypt.hashpw(admin_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+    op.execute(
+        f"""
         INSERT INTO users (email, hashed_password, full_name, role, is_active, is_superuser)
         VALUES (
-            'admin@qastra.dev',
-            '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.V4IjD2BxvQJOhK',
+            '{admin_email}',
+            '{hashed}',
             'QAstra Admin',
             'admin',
             TRUE,
             TRUE
         )
         ON CONFLICT (email) DO NOTHING;
-    """)
+        """
+    )
 
 
 def downgrade() -> None:

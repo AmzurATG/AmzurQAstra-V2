@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@common/store/authStore'
 import MainLayout from '@common/components/layout/MainLayout'
@@ -26,6 +27,19 @@ import NotFound from '@common/pages/NotFound'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const fetchUser = useAuthStore((state) => state.fetchUser)
+  const [isValidating, setIsValidating] = useState(true)
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchUser().finally(() => setIsValidating(false))
+    } else {
+      setIsValidating(false)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (isValidating) return null
+
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />
 }
 

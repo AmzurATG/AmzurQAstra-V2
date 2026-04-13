@@ -3,29 +3,36 @@ Utility script to reset admin password
 Run from backend folder: python reset_admin.py
 """
 import asyncio
+import sys
+from pathlib import Path
+
 import bcrypt
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-# Generate a fresh hash for 'admin123'
-password = "admin123"
-password_bytes = password.encode('utf-8')
-salt = bcrypt.gensalt()
-hashed = bcrypt.hashpw(password_bytes, salt).decode('utf-8')
+# Ensure the backend package is importable
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
-print(f"Generated hash for '{password}': {hashed}")
-
-# Verify it works
-print(f"Verification: {bcrypt.checkpw(password_bytes, hashed.encode('utf-8'))}")
 
 async def reset_admin():
-    # Get database URL from config
-    try:
-        from config import settings
-        db_url = settings.DATABASE_URL
-    except:
-        db_url = "postgresql+asyncpg://qastra:qastra123@localhost:5432/qastra"
-    
+    # Get config from backend/.env
+    from config import settings
+
+    db_url = settings.DATABASE_URL
+    if not db_url:
+        raise RuntimeError("DATABASE_URL is not set. Please configure it in backend/.env")
+
+    admin_email = settings.ADMIN_EMAIL
+    admin_password = settings.ADMIN_PASSWORD
+
+    # Generate password hash
+    password_bytes = admin_password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt).decode('utf-8')
+
+    print(f"Admin email: {admin_email}")
+    print(f"Password hash generated successfully")
+    print(f"Verification: {bcrypt.checkpw(password_bytes, hashed.encode('utf-8'))}")
     print(f"\nConnecting to: {db_url}")
     
     engine = create_async_engine(db_url)
@@ -44,7 +51,7 @@ async def reset_admin():
             await conn.execute(text("""
                 INSERT INTO users (email, hashed_password, full_name, role, is_active, is_superuser)
                 VALUES (:email, :hash, 'QAstra Admin', 'admin', true, true)
-            """), {"email": "admin@qastra.dev", "hash": hashed})
+            """), {"email": admin_email, "hash": hashed})
             print("Admin user created!")
         else:
             # Update first user's password
@@ -58,8 +65,8 @@ async def reset_admin():
     
     await engine.dispose()
     print(f"\n✓ Login with:")
-    print(f"  Email: {users[0][1] if users else 'admin@qastra.dev'}")
-    print(f"  Password: admin123")
+    print(f"  Email: {users[0][1] if users else admin_email}")
+    print(f"  Password: {admin_password}")
 
 if __name__ == "__main__":
     asyncio.run(reset_admin())

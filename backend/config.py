@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     # Requirement document uploads (5 MiB); enforced in RequirementService
     REQUIREMENT_UPLOAD_MAX_BYTES: int = 5 * 1024 * 1024
 
+    # Default Admin Account
+    ADMIN_EMAIL: str = "admin@qastra.dev"
+    ADMIN_PASSWORD: str = "admin123"
+
     # Logging (outside backend/ to prevent uvicorn restart)
     LOG_DIR: str = str(_BACKEND_DIR.parent / "logs")
     LOG_LEVEL: str = "INFO"
