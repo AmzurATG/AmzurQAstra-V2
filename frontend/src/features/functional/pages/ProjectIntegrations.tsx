@@ -6,8 +6,18 @@ import { Loader } from '@common/components/ui/Loader'
 import { CheckCircleIcon, XCircleIcon, PauseCircleIcon } from '@heroicons/react/24/outline'
 import { getProjectIntegrations, type IntegrationResponse } from '@common/api/integrations'
 
+interface IntegrationCard {
+  id: string
+  name: string
+  description: string
+  logo: string
+  color: string
+  features: readonly string[]
+  comingSoon?: boolean
+}
+
 // Integration card data (routes use these ids — must match App.tsx paths)
-const integrations = [
+const integrations: readonly IntegrationCard[] = [
   {
     id: 'jira',
     name: 'Jira',
@@ -60,7 +70,7 @@ const integrations = [
     features: ['Import pages', 'Parse requirements', 'Link documentation'],
     comingSoon: true,
   },
-] as const
+] as const satisfies readonly IntegrationCard[]
 
 /** Backend `integration_type` → card `id` (see IntegrationType enum). */
 const API_TYPE_TO_CARD_ID: Record<string, string> = {

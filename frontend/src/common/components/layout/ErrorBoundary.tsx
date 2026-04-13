@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react'
+import { Component, ErrorInfo, ReactNode } from 'react'
 import { Button } from '../ui/Button'
 
 interface Props {
@@ -50,7 +50,7 @@ export class ErrorBoundary extends Component<Props, State> {
               Try Again
             </Button>
           </div>
-          {process.env.NODE_ENV === 'development' && this.state.error && (
+          {import.meta.env.DEV && this.state.error && (
             <pre className="mt-8 p-4 bg-gray-100 rounded text-left text-xs overflow-auto max-w-full text-red-800 border border-red-200">
               {this.state.error.toString()}
             </pre>

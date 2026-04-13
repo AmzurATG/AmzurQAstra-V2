@@ -23,7 +23,7 @@ export default function IntegrityCheck() {
   const [password, setPassword] = useState('')
   const [useGoogleSignin, setUseGoogleSignin] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
-  const [runId, setRunId] = useState<string | null>(null)
+  const [_runId, setRunId] = useState<string | null>(null)
   const [progress, setProgress] = useState<RunStatusResponse | null>(null)
   const [result, setResult] = useState<RunStatusResponse | null>(null)
   const [preview, setPreview] = useState<IntegrityCheckPreview | null>(null)

@@ -5,12 +5,10 @@ import {
   PlayIcon, 
   PencilIcon, 
   TrashIcon, 
-  SparklesIcon,
   CheckCircleIcon,
   XCircleIcon,
   ClockIcon,
   ArrowPathIcon,
-  CpuChipIcon
 } from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
 import { Link } from 'react-router-dom'

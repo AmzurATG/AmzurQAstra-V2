@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Card } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
@@ -33,8 +33,8 @@ export default function TestCases() {
     setPriorityFilter,
     categoryFilter,
     setCategoryFilter,
-    statusFilter,
-    setStatusFilter,
+    statusFilter: _statusFilter,
+    setStatusFilter: _setStatusFilter,
     page,
     setPage,
     pagination,

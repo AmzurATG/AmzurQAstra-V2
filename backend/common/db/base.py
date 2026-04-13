@@ -3,8 +3,7 @@ SQLAlchemy Base Model
 """
 from datetime import datetime
 from sqlalchemy import Column, Integer, DateTime, func
-from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, declared_attr
 
 
 class Base(DeclarativeBase):

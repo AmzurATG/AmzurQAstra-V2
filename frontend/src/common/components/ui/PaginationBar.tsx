@@ -7,6 +7,9 @@ export type PaginationBarProps = {
   hasPrev: boolean
   hasNext: boolean
   onPageChange: (page: number) => void
+  totalItems?: number
+  pageSize?: number
+  itemLabel?: string
   className?: string
 }
 

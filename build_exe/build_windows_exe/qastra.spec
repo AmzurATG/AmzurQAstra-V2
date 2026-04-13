@@ -7,7 +7,8 @@ into a single QAstra.exe.
 block_cipher = None
 
 import os
-SPEC_DIR = os.path.dirname(os.path.abspath(SPECPATH if 'SPECPATH' in dir() else '__file__'))
+# SPECPATH is a PyInstaller built-in — the directory containing this .spec file
+SPEC_DIR = SPECPATH
 PROJECT_ROOT = os.path.normpath(os.path.join(SPEC_DIR, '..', '..'))
 
 a = Analysis(
@@ -17,6 +18,10 @@ a = Analysis(
     datas=[
         # Backend code + static React build + alembic migrations
         (os.path.join(PROJECT_ROOT, 'backend'), 'backend'),
+        # litellm needs its JSON data files (model cost maps, tokenizers, etc.)
+        (os.path.join(PROJECT_ROOT, 'backend', 'venv', 'Lib', 'site-packages', 'litellm'), 'litellm'),
+        # browser_use needs .md prompt templates in agent/system_prompts/
+        (os.path.join(PROJECT_ROOT, 'backend', 'venv', 'Lib', 'site-packages', 'browser_use'), 'browser_use'),
     ],
     hiddenimports=[
         # =====================================================================
@@ -44,10 +49,14 @@ a = Analysis(
         'fastapi.responses',
         'fastapi.middleware',
         'fastapi.middleware.cors',
+        'fastapi.security',
+        'fastapi.exceptions',
         'starlette',
         'starlette.staticfiles',
         'starlette.responses',
         'starlette.middleware',
+        'starlette.middleware.base',
+        'starlette.requests',
         'sse_starlette',
 
         # ── Pydantic ────────────────────────────────────────────
@@ -62,10 +71,13 @@ a = Analysis(
         # ── Database ────────────────────────────────────────────
         'sqlalchemy',
         'sqlalchemy.ext.asyncio',
+        'sqlalchemy.ext.declarative',
         'sqlalchemy.dialects.postgresql',
         'sqlalchemy.pool',
         'greenlet',
         'asyncpg',
+        'asyncpg.pgproto.pgproto',
+        'asyncpg.protocol.protocol',
         'psycopg2',
         'alembic',
         'alembic.config',
@@ -74,12 +86,22 @@ a = Analysis(
         # ── Auth & Security ─────────────────────────────────────
         'jose',
         'jose.jwt',
-        'python_jose',
         'passlib',
         'passlib.hash',
         'bcrypt',
         'cryptography',
+        'cryptography.fernet',
+        'cryptography.hazmat',
+        'cryptography.hazmat.primitives',
+        'cryptography.hazmat.primitives.ciphers',
+        'cryptography.hazmat.primitives.hashes',
+        'cryptography.hazmat.primitives.hmac',
+        'cryptography.hazmat.primitives.padding',
+        'cryptography.hazmat.primitives.kdf',
+        'cryptography.hazmat.backends',
+        'cryptography.hazmat.backends.openssl',
         'cffi',
+        '_cffi_backend',
         'pycparser',
         'multipart',
         'python_multipart',
@@ -87,7 +109,7 @@ a = Analysis(
         'rsa',
         'pyasn1',
         'pyasn1_modules',
-        'pyjwt',
+        'jwt',                    # PyJWT import name
         'pyotp',
         'oauthlib',
         'requests_oauthlib',
@@ -97,8 +119,7 @@ a = Analysis(
         'httpx_sse',
         'httpcore',
         'h11',
-        'httplib2',
-        'aiohttp',
+        'httplib2',        'pyparsing',        'aiohttp',
         'aiosignal',
         'aiohappyeyeballs',
         'multidict',
@@ -117,6 +138,8 @@ a = Analysis(
         'anthropic',
         'litellm',
         'tiktoken',
+        'tiktoken_ext',
+        'tiktoken_ext.openai_public',
         'tokenizers',
         'ollama',
         'groq',
@@ -130,7 +153,7 @@ a = Analysis(
         'anyio',
         'backoff',
         'docstring_parser',
-        'inquirerpy',
+        'InquirerPy',             # correct import name for inquirerpy
         'pfzy',
         'prompt_toolkit',
         'wcwidth',
@@ -143,12 +166,11 @@ a = Analysis(
         'google.api_core',
         'google.auth',
         'google.auth.transport',
-        'google.auth.oauthlib',
+        'google_auth_oauthlib',   # correct import name
         'google_auth_httplib2',
-        'googleapis_common_protos',
-        'google_api_python_client',
-        'proto',
-        'protobuf',
+        'google.api',             # googleapis-common-protos import name
+        'googleapiclient',        # google-api-python-client import name
+        'google.protobuf',        # protobuf import name
         'uritemplate',
 
         # ── Browser Automation ──────────────────────────────────
@@ -161,7 +183,8 @@ a = Analysis(
         'screeninfo',
 
         # ── Document Handling ───────────────────────────────────
-        'fpdf2',
+        'fpdf',                   # fpdf2 import name
+        'fpdf.enums',
         'reportlab',
         'PyPDF2',
         'pypdf',
@@ -171,18 +194,16 @@ a = Analysis(
         'markdown_it',
         'mdurl',
         'lxml',
-        'beautifulsoup4',
-        'bs4',
+        'bs4',                    # beautifulsoup4 import name
         'soupsieve',
         'defusedxml',
 
         # ── File I/O & Storage ─────────────────────────────────
         'aiofiles',
         'fsspec',
-        'pillow',
-        'PIL',
-        'fonttools',
-        'python_magic',
+        'PIL',                    # pillow import name
+        'fontTools',              # fonttools import name
+        'magic',                  # python-magic import name
         'filelock',
 
         # ── AWS / S3 ───────────────────────────────────────────
@@ -195,8 +216,7 @@ a = Analysis(
         'jmespath',
 
         # ── Jira Integration ───────────────────────────────────
-        'jira',
-        'portalocker',
+        'jira',        'jira.exceptions',        'portalocker',
 
         # ── Redis / Celery ─────────────────────────────────────
         'redis',
@@ -223,10 +243,9 @@ a = Analysis(
         'colorama',
 
         # ── Environment & Config ───────────────────────────────
-        'dotenv',
-        'python_dotenv',
+        'dotenv',                 # python-dotenv import name
         'email_validator',
-        'dnspython',
+        'dns',                    # dnspython import name
 
         # ── Template Engines ───────────────────────────────────
         'jinja2',
@@ -244,13 +263,13 @@ a = Analysis(
         'packaging',
         'six',
 
+        'proto',                  # proto-plus import name
         # ── Date / Time / UUID ─────────────────────────────────
         'dateutil',
         'tzdata',
-        'uuid7',
+        'uuid_extensions',        # uuid7 package import name
 
         # ── Windows-Specific ───────────────────────────────────
-        'pywin32',
         'win32api',
         'win32con',
         'pywintypes',
@@ -282,6 +301,6 @@ exe = EXE(
     debug=False,
     strip=False,
     upx=True,
-    console=False,       # No terminal window
-    icon='icon.ico',     # Optional — remove if no icon file exists
+    console=True,        # Temporarily True for debugging; set False for release
+    # icon='icon.ico',   # Uncomment when an icon file is added
 )

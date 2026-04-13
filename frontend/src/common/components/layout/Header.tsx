@@ -7,8 +7,6 @@ import {
   UserCircleIcon,
   ChevronDownIcon,
   ArrowRightOnRectangleIcon,
-  SignalIcon,
-  SignalSlashIcon
 } from '@heroicons/react/24/outline'
 
 export default function Header() {
