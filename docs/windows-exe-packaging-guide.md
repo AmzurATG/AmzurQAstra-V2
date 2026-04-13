@@ -414,6 +414,11 @@ a = Analysis(
         ('backend', 'backend'),
     ],
     hiddenimports=[
+        # =====================================================================
+        # Complete hidden imports list — derived from a clean venv install of
+        # backend/requirements.txt (170 packages, direct + transitive).
+        # =====================================================================
+
         # ── Uvicorn & ASGI ──────────────────────────────────────
         'uvicorn',
         'uvicorn.logging',
@@ -424,26 +429,37 @@ a = Analysis(
         'uvicorn.protocols.http.auto',
         'uvicorn.lifespan',
         'uvicorn.lifespan.on',
+        'watchfiles',             # uvicorn[standard] file watcher
+        'websockets',             # uvicorn[standard] websocket support
+        'httptools',              # uvicorn[standard] HTTP parser
 
         # ── FastAPI / Starlette ─────────────────────────────────
         'fastapi',
         'fastapi.staticfiles',
         'fastapi.responses',
+        'fastapi.middleware',
         'fastapi.middleware.cors',
         'starlette',
         'starlette.staticfiles',
         'starlette.responses',
         'starlette.middleware',
+        'sse_starlette',          # server-sent events (litellm dep)
 
         # ── Pydantic ────────────────────────────────────────────
         'pydantic',
+        'pydantic.fields',
+        'pydantic_core',
         'pydantic_settings',
+        'annotated_types',
+        'typing_extensions',
+        'typing_inspection',
 
         # ── Database ────────────────────────────────────────────
         'sqlalchemy',
         'sqlalchemy.ext.asyncio',
         'sqlalchemy.dialects.postgresql',
         'sqlalchemy.pool',
+        'greenlet',               # sqlalchemy async support
         'asyncpg',
         'psycopg2',
         'alembic',
@@ -453,15 +469,43 @@ a = Analysis(
         # ── Auth & Security ─────────────────────────────────────
         'jose',
         'jose.jwt',
+        'python_jose',
         'passlib',
         'passlib.hash',
         'bcrypt',
         'cryptography',
+        'cffi',                   # cryptography backend
+        'pycparser',              # cffi dependency
         'multipart',
+        'python_multipart',
+        'ecdsa',                  # python-jose[cryptography]
+        'rsa',                    # python-jose[cryptography]
+        'pyasn1',                 # rsa/ecdsa dependency
+        'pyasn1_modules',
+        'pyjwt',                  # transitive (jira, google-auth)
+        'pyotp',                  # transitive (jira)
+        'oauthlib',               # requests-oauthlib
+        'requests_oauthlib',
 
         # ── HTTP Clients ────────────────────────────────────────
         'httpx',
+        'httpx_sse',              # litellm streaming
+        'httpcore',               # httpx backend
+        'h11',                    # httpcore dependency
+        'httplib2',               # google-auth-httplib2
         'aiohttp',
+        'aiosignal',              # aiohttp dependency
+        'aiohappyeyeballs',       # aiohttp dependency
+        'multidict',              # aiohttp/yarl dependency
+        'yarl',                   # aiohttp dependency
+        'frozenlist',             # aiohttp dependency
+        'propcache',              # aiohttp dependency
+        'requests',               # jira, google-auth, posthog
+        'requests_toolbelt',      # jira dependency
+        'urllib3',
+        'certifi',
+        'charset_normalizer',
+        'idna',
 
         # ── LLM Integrations ───────────────────────────────────
         'openai',
@@ -469,32 +513,157 @@ a = Analysis(
         'litellm',
         'tiktoken',
         'tokenizers',
+        'ollama',                 # litellm transitive
+        'groq',                   # litellm transitive
+
+        # ── LiteLLM Ecosystem (transitive) ─────────────────────
+        'posthog',                # litellm analytics
+        'cloudpickle',            # litellm serialization
+        'jiter',                  # fast JSON (openai/anthropic)
+        'distro',                 # openai platform detection
+        'sniffio',                # anyio backend detection
+        'anyio',                  # async I/O abstraction
+        'backoff',                # retry logic (anthropic)
+        'docstring_parser',       # litellm internal
+        'inquirerpy',             # litellm CLI
+        'pfzy',                   # inquirerpy dependency
+        'prompt_toolkit',         # inquirerpy dependency
+        'wcwidth',                # prompt_toolkit dependency
+
+        # ── MCP (Model Context Protocol) ───────────────────────
+        'mcp',                    # browser-use -> mcp
+
+        # ── Google / Gemini (litellm transitive) ───────────────
+        'google.genai',
+        'google.api_core',
+        'google.auth',
+        'google.auth.transport',
+        'google.auth.oauthlib',
+        'google_auth_httplib2',
+        'googleapis_common_protos',
+        'google_api_python_client',
+        'proto',                  # proto-plus
+        'protobuf',
+        'uritemplate',            # google-api-python-client
 
         # ── Browser Automation ──────────────────────────────────
         'browser_use',
+        'browser_use_sdk',        # browser-use transitive
+        'cdp_use',                # browser-use transitive (CDP protocol)
+        'bubus',                  # browser-use transitive
         'playwright',
+        'pyee',                   # playwright dependency
+        'screeninfo',             # browser-use screen detection
 
         # ── Document Handling ───────────────────────────────────
         'fpdf2',
+        'reportlab',              # PDF generation (transitive)
         'PyPDF2',
-        'docx',
+        'pypdf',                  # pypdf2 uses pypdf internally
+        'docx',                   # python-docx
         'markdown',
+        'markdownify',            # browser-use HTML→Markdown
+        'markdown_it',            # markdown-it-py (rich dependency)
+        'mdurl',                  # markdown-it-py dependency
+        'lxml',                   # HTML/XML parsing (jira, beautifulsoup4)
+        'beautifulsoup4',         # browser-use HTML parsing
+        'bs4',                    # beautifulsoup4 import alias
+        'soupsieve',              # beautifulsoup4 CSS selectors
+        'defusedxml',             # safe XML parsing (jira, python-docx)
 
-        # ── File I/O ───────────────────────────────────────────
+        # ── File I/O & Storage ─────────────────────────────────
         'aiofiles',
+        'fsspec',                 # filesystem abstraction (huggingface_hub)
+        'pillow',                 # image handling
+        'PIL',                    # pillow import alias
+        'fonttools',              # reportlab/pillow dependency
+        'python_magic',           # file type detection
+        'filelock',               # huggingface_hub file locking
 
-        # ── Environment ────────────────────────────────────────
-        'dotenv',
+        # ── AWS / S3 (aioboto3) ────────────────────────────────
+        'aioboto3',
+        'aiobotocore',
+        'aioitertools',           # aiobotocore dependency
+        'boto3',
+        'botocore',
+        's3transfer',
+        'jmespath',               # boto3/botocore JSON query
 
-        # ── Email Validation ───────────────────────────────────
-        'email_validator',
+        # ── Jira Integration ───────────────────────────────────
+        'jira',
+        'portalocker',            # jira file locking
 
-        # ── Redis / Celery (optional) ──────────────────────────
+        # ── Redis / Celery ─────────────────────────────────────
         'redis',
         'celery',
+        'kombu',                  # celery messaging
+        'amqp',                   # kombu AMQP backend
+        'vine',                   # celery/kombu promises
+        'billiard',               # celery multiprocessing
+        'click',                  # celery CLI
+        'click_didyoumean',       # celery CLI extras
+        'click_plugins',
+        'click_repl',
 
-        # ── HuggingFace (optional) ─────────────────────────────
+        # ── HuggingFace ────────────────────────────────────────
         'huggingface_hub',
+        'hf_xet',                 # huggingface_hub storage backend
+        'tqdm',                   # progress bars (huggingface_hub)
+
+        # ── CLI & Output ───────────────────────────────────────
+        'typer',
+        'rich',
+        'pygments',               # rich syntax highlighting
+        'shellingham',            # typer shell detection
+        'colorama',               # Windows terminal colors
+
+        # ── Environment & Config ───────────────────────────────
+        'dotenv',
+        'python_dotenv',
+        'email_validator',
+        'dnspython',              # email-validator dependency
+
+        # ── Template Engines ───────────────────────────────────
+        'jinja2',                 # alembic template engine
+        'markupsafe',             # jinja2 dependency
+        'mako',                   # alembic template engine
+
+        # ── Validation & Serialization ─────────────────────────
+        'jsonschema',
+        'jsonschema_specifications',
+        'referencing',            # jsonschema dependency
+        'rpds',                   # referencing dependency (rpds-py)
+        'regex',
+        'yaml',                   # PyYAML import name
+        'tenacity',
+        'packaging',              # version parsing
+        'six',                    # Python 2/3 compat (various deps)
+
+        # ── Date / Time / UUID ─────────────────────────────────
+        'dateutil',               # python-dateutil
+        'tzdata',                 # timezone data
+        'uuid7',                  # UUID v7 generation
+
+        # ── Testing (exclude from production if desired) ───────
+        'pytest',
+        'pytest_asyncio',
+        'pluggy',                 # pytest dependency
+        'iniconfig',              # pytest dependency
+
+        # ── Windows-Specific ───────────────────────────────────
+        'pywin32',
+        'win32api',               # pywin32 submodule
+        'win32con',
+        'pywintypes',
+
+        # ── Misc Transitive ────────────────────────────────────
+        'importlib_metadata',     # importlib-metadata
+        'zipp',                   # importlib-metadata dependency
+        'fastuuid',               # fast UUID (starlette)
+        'annotated_doc',          # annotation docs
+        'psutil',                 # process utils (various deps)
+        'attrs',                  # attrs (various deps)
+        'wrapt',                  # decorator utils
     ],
     hookspath=[],
     runtime_hooks=[],
