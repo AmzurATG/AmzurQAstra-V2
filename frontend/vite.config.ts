@@ -11,6 +11,10 @@ export default defineConfig({
       '@features': path.resolve(__dirname, './src/features'),
     },
   },
+  build: {
+    outDir: '../backend/static',
+    emptyOutDir: true,
+  },
   server: {
     port: 5173,
     proxy: {

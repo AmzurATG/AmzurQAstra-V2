@@ -1,8 +1,13 @@
 """
 Application settings loaded from environment / backend/.env.
+
+Frozen-aware: when running as a PyInstaller exe, paths resolve
+relative to sys.executable (where the .env and runtime data live)
+instead of __file__ (which points to the temp _MEIPASS folder).
 """
 from __future__ import annotations
 
+import sys
 import json
 from pathlib import Path
 from typing import Any, List, Optional
@@ -10,12 +15,39 @@ from typing import Any, List, Optional
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Code/data root: inside _MEIPASS when frozen, backend/ dir in dev.
 _BACKEND_DIR = Path(__file__).resolve().parent
+
+
+def _resolve_env_file() -> str:
+    """
+    Resolve .env location:
+    - Frozen exe: .env sits next to QAstra.exe (sys.executable's parent)
+    - Dev mode:   .env sits inside backend/
+    """
+    if getattr(sys, 'frozen', False):
+        return str(Path(sys.executable).parent / ".env")
+    return str(_BACKEND_DIR / ".env")
+
+
+def _resolve_app_root() -> Path:
+    """
+    Resolve the application root directory for runtime data
+    (logs, screenshots, storage, uploads).
+    - Frozen exe: the folder containing QAstra.exe
+    - Dev mode:   the project root (parent of backend/)
+    """
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent
+    return _BACKEND_DIR.parent
+
+
+_APP_ROOT = _resolve_app_root()
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=str(_BACKEND_DIR / ".env"),
+        env_file=_resolve_env_file(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -92,7 +124,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None  # only when BROWSER_USE_LLM_BACKEND=google
     BROWSER_USE_DEFAULT_EXTENSIONS: bool = True
     # Outside backend/ to prevent uvicorn --reload restarts when screenshots are written.
-    SCREENSHOTS_DIR: str = str(_BACKEND_DIR.parent / "screenshots")
+    SCREENSHOTS_DIR: str = str(_APP_ROOT / "screenshots")
 
     # MCP (optional)
     MCP_SERVER_URL: str = "http://localhost:3001"
@@ -102,7 +134,7 @@ class Settings(BaseSettings):
 
     # Storage
     STORAGE_TYPE: str = "local"
-    STORAGE_LOCAL_PATH: str = "../storage"
+    STORAGE_LOCAL_PATH: str = str(_APP_ROOT / "storage")
     STORAGE_S3_BUCKET: Optional[str] = None
     STORAGE_S3_REGION: Optional[str] = None
     STORAGE_S3_ACCESS_KEY: Optional[str] = None
@@ -114,7 +146,7 @@ class Settings(BaseSettings):
     STORAGE_SUPABASE_BUCKET: Optional[str] = None
     STORAGE_SUPABASE_PREFIX: Optional[str] = None
 
-    UPLOAD_DIR: str = "./uploads"
+    UPLOAD_DIR: str = str(_APP_ROOT / "uploads")
     MAX_UPLOAD_SIZE_MB: int = 50
     # Requirement document uploads (5 MiB); enforced in RequirementService
     REQUIREMENT_UPLOAD_MAX_BYTES: int = 5 * 1024 * 1024
@@ -124,7 +156,7 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "admin123"
 
     # Logging (outside backend/ to prevent uvicorn restart)
-    LOG_DIR: str = str(_BACKEND_DIR.parent / "logs")
+    LOG_DIR: str = str(_APP_ROOT / "logs")
     LOG_LEVEL: str = "INFO"
     LOG_MAX_BYTES: int = 10_485_760
     LOG_BACKUP_COUNT: int = 5

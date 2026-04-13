@@ -15,6 +15,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
@@ -88,8 +89,22 @@ def create_application() -> FastAPI:
     screenshots_path.mkdir(parents=True, exist_ok=True)
     app.mount("/screenshots", StaticFiles(directory=str(screenshots_path)), name="screenshots")
 
-    # Register global exception handlers (must be last so all routes are already registered)
+    # Register global exception handlers
     register_exception_handlers(app)
+
+    # ── Serve React static build (production / exe mode) ────────────────
+    # In dev, Vite serves the frontend on :5173 and proxies /api to :8000.
+    # In production (exe), the React build lives in backend/static/.
+    _static_dir = Path(__file__).resolve().parent / "static"
+    if _static_dir.is_dir():
+        _assets_dir = _static_dir / "assets"
+        if _assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="frontend-assets")
+
+        # Catch-all: serve index.html for any route not matched above (React Router)
+        @app.get("/{full_path:path}")
+        async def serve_frontend(full_path: str):
+            return FileResponse(str(_static_dir / "index.html"))
 
     return app
 
