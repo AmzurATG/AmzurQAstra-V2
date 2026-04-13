@@ -21,8 +21,6 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / "backend" / ".env")
 
 DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = int(os.getenv("DB_PORT"))
 
@@ -36,10 +34,12 @@ def get_credentials() -> tuple[str, str]:
     print(f"This will DROP all objects in the '{DB_NAME}' database.")
     print("You need PostgreSQL superuser credentials.")
     print()
+    
     username = input("PostgreSQL superuser username: ").strip()
     if not username:
         print("Error: Username cannot be empty.")
         sys.exit(1)
+
     password = getpass.getpass("PostgreSQL superuser password: ")
     return username, password
 
