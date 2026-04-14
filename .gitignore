@@ -16,6 +16,7 @@ build/
 *.egg-info/
 *.exe
 *.spec.bak
+backend/static/
 
 # IDE
 .vscode/

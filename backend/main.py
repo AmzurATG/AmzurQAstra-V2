@@ -95,16 +95,18 @@ def create_application() -> FastAPI:
     # ── Serve React static build (production / exe mode) ────────────────
     # In dev, Vite serves the frontend on :5173 and proxies /api to :8000.
     # In production (exe), the React build lives in backend/static/.
-    _static_dir = Path(__file__).resolve().parent / "static"
-    if _static_dir.is_dir():
-        _assets_dir = _static_dir / "assets"
-        if _assets_dir.is_dir():
-            app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="frontend-assets")
+    # Only activate when running as a frozen PyInstaller exe.
+    if getattr(sys, 'frozen', False):
+        _static_dir = Path(__file__).resolve().parent / "static"
+        if _static_dir.is_dir():
+            _assets_dir = _static_dir / "assets"
+            if _assets_dir.is_dir():
+                app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="frontend-assets")
 
-        # Catch-all: serve index.html for any route not matched above (React Router)
-        @app.get("/{full_path:path}")
-        async def serve_frontend(full_path: str):
-            return FileResponse(str(_static_dir / "index.html"))
+            # Catch-all: serve index.html for any route not matched above (React Router)
+            @app.get("/{full_path:path}")
+            async def serve_frontend(full_path: str):
+                return FileResponse(str(_static_dir / "index.html"))
 
     return app
 
