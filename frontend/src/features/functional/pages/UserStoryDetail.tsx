@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeftIcon, PencilIcon, SparklesIcon, TrashIcon, ShieldCheckIcon } from '@heroicons/react/24/outline'
+import {
+  ArrowLeftIcon,
+  PencilIcon,
+  SparklesIcon,
+  TrashIcon,
+  ShieldCheckIcon,
+} from '@heroicons/react/24/outline'
 import { Card, CardTitle } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
 import { PageLoader } from '@common/components/ui/Loader'
 import { userStoriesApi } from '../api'
 import type { UserStory } from '../types'
 import { UserStoryEditModal } from '../components/userStories/UserStoryEditModal'
+import { TestGenerationInfoDialog } from '../components/userStories/TestGenerationInfoDialog'
+import { RegenerateTestsDialog } from '../components/userStories/RegenerateTestsDialog'
+import { useUserStoryTestGeneration } from '../hooks/useUserStoryTestGeneration'
 import { itemTypeConfig, priorityConfig, sourceConfig, statusConfig } from '../constants/userStoryUi'
 import toast from 'react-hot-toast'
 
@@ -19,8 +28,8 @@ export default function UserStoryDetail() {
   const [story, setStory] = useState<UserStory | null>(null)
   const [loading, setLoading] = useState(true)
   const [editOpen, setEditOpen] = useState(false)
-  const [generating, setGenerating] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [regenerateOpen, setRegenerateOpen] = useState(false)
 
   const loadStory = useCallback(async () => {
     if (!projectId || !storyId || Number.isNaN(sid)) return
@@ -40,26 +49,23 @@ export default function UserStoryDetail() {
     loadStory()
   }, [loadStory])
 
-  const handleGenerateTests = async () => {
+  const {
+    generatingStoryId,
+    runGenerate,
+    infoDialogOpen,
+    infoMessage,
+    closeInfoDialog,
+  } = useUserStoryTestGeneration(projectId ? Number(projectId) : undefined, {
+    onSuccess: loadStory,
+  })
+
+  const generatedCount = story?.generated_test_cases ?? 0
+  const hasGeneratedTests = generatedCount > 0
+  const isGenerating = story !== null && generatingStoryId === story.id
+
+  const handleGenerateTests = () => {
     if (!story) return
-    setGenerating(true)
-    try {
-      const response = await userStoriesApi.generateTests(pid, story.id, { include_steps: true })
-      if (response.data.success) {
-        toast.success(`Generated ${response.data.test_cases_created} test case(s)`)
-        loadStory()
-      } else {
-        toast.error(response.data.error || 'Failed to generate tests')
-      }
-    } catch (error: unknown) {
-      const message =
-        error && typeof error === 'object' && 'response' in error
-          ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : undefined
-      toast.error(message || 'Failed to generate tests')
-    } finally {
-      setGenerating(false)
-    }
+    void runGenerate(story.id, false)
   }
 
   const handleDelete = async () => {
@@ -128,10 +134,27 @@ export default function UserStoryDetail() {
             <PencilIcon className="mr-1.5 h-4 w-4" />
             Edit
           </Button>
-          <Button variant="outline" onClick={handleGenerateTests} disabled={generating} isLoading={generating}>
-            <SparklesIcon className="mr-1.5 h-4 w-4" />
-            Generate tests
-          </Button>
+          {!hasGeneratedTests ? (
+            <Button
+              variant="outline"
+              onClick={handleGenerateTests}
+              disabled={isGenerating}
+              isLoading={isGenerating}
+            >
+              <SparklesIcon className="mr-1.5 h-4 w-4" />
+              Generate tests
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={() => setRegenerateOpen(true)}
+              disabled={isGenerating}
+              isLoading={isGenerating}
+            >
+              <SparklesIcon className="mr-1.5 h-4 w-4" />
+              Regenerate tests
+            </Button>
+          )}
           <Button variant="danger" onClick={handleDelete} disabled={deleting} isLoading={deleting}>
             <TrashIcon className="mr-1.5 h-4 w-4" />
             Delete
@@ -194,6 +217,23 @@ export default function UserStoryDetail() {
         onClose={() => setEditOpen(false)}
         story={story}
         onSaved={loadStory}
+      />
+
+      <TestGenerationInfoDialog
+        isOpen={infoDialogOpen}
+        message={infoMessage}
+        onClose={closeInfoDialog}
+      />
+
+      <RegenerateTestsDialog
+        isOpen={regenerateOpen}
+        storyLabel={story.external_key || `Story #${story.id}`}
+        isLoading={isGenerating}
+        onClose={() => setRegenerateOpen(false)}
+        onConfirm={async () => {
+          await runGenerate(story.id, true)
+          setRegenerateOpen(false)
+        }}
       />
     </div>
   )

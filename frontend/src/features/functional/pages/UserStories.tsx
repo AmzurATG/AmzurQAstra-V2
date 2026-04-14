@@ -13,9 +13,13 @@ import {
 import { SyncFromIntegrationModal } from '../components'
 import { UserStoryCreateModal } from '../components/userStories/UserStoryCreateModal'
 import { UserStoryListRow } from '../components/userStories/UserStoryListRow'
+import { TestGenerationInfoDialog } from '../components/userStories/TestGenerationInfoDialog'
+import { RegenerateTestsDialog } from '../components/userStories/RegenerateTestsDialog'
+import { useUserStoryTestGeneration } from '../hooks/useUserStoryTestGeneration'
+import { usePmQuickSync } from '../hooks/usePmQuickSync'
 import { userStoriesApi } from '../api'
 import type { UserStory, UserStoryStats } from '../types'
-import { DEFAULT_SYNC_ISSUE_TYPES, USER_STORIES_PAGE_SIZE } from '../constants/userStoryUi'
+import { USER_STORIES_PAGE_SIZE } from '../constants/userStoryUi'
 import toast from 'react-hot-toast'
 
 export default function UserStories() {
@@ -40,9 +44,11 @@ export default function UserStories() {
   })
   const [isLoading, setIsLoading] = useState(true)
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
-  const [isQuickSyncing, setIsQuickSyncing] = useState(false)
-  const [generatingStoryId, setGeneratingStoryId] = useState<number | null>(null)
   const [deletingStoryId, setDeletingStoryId] = useState<number | null>(null)
+  const [regenerateTarget, setRegenerateTarget] = useState<{
+    id: number
+    key: string | null
+  } | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
 
   const loadStats = useCallback(async () => {
@@ -105,79 +111,38 @@ export default function UserStories() {
     if (projectId) loadStories()
   }, [projectId, loadStories])
 
+  const onTestGenerationSuccess = useCallback(() => {
+    loadStories()
+    loadStats()
+  }, [loadStories, loadStats])
+
+  const {
+    generatingStoryId,
+    runGenerate,
+    infoDialogOpen,
+    infoMessage,
+    closeInfoDialog,
+  } = useUserStoryTestGeneration(projectId ? Number(projectId) : undefined, {
+    onSuccess: onTestGenerationSuccess,
+  })
+
   const handleSearch = () => setDebouncedSearch(searchQuery.trim())
 
   const hasListFilters = statusFilter !== 'all' || debouncedSearch.length > 0
 
-  const handleSyncComplete = () => {
+  const handleSyncComplete = useCallback(() => {
     loadStories()
     loadStats()
+  }, [loadStories, loadStats])
+
+  const { isQuickSyncing, syncNow: handleSyncNow } = usePmQuickSync(projectId, handleSyncComplete)
+
+  const handleGenerateTests = (storyId: number, _storyKey: string | null) => {
+    void runGenerate(storyId, false)
   }
 
-  const handleSyncNow = async () => {
-    if (!projectId) return
-    setIsQuickSyncing(true)
-    try {
-      const integrationsRes = await userStoriesApi.getIntegrations(Number(projectId))
-      const pmIntegrations = integrationsRes.data.filter(
-        (i) => i.is_enabled && ['jira', 'redmine', 'azure_devops'].includes(i.integration_type)
-      )
-      if (pmIntegrations.length === 0) {
-        toast.error('No project management integration connected. Add one under Integrations.')
-        return
-      }
-      const integration = pmIntegrations[0]
-      const syncResponse = await userStoriesApi.sync(Number(projectId), {
-        integration_type: integration.integration_type,
-        issue_types: [...DEFAULT_SYNC_ISSUE_TYPES],
-        force_full_sync: false,
-      })
-      if (syncResponse.data.status === 'success') {
-        const n = syncResponse.data.items_synced
-        if (n === 0) {
-          toast.success('Already up to date — no new or changed issues.')
-        } else {
-          toast.success(`Synced ${n} item${n === 1 ? '' : 's'}.`)
-        }
-        handleSyncComplete()
-      } else {
-        toast.error(syncResponse.data.message || 'Sync completed with errors')
-      }
-    } catch (error: unknown) {
-      const message =
-        error && typeof error === 'object' && 'response' in error
-          ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : undefined
-      toast.error(message || 'Failed to sync')
-    } finally {
-      setIsQuickSyncing(false)
-    }
-  }
-
-  const handleGenerateTests = async (storyId: number, storyKey: string | null) => {
-    setGeneratingStoryId(storyId)
-    try {
-      const response = await userStoriesApi.generateTests(Number(projectId), storyId, {
-        include_steps: true,
-      })
-
-      if (response.data.success) {
-        toast.success(
-          `Generated ${response.data.test_cases_created} test case(s) for ${storyKey || `Story #${storyId}`}`
-        )
-        loadStories()
-      } else {
-        toast.error(response.data.error || 'Failed to generate tests')
-      }
-    } catch (error: unknown) {
-      const message =
-        error && typeof error === 'object' && 'response' in error
-          ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : undefined
-      toast.error(message || 'Failed to generate tests')
-    } finally {
-      setGeneratingStoryId(null)
-    }
+  const handleRegenerateClick = (storyId: number, _key: string | null) => {
+    setRegenerateTarget({ id: storyId, key: _key })
   }
 
   const handleDeleteStory = async (storyId: number, storyKey: string | null) => {
@@ -338,6 +303,7 @@ export default function UserStories() {
                 generatingStoryId={generatingStoryId}
                 deletingStoryId={deletingStoryId}
                 onGenerateTests={handleGenerateTests}
+                onRegenerateClick={handleRegenerateClick}
                 onDelete={handleDeleteStory}
               />
             ))}
@@ -375,6 +341,31 @@ export default function UserStories() {
         onCreated={() => {
           loadStories()
           loadStats()
+        }}
+      />
+
+      <TestGenerationInfoDialog
+        isOpen={infoDialogOpen}
+        message={infoMessage}
+        onClose={closeInfoDialog}
+      />
+
+      <RegenerateTestsDialog
+        isOpen={regenerateTarget !== null}
+        storyLabel={
+          regenerateTarget
+            ? regenerateTarget.key || `Story #${regenerateTarget.id}`
+            : ''
+        }
+        isLoading={
+          regenerateTarget !== null && generatingStoryId === regenerateTarget.id
+        }
+        onClose={() => setRegenerateTarget(null)}
+        onConfirm={async () => {
+          if (!regenerateTarget) return
+          const t = regenerateTarget
+          await runGenerate(t.id, true)
+          setRegenerateTarget(null)
         }}
       />
     </div>
