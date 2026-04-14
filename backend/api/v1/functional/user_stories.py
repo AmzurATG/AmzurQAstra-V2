@@ -107,6 +107,8 @@ class SyncRequest(BaseModel):
     sprint_id: Optional[int] = None  # Filter by sprint (None = all sprints)
     issue_types: Optional[List[str]] = None
     updated_since: Optional[datetime] = None
+    # When True: ignore last_sync_at / cursor and fetch all matching remote issues
+    force_full_sync: bool = False
 
 
 class SyncResponse(BaseModel):
@@ -586,8 +588,10 @@ async def sync_user_stories(
                 detail="No project key specified in integration config or request"
             )
 
-        # Effective incremental cursor: server uses DB last_sync_at when client omits updated_since
-        if data.updated_since is not None:
+        # Effective incremental cursor unless force_full_sync
+        if data.force_full_sync:
+            effective_updated_since = None
+        elif data.updated_since is not None:
             effective_updated_since = data.updated_since
         elif db_integration.last_sync_at is not None:
             effective_updated_since = db_integration.last_sync_at
