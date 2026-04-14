@@ -161,5 +161,21 @@ class Settings(BaseSettings):
     LOG_MAX_BYTES: int = 10_485_760
     LOG_BACKUP_COUNT: int = 5
 
+    @field_validator(
+        "LOG_DIR", "SCREENSHOTS_DIR", "STORAGE_LOCAL_PATH", "UPLOAD_DIR",
+        mode="after",
+    )
+    @classmethod
+    def _resolve_runtime_dir(cls, v: str) -> str:
+        """
+        Ensure runtime data directories are absolute.
+        In frozen mode, resolve relative paths against the exe directory
+        (not CWD, which is the temp _MEIPASS folder).
+        """
+        p = Path(v)
+        if not p.is_absolute():
+            p = _APP_ROOT / p
+        return str(p)
+
 
 settings = Settings()

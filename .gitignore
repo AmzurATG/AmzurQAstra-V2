@@ -14,6 +14,8 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+*.exe
+*.spec.bak
 
 # IDE
 .vscode/
