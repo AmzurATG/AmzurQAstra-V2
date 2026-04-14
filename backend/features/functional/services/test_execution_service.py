@@ -29,6 +29,11 @@ from features.functional.services.run_progress_manager import RunProgressManager
 from features.functional.services.completed_result_builder import completed_case_dict
 from features.functional.services.test_run_stats import fetch_test_run_summary
 from features.functional.services import test_result_evidence
+from features.functional.utils.credentials_redaction import (
+    redact_agent_logs_list,
+    redact_known_credentials,
+    redact_step_dict,
+)
 
 class TestExecutionService:
     """Manages test run lifecycle: create → execute (background) → poll → results."""
@@ -457,12 +462,19 @@ class TestExecutionService:
                         for s_orig in steps_data:
                             num = s_orig["step_number"]
                             s_res = llm_steps.get(num, {})
-                            final_step_results.append({
+                            merged = {
                                 **s_orig,
                                 "status": s_res.get("status", "skipped"),
                                 "actual_result": s_res.get("actual_result"),
                                 "adaptation": s_res.get("adaptation"),
-                            })
+                            }
+                            final_step_results.append(
+                                redact_step_dict(merged, username, password)
+                            )
+
+                        safe_agent_logs = redact_agent_logs_list(
+                            result.get("logs"), username, password
+                        )
 
                         test_result.status = (
                             TestResultStatus.PASSED if tc_status == "passed"
@@ -477,8 +489,12 @@ class TestExecutionService:
                         test_result.original_steps = steps_data
                         # First screenshot for legacy consumers; full trail in agent_logs
                         test_result.screenshot_path = (result.get("screenshots") or [None])[0]
-                        test_result.agent_logs = result.get("logs")
-                        test_result.error_message = result.get("error")
+                        test_result.agent_logs = safe_agent_logs
+                        test_result.error_message = redact_known_credentials(
+                            result.get("error"),
+                            username=username,
+                            password=password,
+                        )
                         test_result.failed_step = next(
                             (s["step_number"] for s in final_step_results if s.get("status") != "passed"),
                             None,
@@ -492,7 +508,6 @@ class TestExecutionService:
                             failed += 1
                             _log(f"✗ {tc_title} — {tc_status.upper()} ({duration}ms)", tc.id)
 
-                        agent_logs = result.get("logs")
                         completed_results.append(
                             completed_case_dict(
                                 test_result_id=test_result.id,
@@ -506,7 +521,7 @@ class TestExecutionService:
                                 step_results=final_step_results,
                                 adapted_steps=[s for s in final_step_results if s.get("adaptation")],
                                 original_steps=steps_data,
-                                agent_logs=agent_logs,
+                                agent_logs=safe_agent_logs,
                                 screenshot_path=test_result.screenshot_path,
                             )
                         )
