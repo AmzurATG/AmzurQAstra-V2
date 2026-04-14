@@ -33,7 +33,6 @@ export default function SyncFromIntegrationModal({
   const [integrations, setIntegrations] = useState<ProjectIntegrationInfo[]>([])
   const [selectedIntegration, setSelectedIntegration] = useState<ProjectIntegrationInfo | null>(null)
   const [selectedTypes, setSelectedTypes] = useState<string[]>(DEFAULT_SELECTED_TYPES)
-  const [forceFullResync, setForceFullResync] = useState(false)
   const [sprints, setSprints] = useState<Sprint[]>([])
   const [selectedSprintId, setSelectedSprintId] = useState<number | null>(null) // null = all sprints
   const [isLoadingSprints, setIsLoadingSprints] = useState(false)
@@ -44,7 +43,6 @@ export default function SyncFromIntegrationModal({
   // Load integrations when modal opens
   useEffect(() => {
     if (isOpen) {
-      setForceFullResync(false)
       loadIntegrations()
     }
   }, [isOpen, projectId])
@@ -116,7 +114,6 @@ export default function SyncFromIntegrationModal({
         integration_type: selectedIntegration.integration_type,
         issue_types: selectedTypes,
         sprint_id: selectedSprintId, // null means all sprints
-        force_full_sync: forceFullResync,
       }
 
       const response = await userStoriesApi.sync(projectId, syncRequest)
@@ -385,26 +382,6 @@ export default function SyncFromIntegrationModal({
                           : ' (first sync loads everything matching your selections)'}
                         .
                       </p>
-
-                      <div>
-                        <label className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={forceFullResync}
-                            onChange={(e) => setForceFullResync(e.target.checked)}
-                            className="mt-0.5 w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-                          />
-                          <div>
-                            <span className="text-sm font-medium text-gray-900">
-                              Full resync
-                            </span>
-                            <span className="text-xs text-gray-500 block mt-0.5">
-                              Re-fetch all matching issues from the tool, ignoring last sync time. Use if
-                              something looks out of date.
-                            </span>
-                          </div>
-                        </label>
-                      </div>
                     </>
                   )}
                 </div>

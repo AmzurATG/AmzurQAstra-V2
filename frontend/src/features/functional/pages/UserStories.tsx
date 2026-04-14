@@ -130,7 +130,6 @@ export default function UserStories() {
       const syncResponse = await userStoriesApi.sync(Number(projectId), {
         integration_type: integration.integration_type,
         issue_types: [...DEFAULT_SYNC_ISSUE_TYPES],
-        force_full_sync: false,
       })
       if (syncResponse.data.status === 'success') {
         const n = syncResponse.data.items_synced
