@@ -8,6 +8,9 @@ import type { UserStoryItemType, UserStoryPriority, UserStoryStatus } from '../t
 
 export const USER_STORIES_PAGE_SIZE = 20
 
+/** Jira/PM issue type names for default quick sync and modal initial selection */
+export const DEFAULT_SYNC_ISSUE_TYPES = ['Epic', 'Story', 'Bug'] as const
+
 export const STATUS_OPTIONS: UserStoryStatus[] = [
   'open',
   'in_progress',

@@ -4,6 +4,7 @@ import { XMarkIcon, ArrowPathIcon, CheckIcon } from '@heroicons/react/24/outline
 import { Button } from '@common/components/ui/Button'
 import { userStoriesApi } from '../api'
 import type { ProjectIntegrationInfo, SyncRequest, Sprint } from '../types'
+import { DEFAULT_SYNC_ISSUE_TYPES } from '../constants/userStoryUi'
 import toast from 'react-hot-toast'
 
 interface SyncFromIntegrationModalProps {
@@ -21,7 +22,7 @@ const ITEM_TYPES = [
   { id: 'Sub-task', label: 'Sub-tasks', description: 'Subtasks of stories' },
 ]
 
-const DEFAULT_SELECTED_TYPES = ['Epic', 'Story', 'Bug']
+const DEFAULT_SELECTED_TYPES: string[] = [...DEFAULT_SYNC_ISSUE_TYPES]
 
 export default function SyncFromIntegrationModal({
   isOpen,
@@ -32,7 +33,7 @@ export default function SyncFromIntegrationModal({
   const [integrations, setIntegrations] = useState<ProjectIntegrationInfo[]>([])
   const [selectedIntegration, setSelectedIntegration] = useState<ProjectIntegrationInfo | null>(null)
   const [selectedTypes, setSelectedTypes] = useState<string[]>(DEFAULT_SELECTED_TYPES)
-  const [syncMode, setSyncMode] = useState<'full' | 'incremental'>('full')
+  const [forceFullResync, setForceFullResync] = useState(false)
   const [sprints, setSprints] = useState<Sprint[]>([])
   const [selectedSprintId, setSelectedSprintId] = useState<number | null>(null) // null = all sprints
   const [isLoadingSprints, setIsLoadingSprints] = useState(false)
@@ -43,6 +44,7 @@ export default function SyncFromIntegrationModal({
   // Load integrations when modal opens
   useEffect(() => {
     if (isOpen) {
+      setForceFullResync(false)
       loadIntegrations()
     }
   }, [isOpen, projectId])
@@ -113,16 +115,19 @@ export default function SyncFromIntegrationModal({
       const syncRequest: SyncRequest = {
         integration_type: selectedIntegration.integration_type,
         issue_types: selectedTypes,
-        updated_since: syncMode === 'incremental' && selectedIntegration.last_sync_at
-          ? selectedIntegration.last_sync_at
-          : undefined,
-        sprint_id: selectedSprintId,  // null means all sprints
+        sprint_id: selectedSprintId, // null means all sprints
+        force_full_sync: forceFullResync,
       }
 
       const response = await userStoriesApi.sync(projectId, syncRequest)
-      
+
       if (response.data.status === 'success') {
-        toast.success(`Synced ${response.data.items_synced} items successfully!`)
+        const n = response.data.items_synced
+        if (n === 0) {
+          toast.success('Already up to date — no new or changed issues.')
+        } else {
+          toast.success(`Synced ${n} item${n === 1 ? '' : 's'} successfully.`)
+        }
         onSyncComplete()
         onClose()
       } else {
@@ -373,43 +378,32 @@ export default function SyncFromIntegrationModal({
                         </div>
                       )}
 
-                      {/* Sync Mode */}
+                      <p className="text-xs text-gray-500 leading-relaxed">
+                        Imports new and updated work items since the last successful sync
+                        {selectedIntegration?.last_sync_at
+                          ? ` (${formatDate(selectedIntegration.last_sync_at)})`
+                          : ' (first sync loads everything matching your selections)'}
+                        .
+                      </p>
+
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Sync Mode
+                        <label className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={forceFullResync}
+                            onChange={(e) => setForceFullResync(e.target.checked)}
+                            className="mt-0.5 w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                          />
+                          <div>
+                            <span className="text-sm font-medium text-gray-900">
+                              Full resync
+                            </span>
+                            <span className="text-xs text-gray-500 block mt-0.5">
+                              Re-fetch all matching issues from the tool, ignoring last sync time. Use if
+                              something looks out of date.
+                            </span>
+                          </div>
                         </label>
-                        <div className="space-y-2">
-                          <label className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                            <input
-                              type="radio"
-                              name="syncMode"
-                              checked={syncMode === 'full'}
-                              onChange={() => setSyncMode('full')}
-                              className="w-4 h-4 text-primary-600 border-gray-300 focus:ring-primary-500"
-                            />
-                            <div>
-                              <span className="text-sm font-medium text-gray-900">Full sync</span>
-                              <span className="text-xs text-gray-500 ml-2">(all items)</span>
-                            </div>
-                          </label>
-                          <label className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                            <input
-                              type="radio"
-                              name="syncMode"
-                              checked={syncMode === 'incremental'}
-                              onChange={() => setSyncMode('incremental')}
-                              className="w-4 h-4 text-primary-600 border-gray-300 focus:ring-primary-500"
-                            />
-                            <div>
-                              <span className="text-sm font-medium text-gray-900">
-                                Incremental sync
-                              </span>
-                              <span className="text-xs text-gray-500 ml-2">
-                                (since {formatDate(selectedIntegration?.last_sync_at || null)})
-                              </span>
-                            </div>
-                          </label>
-                        </div>
                       </div>
                     </>
                   )}

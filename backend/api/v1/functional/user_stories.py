@@ -107,6 +107,9 @@ class SyncRequest(BaseModel):
     sprint_id: Optional[int] = None  # Filter by sprint (None = all sprints)
     issue_types: Optional[List[str]] = None
     updated_since: Optional[datetime] = None
+    # When False (default): use updated_since if provided, else last successful sync time from DB,
+    # else fetch all matching issues (first sync). When True: ignore cursor and fetch everything.
+    force_full_sync: bool = False
 
 
 class SyncResponse(BaseModel):
@@ -585,12 +588,22 @@ async def sync_user_stories(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No project key specified in integration config or request"
             )
-        
+
+        # Effective incremental cursor: server uses DB last_sync_at when client omits updated_since
+        if data.force_full_sync:
+            effective_updated_since = None
+        elif data.updated_since is not None:
+            effective_updated_since = data.updated_since
+        elif db_integration.last_sync_at is not None:
+            effective_updated_since = db_integration.last_sync_at
+        else:
+            effective_updated_since = None
+
         # Fetch stories from external system
         external_stories = await integration.fetch_user_stories(
             project_key=project_key,
             issue_types=data.issue_types,
-            updated_since=data.updated_since,
+            updated_since=effective_updated_since,
             sprint_id=data.sprint_id,
         )
         
