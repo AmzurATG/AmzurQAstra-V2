@@ -50,6 +50,8 @@ export default function UserStories() {
     key: string | null
   } | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [integrationsReady, setIntegrationsReady] = useState(false)
+  const [hasPmIntegration, setHasPmIntegration] = useState(false)
 
   const loadStats = useCallback(async () => {
     if (!projectId) return
@@ -111,6 +113,30 @@ export default function UserStories() {
     if (projectId) loadStories()
   }, [projectId, loadStories])
 
+  useEffect(() => {
+    if (!projectId) return
+    let cancelled = false
+    setIntegrationsReady(false)
+    ;(async () => {
+      try {
+        const res = await userStoriesApi.getIntegrations(Number(projectId))
+        if (cancelled) return
+        const pm = res.data.filter(
+          (i) =>
+            i.is_enabled && ['jira', 'redmine', 'azure_devops'].includes(i.integration_type)
+        )
+        setHasPmIntegration(pm.length > 0)
+      } catch {
+        if (!cancelled) setHasPmIntegration(false)
+      } finally {
+        if (!cancelled) setIntegrationsReady(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
+
   const onTestGenerationSuccess = useCallback(() => {
     loadStories()
     loadStats()
@@ -130,12 +156,22 @@ export default function UserStories() {
 
   const hasListFilters = statusFilter !== 'all' || debouncedSearch.length > 0
 
-  const handleSyncComplete = useCallback(() => {
+  const reloadStoriesAndStats = useCallback(() => {
     loadStories()
     loadStats()
   }, [loadStories, loadStats])
 
-  const { isQuickSyncing, syncNow: handleSyncNow } = usePmQuickSync(projectId, handleSyncComplete)
+  const {
+    isQuickSyncing,
+    syncNow: handleSyncNow,
+    hasConfiguredSync,
+    refreshPreferences,
+  } = usePmQuickSync(projectId, reloadStoriesAndStats)
+
+  const handleIntegrationSyncComplete = useCallback(() => {
+    refreshPreferences()
+    reloadStoriesAndStats()
+  }, [refreshPreferences, reloadStoriesAndStats])
 
   const handleGenerateTests = (storyId: number, _storyKey: string | null) => {
     void runGenerate(storyId, false)
@@ -170,6 +206,15 @@ export default function UserStories() {
     pagination.total === 0 ? 0 : (page - 1) * USER_STORIES_PAGE_SIZE + 1
   const rangeEnd = Math.min(page * USER_STORIES_PAGE_SIZE, pagination.total)
 
+  const syncFromIntegrationIsPrimary = hasPmIntegration && !hasConfiguredSync
+  const syncNowVariant = hasConfiguredSync ? 'primary' : 'outline'
+  const syncFromIntegrationVariant = syncFromIntegrationIsPrimary ? 'primary' : 'outline'
+
+  const syncNowTooltip =
+    !hasConfiguredSync
+      ? 'Use Sync from Integration first to choose integration, item types, and sprint (Jira).'
+      : undefined
+
   return (
     <div className="min-w-0 space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -179,18 +224,24 @@ export default function UserStories() {
         </div>
         <div className="flex shrink-0 flex-wrap gap-3">
           <Button
-            variant="primary"
+            variant={syncNowVariant}
             onClick={handleSyncNow}
             isLoading={isQuickSyncing}
-            disabled={isQuickSyncing}
+            disabled={isQuickSyncing || !hasConfiguredSync}
+            title={syncNowTooltip}
           >
             <ArrowPathIcon className="mr-2 h-4 w-4" />
             Sync now
           </Button>
           <Button
-            variant="outline"
+            variant={syncFromIntegrationVariant}
             onClick={() => setIsSyncModalOpen(true)}
             disabled={isQuickSyncing}
+            title={
+              syncFromIntegrationIsPrimary
+                ? 'Choose integration, item types, and sprint — then you can use Sync now.'
+                : undefined
+            }
           >
             <ArrowPathIcon className="mr-2 h-4 w-4" />
             Sync from Integration
@@ -255,25 +306,78 @@ export default function UserStories() {
         </div>
       </Card>
 
-      {!isLoading && pagination.total === 0 && !hasListFilters && (
+      {!isLoading && !integrationsReady && pagination.total === 0 && !hasListFilters && (
+        <Card className="py-12 text-center">
+          <ArrowPathIcon className="mx-auto mb-4 h-8 w-8 animate-spin text-primary-500" />
+          <p className="text-gray-500">Loading…</p>
+        </Card>
+      )}
+
+      {!isLoading && integrationsReady && pagination.total === 0 && !hasListFilters && (
         <Card className="py-12 text-center">
           <LinkIcon className="mx-auto mb-4 h-12 w-12 text-gray-300" />
           <h3 className="mb-2 text-lg font-medium text-gray-900">No User Stories Yet</h3>
-          <p className="mb-4 text-gray-500">
-            Connect to Jira or Redmine to import user stories, or add them manually.
-          </p>
-          <div className="flex justify-center gap-3">
-            <Link to={`/projects/${projectId}/integrations`}>
-              <Button variant="outline">
-                <LinkIcon className="mr-2 h-4 w-4" />
-                Configure Integrations
-              </Button>
-            </Link>
-            <Button onClick={handleSyncNow} isLoading={isQuickSyncing} disabled={isQuickSyncing}>
-              <ArrowPathIcon className="mr-2 h-4 w-4" />
-              Sync now
-            </Button>
-          </div>
+          {hasPmIntegration ? (
+            <>
+              <p className="mb-4 max-w-md mx-auto text-gray-500">
+                Your project is connected to a tool, but no work items have been imported yet. Use{' '}
+                <span className="font-medium text-gray-700">Sync from Integration</span> to choose
+                what to import (and for Jira, which sprint). After that,{' '}
+                <span className="font-medium text-gray-700">Sync now</span> repeats the same scope.
+              </p>
+              <div className="flex flex-wrap justify-center gap-3">
+                <Button
+                  variant={syncFromIntegrationVariant}
+                  onClick={() => setIsSyncModalOpen(true)}
+                  disabled={isQuickSyncing}
+                >
+                  <ArrowPathIcon className="mr-2 h-4 w-4" />
+                  Sync from Integration
+                </Button>
+                <Button
+                  variant={syncNowVariant}
+                  onClick={handleSyncNow}
+                  isLoading={isQuickSyncing}
+                  disabled={isQuickSyncing || !hasConfiguredSync}
+                  title={syncNowTooltip}
+                >
+                  <ArrowPathIcon className="mr-2 h-4 w-4" />
+                  Sync now
+                </Button>
+                <Link to={`/projects/${projectId}/integrations`}>
+                  <Button variant="outline">
+                    <LinkIcon className="mr-2 h-4 w-4" />
+                    Manage integrations
+                  </Button>
+                </Link>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="mb-4 max-w-md mx-auto text-gray-500">
+                Connect to Jira, Redmine, or Azure DevOps to import user stories, or add them
+                manually.
+              </p>
+              <div className="flex flex-wrap justify-center gap-3">
+                <Link to={`/projects/${projectId}/integrations`}>
+                  <Button variant="primary">
+                    <LinkIcon className="mr-2 h-4 w-4" />
+                    Configure Integrations
+                  </Button>
+                </Link>
+                <Button
+                  variant="outline"
+                  onClick={handleSyncNow}
+                  isLoading={isQuickSyncing}
+                  disabled={isQuickSyncing || !hasConfiguredSync}
+                  title={syncNowTooltip}
+                >
+                  <ArrowPathIcon className="mr-2 h-4 w-4" />
+                  Sync now
+                </Button>
+              </div>
+            </>
+          )}
         </Card>
       )}
 
@@ -331,7 +435,7 @@ export default function UserStories() {
         isOpen={isSyncModalOpen}
         onClose={() => setIsSyncModalOpen(false)}
         projectId={Number(projectId)}
-        onSyncComplete={handleSyncComplete}
+        onSyncComplete={handleIntegrationSyncComplete}
       />
 
       <UserStoryCreateModal

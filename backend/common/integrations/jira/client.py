@@ -207,7 +207,8 @@ class JiraIntegration(ProjectManagementIntegration):
         project_key: str,
         issue_types: Optional[List[str]] = None,
         updated_since: Optional[datetime] = None,
-        sprint_id: Optional[int] = None
+        sprint_id: Optional[int] = None,
+        sprint_ids: Optional[List[int]] = None,
     ) -> List[UserStoryData]:
         """
         Fetch issues from Jira project using the new /search/jql API.
@@ -216,7 +217,8 @@ class JiraIntegration(ProjectManagementIntegration):
             project_key: Jira project key (e.g., "PROJ")
             issue_types: Filter by issue types, defaults to config value
             updated_since: Only fetch issues updated after this time
-            sprint_id: Filter by sprint ID (optional)
+            sprint_id: Deprecated; use sprint_ids with one element.
+            sprint_ids: Filter by one or more sprint IDs (optional). Omitted/empty = all sprints.
         """
         try:
             # Build JQL query
@@ -227,9 +229,18 @@ class JiraIntegration(ProjectManagementIntegration):
                 types_str = ", ".join([f'"{t}"' for t in types])
                 jql = f"project = {project_key} AND issuetype IN ({types_str})"
             
-            # Add sprint filter
-            if sprint_id:
-                jql += f" AND sprint = {sprint_id}"
+            # Add sprint filter (single sprint or sprint in (...))
+            effective_sprint_ids: Optional[List[int]] = None
+            if sprint_ids:
+                effective_sprint_ids = list(dict.fromkeys(sprint_ids))
+            elif sprint_id is not None:
+                effective_sprint_ids = [sprint_id]
+            if effective_sprint_ids:
+                if len(effective_sprint_ids) == 1:
+                    jql += f" AND sprint = {effective_sprint_ids[0]}"
+                else:
+                    ids_jql = ", ".join(str(sid) for sid in effective_sprint_ids)
+                    jql += f" AND sprint in ({ids_jql})"
             
             if updated_since:
                 jql += f' AND updated >= "{updated_since.strftime("%Y-%m-%d %H:%M")}"'

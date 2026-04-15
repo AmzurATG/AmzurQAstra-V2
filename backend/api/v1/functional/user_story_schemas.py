@@ -78,6 +78,8 @@ class SyncRequest(BaseModel):
     integration_type: str
     project_key: Optional[str] = None
     sprint_id: Optional[int] = None
+    # When set (non-empty), Jira uses sprint in (...); takes precedence over sprint_id.
+    sprint_ids: Optional[List[int]] = None
     issue_types: Optional[List[str]] = None
     updated_since: Optional[datetime] = None
     force_full_sync: bool = False

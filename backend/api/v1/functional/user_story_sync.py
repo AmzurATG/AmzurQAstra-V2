@@ -1,5 +1,6 @@
 """Sync user stories from external PM tools."""
 from datetime import datetime
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -97,12 +98,22 @@ async def sync_user_stories(
         else:
             effective_updated_since = None
 
-        external_stories = await integration.fetch_user_stories(
+        fetch_kwargs = dict(
             project_key=project_key,
             issue_types=data.issue_types,
             updated_since=effective_updated_since,
-            sprint_id=data.sprint_id,
         )
+        # Only Jira's client accepts sprint filter kwargs.
+        if int_type == IntegrationType.jira:
+            sprint_ids: Optional[List[int]] = None
+            if data.sprint_ids:
+                sprint_ids = list(dict.fromkeys(data.sprint_ids))
+            elif data.sprint_id is not None:
+                sprint_ids = [data.sprint_id]
+            if sprint_ids:
+                fetch_kwargs["sprint_ids"] = sprint_ids
+
+        external_stories = await integration.fetch_user_stories(**fetch_kwargs)
 
         source_map = {
             "jira": UserStorySource.jira,
