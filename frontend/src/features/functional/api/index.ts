@@ -245,6 +245,8 @@ export const userStoriesApi = {
       search?: string
       page?: number
       page_size?: number
+      /** Comma-separated Jira sprint ids; aligns list with last sync scope */
+      sprint_ids?: string
     }
   ) => apiClient.get<PaginatedResponse<UserStory>>(`/functional/user-stories/${projectId}`, { params }),
 
@@ -260,8 +262,8 @@ export const userStoriesApi = {
   delete: (projectId: number, storyId: number) =>
     apiClient.delete<{ message: string; test_cases_deleted: number }>(`/functional/user-stories/${projectId}/${storyId}`),
 
-  getStats: (projectId: number) =>
-    apiClient.get<UserStoryStats>(`/functional/user-stories/${projectId}/stats`),
+  getStats: (projectId: number, params?: { sprint_ids?: string }) =>
+    apiClient.get<UserStoryStats>(`/functional/user-stories/${projectId}/stats`, { params }),
 
   sync: (projectId: number, data: SyncRequest) =>
     apiClient.post<SyncResponse>(`/functional/user-stories/${projectId}/sync`, data),

@@ -5,8 +5,8 @@ Sync and generate-tests live in sibling modules to keep files maintainable.
 """
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.api.deps import get_current_active_user
@@ -46,12 +46,29 @@ router.include_router(user_story_sync_router)
 router.include_router(user_story_generate_router)
 
 
+def _parse_sprint_ids_csv(raw: Optional[str]) -> Optional[List[str]]:
+    if not raw or not raw.strip():
+        return None
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    return parts or None
+
+
 @router.get("/{project_id}/stats", response_model=StoryStatsResponse)
 async def get_user_story_stats(
     project_id: int,
+    sprint_ids: Optional[str] = Query(
+        None,
+        description="Comma-separated external sprint ids; scopes stats to those sprints (Jira)",
+    ),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
+    sprint_parts = _parse_sprint_ids_csv(sprint_ids)
+    base = [UserStory.project_id == project_id]
+    if sprint_parts:
+        base.append(UserStory.sprint_id.in_(sprint_parts))
+    scope = and_(*base)
+
     result = await db.execute(
         select(
             func.count(UserStory.id).label("total"),
@@ -67,7 +84,7 @@ async def get_user_story_stats(
             func.count(UserStory.id)
             .filter(UserStory.status == UserStoryStatus.blocked)
             .label("blocked"),
-        ).where(UserStory.project_id == project_id)
+        ).where(scope)
     )
     row = result.one()
     return StoryStatsResponse(
@@ -146,14 +163,24 @@ async def list_user_stories(
     priority: Optional[UserStoryPriority] = None,
     source: Optional[UserStorySource] = None,
     search: Optional[str] = None,
+    sprint_ids: Optional[str] = Query(
+        None,
+        description="Comma-separated external sprint ids; limits rows to those sprints (matches last sync scope)",
+    ),
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
+    sprint_parts = _parse_sprint_ids_csv(sprint_ids)
+
     query = select(UserStory).where(UserStory.project_id == project_id)
     count_query = select(func.count(UserStory.id)).where(
         UserStory.project_id == project_id
     )
+
+    if sprint_parts:
+        query = query.where(UserStory.sprint_id.in_(sprint_parts))
+        count_query = count_query.where(UserStory.sprint_id.in_(sprint_parts))
 
     if status:
         query = query.where(UserStory.status == status)

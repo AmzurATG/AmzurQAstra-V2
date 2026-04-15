@@ -1,14 +1,21 @@
 import { useCallback, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { userStoriesApi } from '../api'
-import { getPmSyncPreferences, jiraSprintPayloadFromPrefs } from '../utils/pmSyncPreferences'
+import {
+  getPmSyncPreferences,
+  hydratePmSyncPreferencesFromIntegrations,
+  jiraSprintPayloadFromPrefs,
+} from '../utils/pmSyncPreferences'
 
 /**
  * One-click sync using the same integration, issue types, and Jira sprint as the last successful "Sync from Integration".
+ *
+ * @param remoteQuickSyncAllowed — true when GET integrations shows a stored sync_scope (enables button before localStorage hydrate, e.g. new browser).
  */
 export function usePmQuickSync(
   projectId: string | undefined,
-  onSuccess: () => void
+  onSuccess: () => void,
+  remoteQuickSyncAllowed = false
 ) {
   const [isQuickSyncing, setIsQuickSyncing] = useState(false)
   const [prefsVersion, setPrefsVersion] = useState(0)
@@ -18,7 +25,7 @@ export function usePmQuickSync(
     return getPmSyncPreferences(Number(projectId))
   }, [projectId, prefsVersion])
 
-  const hasConfiguredSync = preferences !== null
+  const hasConfiguredSync = preferences !== null || remoteQuickSyncAllowed
 
   const refreshPreferences = useCallback(() => {
     setPrefsVersion((v) => v + 1)
@@ -26,7 +33,17 @@ export function usePmQuickSync(
 
   const syncNow = useCallback(async () => {
     if (!projectId) return
-    const prefs = getPmSyncPreferences(Number(projectId))
+    let prefs = getPmSyncPreferences(Number(projectId))
+    if (!prefs) {
+      try {
+        const res = await userStoriesApi.getIntegrations(Number(projectId))
+        hydratePmSyncPreferencesFromIntegrations(Number(projectId), res.data)
+        refreshPreferences()
+        prefs = getPmSyncPreferences(Number(projectId))
+      } catch {
+        // fall through
+      }
+    }
     if (!prefs) {
       toast.error('Use Sync from Integration first to choose integration and scope.')
       return
@@ -59,7 +76,14 @@ export function usePmQuickSync(
     } finally {
       setIsQuickSyncing(false)
     }
-  }, [projectId, onSuccess])
+  }, [projectId, onSuccess, refreshPreferences])
 
-  return { isQuickSyncing, syncNow, hasConfiguredSync, refreshPreferences }
+  return {
+    isQuickSyncing,
+    syncNow,
+    hasConfiguredSync,
+    refreshPreferences,
+    /** Bump when preferences change so list/stats refetch with sprint scope */
+    prefsVersion,
+  }
 }

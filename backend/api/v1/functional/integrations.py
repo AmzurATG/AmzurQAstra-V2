@@ -72,7 +72,7 @@ class IntegrationResponse(BaseModel):
 
 
 # Fields that should NEVER be redacted (even if they match sensitive keywords)
-NON_SENSITIVE_FIELDS = {'project_key', 'project_name', 'webhook_key', 'channel_key'}
+NON_SENSITIVE_FIELDS = {'project_key', 'project_name', 'webhook_key', 'channel_key', 'sync_scope'}
 
 # Fields that should ALWAYS be redacted
 SENSITIVE_KEYWORDS = ['token', 'password', 'secret', 'api_key', 'pat', 'access_token', 'api_token', 'personal_access_token']

@@ -39,8 +39,8 @@ export default function SyncFromIntegrationModal({
   const [selectedIntegration, setSelectedIntegration] = useState<ProjectIntegrationInfo | null>(null)
   const [selectedTypes, setSelectedTypes] = useState<string[]>(DEFAULT_SELECTED_TYPES)
   const [sprints, setSprints] = useState<Sprint[]>([])
-  /** Jira: true = sync all sprints; false = only checked sprint ids */
-  const [jiraAllSprints, setJiraAllSprints] = useState(true)
+  /** Jira: user must opt in to All sprints or pick specific sprints */
+  const [jiraAllSprints, setJiraAllSprints] = useState(false)
   const [jiraSelectedSprintIds, setJiraSelectedSprintIds] = useState<number[]>([])
   const [isLoadingSprints, setIsLoadingSprints] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -54,29 +54,40 @@ export default function SyncFromIntegrationModal({
     }
   }, [isOpen, projectId])
 
-  // Load sprints when integration is selected
+  // Load sprints when integration is selected or modal reopens (refresh list)
   useEffect(() => {
-    if (selectedIntegration && selectedIntegration.integration_type === 'jira') {
-      loadSprints()
-    } else {
-      setSprints([])
-      setJiraAllSprints(true)
-      setJiraSelectedSprintIds([])
+    if (!isOpen || !selectedIntegration || selectedIntegration.integration_type !== 'jira') {
+      if (selectedIntegration && selectedIntegration.integration_type !== 'jira') {
+        setSprints([])
+        setJiraAllSprints(false)
+        setJiraSelectedSprintIds([])
+      }
+      return
     }
-  }, [selectedIntegration])
+    loadSprints()
+  }, [selectedIntegration, isOpen])
 
-  // Drop sprint ids that no longer exist on the board
+  // Drop sprint ids that no longer exist on the board (never promote to "All sprints" — that hid user scope)
   useEffect(() => {
     if (selectedIntegration?.integration_type !== 'jira' || !sprints.length || jiraAllSprints) return
-    const valid = jiraSelectedSprintIds.filter((id) => sprints.some((s) => s.id === id))
+    if (isLoadingSprints) return
+    const valid = jiraSelectedSprintIds.filter((id) =>
+      sprints.some((s) => Number(s.id) === Number(id))
+    )
     if (valid.length === jiraSelectedSprintIds.length) return
     if (valid.length === 0) {
-      setJiraAllSprints(true)
+      setJiraAllSprints(false)
       setJiraSelectedSprintIds([])
     } else {
       setJiraSelectedSprintIds(valid)
     }
-  }, [sprints, selectedIntegration?.integration_type, jiraAllSprints, jiraSelectedSprintIds])
+  }, [
+    sprints,
+    selectedIntegration?.integration_type,
+    jiraAllSprints,
+    jiraSelectedSprintIds,
+    isLoadingSprints,
+  ])
 
   const loadSprints = async () => {
     if (!selectedIntegration) return
@@ -115,7 +126,7 @@ export default function SyncFromIntegrationModal({
           if (match.integration_type === 'jira') {
             const st = jiraSprintStateFromPrefs(prefs)
             setJiraAllSprints(st.allSprints)
-            setJiraSelectedSprintIds(st.selectedIds)
+            setJiraSelectedSprintIds(st.selectedIds.map((id) => Number(id)))
           } else {
             setJiraAllSprints(true)
             setJiraSelectedSprintIds([])
@@ -123,7 +134,7 @@ export default function SyncFromIntegrationModal({
         } else {
           setSelectedIntegration(pmIntegrations[0])
           setSelectedTypes(DEFAULT_SELECTED_TYPES)
-          setJiraAllSprints(true)
+          setJiraAllSprints(false)
           setJiraSelectedSprintIds([])
         }
       }
@@ -146,7 +157,7 @@ export default function SyncFromIntegrationModal({
   const toggleJiraSprint = (sprintId: number) => {
     if (jiraAllSprints) {
       // Leave "all" mode: keep every loaded sprint except the one toggled off
-      const allIds = sprints.map((s) => s.id)
+      const allIds = sprints.map((s) => Number(s.id))
       setJiraAllSprints(false)
       setJiraSelectedSprintIds(allIds.filter((id) => id !== sprintId))
       return
@@ -444,7 +455,10 @@ export default function SyncFromIntegrationModal({
                                         <input
                                           type="checkbox"
                                           checked={
-                                            jiraAllSprints || jiraSelectedSprintIds.includes(sprint.id)
+                                            jiraAllSprints ||
+                                            jiraSelectedSprintIds.some(
+                                              (id) => Number(id) === Number(sprint.id)
+                                            )
                                           }
                                           onChange={() => toggleJiraSprint(sprint.id)}
                                           className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"

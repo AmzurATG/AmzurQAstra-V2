@@ -514,7 +514,15 @@ export interface ProjectIntegrationInfo {
   config: {
     project_key?: string
     project_name?: string
-    [key: string]: string | undefined
+    /** Set by server after successful sync — drives Sync now + list scope */
+    sync_scope?: {
+      integration_type: string
+      issue_types: string[]
+      force_full_sync: boolean
+      all_sprints?: boolean
+      sprint_ids?: number[] | null
+    }
+    [key: string]: unknown
   } | null
   is_enabled: boolean
   last_sync_at: string | null

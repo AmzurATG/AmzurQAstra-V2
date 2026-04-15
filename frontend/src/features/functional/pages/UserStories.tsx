@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { Card, CardTitle } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
@@ -20,6 +20,13 @@ import { usePmQuickSync } from '../hooks/usePmQuickSync'
 import { userStoriesApi } from '../api'
 import type { UserStory, UserStoryStats } from '../types'
 import { USER_STORIES_PAGE_SIZE } from '../constants/userStoryUi'
+import {
+  getPmSyncPreferences,
+  hasValidSyncScopeForQuickSync,
+  hydratePmSyncPreferencesFromIntegrations,
+  isJiraScopedWithoutSprintSelection,
+  sprintIdsQueryFromPrefs,
+} from '../utils/pmSyncPreferences'
 import toast from 'react-hot-toast'
 
 export default function UserStories() {
@@ -52,26 +59,70 @@ export default function UserStories() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [integrationsReady, setIntegrationsReady] = useState(false)
   const [hasPmIntegration, setHasPmIntegration] = useState(false)
+  /** Server has sync_scope with issue types — enables Sync now when localStorage is empty (new device/tab). */
+  const [remoteQuickSyncAllowed, setRemoteQuickSyncAllowed] = useState(false)
+
+  const reloadStoriesAndStatsRef = useRef<() => void>(() => {})
+
+  const {
+    isQuickSyncing,
+    syncNow: handleSyncNow,
+    hasConfiguredSync,
+    refreshPreferences,
+    prefsVersion,
+  } = usePmQuickSync(
+    projectId,
+    () => reloadStoriesAndStatsRef.current(),
+    remoteQuickSyncAllowed
+  )
 
   const loadStats = useCallback(async () => {
     if (!projectId) return
     try {
-      const response = await userStoriesApi.getStats(Number(projectId))
+      const prefs = getPmSyncPreferences(Number(projectId))
+      if (isJiraScopedWithoutSprintSelection(prefs)) {
+        setStats({
+          total: 0,
+          open: 0,
+          in_progress: 0,
+          done: 0,
+          blocked: 0,
+        })
+        return
+      }
+      const sprintIds = sprintIdsQueryFromPrefs(prefs)
+      const response = await userStoriesApi.getStats(
+        Number(projectId),
+        sprintIds ? { sprint_ids: sprintIds } : undefined
+      )
       setStats(response.data)
     } catch (error) {
       console.error('Failed to load stats:', error)
     }
-  }, [projectId])
+  }, [projectId, prefsVersion])
 
   const loadStories = useCallback(async () => {
     if (!projectId) return
     setIsLoading(true)
     try {
+      const prefs = getPmSyncPreferences(Number(projectId))
+      if (isJiraScopedWithoutSprintSelection(prefs)) {
+        setStories([])
+        setPagination({
+          total: 0,
+          total_pages: 1,
+          has_next: false,
+          has_prev: false,
+        })
+        return
+      }
+      const sprintIds = sprintIdsQueryFromPrefs(prefs)
       const params: {
         page: number
         page_size: number
         status?: string
         search?: string
+        sprint_ids?: string
       } = {
         page,
         page_size: USER_STORIES_PAGE_SIZE,
@@ -79,6 +130,7 @@ export default function UserStories() {
       if (statusFilter !== 'all') params.status = statusFilter
       const q = debouncedSearch.trim()
       if (q) params.search = q
+      if (sprintIds) params.sprint_ids = sprintIds
 
       const response = await userStoriesApi.list(Number(projectId), params)
       const data = response.data
@@ -94,7 +146,7 @@ export default function UserStories() {
     } finally {
       setIsLoading(false)
     }
-  }, [projectId, page, statusFilter, debouncedSearch])
+  }, [projectId, page, statusFilter, debouncedSearch, prefsVersion])
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 400)
@@ -103,7 +155,7 @@ export default function UserStories() {
 
   useLayoutEffect(() => {
     setPage(1)
-  }, [projectId, statusFilter, debouncedSearch])
+  }, [projectId, statusFilter, debouncedSearch, prefsVersion])
 
   useEffect(() => {
     if (projectId) loadStats()
@@ -117,6 +169,7 @@ export default function UserStories() {
     if (!projectId) return
     let cancelled = false
     setIntegrationsReady(false)
+    setRemoteQuickSyncAllowed(false)
     ;(async () => {
       try {
         const res = await userStoriesApi.getIntegrations(Number(projectId))
@@ -126,8 +179,23 @@ export default function UserStories() {
             i.is_enabled && ['jira', 'redmine', 'azure_devops'].includes(i.integration_type)
         )
         setHasPmIntegration(pm.length > 0)
+        setRemoteQuickSyncAllowed(
+          res.data.some(
+            (i) =>
+              i.is_enabled &&
+              ['jira', 'redmine', 'azure_devops'].includes(i.integration_type) &&
+              hasValidSyncScopeForQuickSync(i.config as Record<string, unknown> | null)
+          )
+        )
+        const hydrated = hydratePmSyncPreferencesFromIntegrations(Number(projectId), res.data)
+        if (hydrated) {
+          refreshPreferences()
+        }
       } catch {
-        if (!cancelled) setHasPmIntegration(false)
+        if (!cancelled) {
+          setHasPmIntegration(false)
+          setRemoteQuickSyncAllowed(false)
+        }
       } finally {
         if (!cancelled) setIntegrationsReady(true)
       }
@@ -135,7 +203,7 @@ export default function UserStories() {
     return () => {
       cancelled = true
     }
-  }, [projectId])
+  }, [projectId, refreshPreferences])
 
   const onTestGenerationSuccess = useCallback(() => {
     loadStories()
@@ -161,12 +229,9 @@ export default function UserStories() {
     loadStats()
   }, [loadStories, loadStats])
 
-  const {
-    isQuickSyncing,
-    syncNow: handleSyncNow,
-    hasConfiguredSync,
-    refreshPreferences,
-  } = usePmQuickSync(projectId, reloadStoriesAndStats)
+  useEffect(() => {
+    reloadStoriesAndStatsRef.current = reloadStoriesAndStats
+  }, [reloadStoriesAndStats])
 
   const handleIntegrationSyncComplete = useCallback(() => {
     refreshPreferences()

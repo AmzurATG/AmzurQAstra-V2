@@ -4,6 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 
 from common.db.database import get_db
 from common.db.models.user import User
@@ -19,7 +20,7 @@ from common.api.deps import get_current_active_user
 from common.integrations import get_integration
 from common.integrations.base import ProjectManagementIntegration
 from common.integrations.exceptions import IntegrationError
-from common.utils.security import decrypt_config
+from common.utils.security import decrypt_config, encrypt_config
 from api.v1.functional.user_story_schemas import SyncRequest, SyncResponse
 
 router = APIRouter()
@@ -232,6 +233,30 @@ async def sync_user_stories(
         db_integration.last_sync_at = datetime.utcnow()
         db_integration.last_sync_error = None
         db_integration.items_synced = synced_count
+
+        # Persist last sync scope on integration (non-sensitive) for cross-device Sync now + list filtering
+        full_cfg = dict(decrypt_config(db_integration.config) or {})
+        sync_scope: dict = {
+            "integration_type": data.integration_type,
+            "issue_types": list(data.issue_types or []),
+            "force_full_sync": bool(data.force_full_sync),
+        }
+        if int_type == IntegrationType.jira:
+            if data.sprint_ids:
+                sync_scope["all_sprints"] = False
+                sync_scope["sprint_ids"] = [int(x) for x in list(dict.fromkeys(data.sprint_ids))]
+            elif data.sprint_id is not None:
+                sync_scope["all_sprints"] = False
+                sync_scope["sprint_ids"] = [int(data.sprint_id)]
+            else:
+                sync_scope["all_sprints"] = True
+                sync_scope["sprint_ids"] = None
+        else:
+            sync_scope["all_sprints"] = True
+            sync_scope["sprint_ids"] = None
+        full_cfg["sync_scope"] = sync_scope
+        db_integration.config = encrypt_config(full_cfg)
+        flag_modified(db_integration, "config")
 
         await db.commit()
 
