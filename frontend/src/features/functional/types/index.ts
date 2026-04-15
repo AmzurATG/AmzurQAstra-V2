@@ -463,6 +463,8 @@ export interface UserStory {
   integrity_check: boolean
   linked_requirements: number
   linked_test_cases: number
+  /** LLM-generated test cases (duplicate guard uses this, not manual cases) */
+  generated_test_cases?: number
   synced_at?: string
   created_at: string
   updated_at: string
@@ -482,8 +484,11 @@ export interface SyncRequest {
   issue_types?: string[]
   /** Explicit cursor; usually omitted so the server uses last successful sync time */
   updated_since?: string
-  sprint_id?: number | null // null for all sprints
-  /** When true, ignore last sync time and fetch all matching issues */
+  /** @deprecated Prefer sprint_ids; single sprint */
+  sprint_id?: number | null
+  /** Jira: one or more sprints; omit when syncing all sprints */
+  sprint_ids?: number[]
+  /** When true, ignore last sync and fetch all matching remote issues */
   force_full_sync?: boolean
 }
 
@@ -522,6 +527,8 @@ export interface ProjectIntegrationInfo {
 
 export interface GenerateTestsRequest {
   include_steps: boolean
+  /** When true, existing story test cases are removed before generating */
+  force_regenerate?: boolean
 }
 
 export interface GeneratedTestCaseInfo {
@@ -538,4 +545,6 @@ export interface GenerateTestsResponse {
   test_cases_created: number
   test_cases: GeneratedTestCaseInfo[]
   error: string | null
+  /** e.g. already_exists when duplicate generation was blocked */
+  code?: string | null
 }

@@ -11,6 +11,7 @@ type Props = {
   generatingStoryId: number | null
   deletingStoryId: number | null
   onGenerateTests: (storyId: number, key: string | null) => void
+  onRegenerateClick: (storyId: number, key: string | null) => void
   onDelete: (storyId: number, key: string | null) => void
 }
 
@@ -21,10 +22,13 @@ export function UserStoryListRow({
   generatingStoryId,
   deletingStoryId,
   onGenerateTests,
+  onRegenerateClick,
   onDelete,
 }: Props) {
   const navigate = useNavigate()
   const detailPath = `/projects/${projectId}/user-stories/${story.id}`
+  const generatedCount = story.generated_test_cases ?? 0
+  const hasGeneratedTests = generatedCount > 0
 
   const statusCfg = statusConfig[story.status] || statusConfig.open
   const StatusIcon = statusCfg.icon
@@ -91,20 +95,37 @@ export function UserStoryListRow({
           <Button variant="outline" size="sm" type="button" onClick={(e) => { e.stopPropagation(); openDetail() }}>
             View
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onGenerateTests(story.id, story.external_key ?? null)
-            }}
-            disabled={generatingStoryId === story.id}
-            isLoading={generatingStoryId === story.id}
-          >
-            {generatingStoryId !== story.id && <SparklesIcon className="mr-1 h-4 w-4" />}
-            Generate tests
-          </Button>
+          {!hasGeneratedTests ? (
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onGenerateTests(story.id, story.external_key ?? null)
+              }}
+              disabled={generatingStoryId === story.id}
+              isLoading={generatingStoryId === story.id}
+            >
+              {generatingStoryId !== story.id && <SparklesIcon className="mr-1 h-4 w-4" />}
+              Generate tests
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onRegenerateClick(story.id, story.external_key ?? null)
+              }}
+              disabled={generatingStoryId === story.id}
+              isLoading={generatingStoryId === story.id}
+            >
+              {generatingStoryId !== story.id && <SparklesIcon className="mr-1 h-4 w-4" />}
+              Regenerate tests
+            </Button>
+          )}
           <Button
             variant="danger"
             size="sm"
