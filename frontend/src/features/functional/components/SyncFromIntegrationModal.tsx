@@ -144,7 +144,13 @@ export default function SyncFromIntegrationModal({
   }
 
   const toggleJiraSprint = (sprintId: number) => {
-    setJiraAllSprints(false)
+    if (jiraAllSprints) {
+      // Leave "all" mode: keep every loaded sprint except the one toggled off
+      const allIds = sprints.map((s) => s.id)
+      setJiraAllSprints(false)
+      setJiraSelectedSprintIds(allIds.filter((id) => id !== sprintId))
+      return
+    }
     setJiraSelectedSprintIds((prev) =>
       prev.includes(sprintId) ? prev.filter((id) => id !== sprintId) : [...prev, sprintId]
     )
@@ -437,7 +443,9 @@ export default function SyncFromIntegrationModal({
                                       >
                                         <input
                                           type="checkbox"
-                                          checked={!jiraAllSprints && jiraSelectedSprintIds.includes(sprint.id)}
+                                          checked={
+                                            jiraAllSprints || jiraSelectedSprintIds.includes(sprint.id)
+                                          }
                                           onChange={() => toggleJiraSprint(sprint.id)}
                                           className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
                                         />
@@ -452,8 +460,9 @@ export default function SyncFromIntegrationModal({
                             </div>
                           )}
                           <p className="mt-1 text-xs text-gray-500">
-                            Check <span className="font-medium">All sprints</span> for every sprint, or pick one or
-                            more specific sprints.
+                            With <span className="font-medium">All sprints</span>, every sprint below is included
+                            (all boxes checked). Uncheck a sprint to limit scope, or pick only the sprints you
+                            need.
                           </p>
                         </div>
                       )}

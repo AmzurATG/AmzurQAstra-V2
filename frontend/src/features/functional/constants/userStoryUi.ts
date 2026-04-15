@@ -6,7 +6,8 @@ import {
 } from '@heroicons/react/24/outline'
 import type { UserStoryItemType, UserStoryPriority, UserStoryStatus } from '../types'
 
-export const USER_STORIES_PAGE_SIZE = 20
+/** Kept small so the list stays scannable (max rows per request / page). */
+export const USER_STORIES_PAGE_SIZE = 5
 
 /** Jira/PM issue type names for default quick sync and modal initial selection */
 export const DEFAULT_SYNC_ISSUE_TYPES = ['Epic', 'Story', 'Bug'] as const
