@@ -112,7 +112,7 @@ export function UserStoryListRow({
             isLoading={generatingStoryId === story.id}
             title={
               hasGeneratedTests
-                ? 'AI test cases already exist. Remove generated cases from Test Cases if you need to generate again.'
+                ? 'Test cases already generated for this story'
                 : 'Create AI test cases from this story'
             }
           >

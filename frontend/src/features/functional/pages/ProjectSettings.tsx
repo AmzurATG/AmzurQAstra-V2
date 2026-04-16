@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 
 export default function ProjectSettings() {
   const { projectId } = useParams<{ projectId: string }>()
-  const { currentProject, fetchProject } = useProjectStore()
+  const { currentProject, setCurrentProject } = useProjectStore()
   
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -52,12 +52,11 @@ export default function ProjectSettings() {
         }
       }
       
-      await projectsApi.update(Number(projectId), updateData)
+      const updated = await projectsApi.update(Number(projectId), updateData)
+      setCurrentProject(updated)
       toast.success('Project settings saved successfully')
       // Clear password field after save
       setAppPassword('')
-      // Refresh the project in store
-      await fetchProject(projectId)
     } catch (error: any) {
       const message = error.response?.data?.detail || error.message || 'Failed to save settings'
       toast.error(message)

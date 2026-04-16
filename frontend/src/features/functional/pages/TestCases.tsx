@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Card } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
@@ -17,11 +17,26 @@ import { CredentialsOverride } from '../components/CredentialsOverride'
 import { TestCaseEditModal } from '../components/TestCaseEditModal'
 import type { TestCase, TestStep, TestRunCreateRequest } from '../types'
 
+/** If store has no app URL, one silent GET may recover after Settings save or another tab. */
+async function ensureProjectHasAppUrl(projectId: string | undefined): Promise<boolean> {
+  if (!projectId) return false
+  const store = useProjectStore.getState()
+  if (store.currentProject?.app_url) return true
+  await store.revalidateProject(projectId)
+  return !!(useProjectStore.getState().currentProject?.app_url)
+}
+
 export default function TestCases() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
-  const { currentProject } = useProjectStore()
+  const { revalidateProject } = useProjectStore()
   const pid = Number(projectId)
+
+  useEffect(() => {
+    if (projectId) {
+      void revalidateProject(projectId)
+    }
+  }, [projectId, revalidateProject])
 
   // Hooks
   const {
@@ -108,18 +123,24 @@ export default function TestCases() {
     }
   }
 
-  // Execution Handlers
-  const buildRequest = (tcIds?: number[]): TestRunCreateRequest => ({
-    project_id: pid,
-    app_url: currentProject?.app_url || undefined,
-    test_case_ids: tcIds,
-    credentials: (overrideUser || overridePass)
-      ? { username: overrideUser || undefined, password: overridePass || undefined }
-      : undefined,
-  })
+  // Execution Handlers (read latest project from store so runs use URL after revalidate)
+  const buildRequest = (tcIds?: number[]): TestRunCreateRequest => {
+    const cp = useProjectStore.getState().currentProject
+    return {
+      project_id: pid,
+      app_url: cp?.app_url || undefined,
+      test_case_ids: tcIds,
+      credentials: (overrideUser || overridePass)
+        ? { username: overrideUser || undefined, password: overridePass || undefined }
+        : undefined,
+    }
+  }
 
   const runSingle = async (tcId: number) => {
-    if (!currentProject?.app_url) { toast.error('Set App URL first'); return }
+    if (!(await ensureProjectHasAppUrl(projectId))) {
+      toast.error('Set App URL first')
+      return
+    }
     toast.promise(exec.startRun(buildRequest([tcId])), {
       loading: 'Initializing browser...',
       success: 'Execution started',
@@ -128,7 +149,10 @@ export default function TestCases() {
   }
 
   const runSelected = async () => {
-    if (!currentProject?.app_url) { toast.error('Set App URL first'); return }
+    if (!(await ensureProjectHasAppUrl(projectId))) {
+      toast.error('Set App URL first')
+      return
+    }
     if (selectedIds.size === 0) { toast.error('Select cases first'); return }
     toast.promise(exec.startRun(buildRequest(Array.from(selectedIds))), {
       loading: `Starting ${selectedIds.size} tests...`,
@@ -138,7 +162,10 @@ export default function TestCases() {
   }
 
   const runAll = async () => {
-    if (!currentProject?.app_url) { toast.error('Set App URL first'); return }
+    if (!(await ensureProjectHasAppUrl(projectId))) {
+      toast.error('Set App URL first')
+      return
+    }
     toast.promise(exec.startRun(buildRequest()), {
       loading: 'Preparing full test run...',
       success: 'Execution started',
@@ -149,16 +176,14 @@ export default function TestCases() {
   const saveCredentialsToProject = async () => {
     if (!pid || !overrideUser || !overridePass) return
     try {
-      await projectsApi.update(pid, {
+      const updated = await projectsApi.update(pid, {
         app_credentials: {
           username: overrideUser,
           password: overridePass
         }
       })
+      useProjectStore.getState().setCurrentProject(updated)
       toast.success('Credentials saved to project settings')
-      // Refresh project to update header
-      const { fetchProject } = useProjectStore.getState()
-      await fetchProject(projectId!)
       setShowCreds(false)
     } catch (err) {
       toast.error('Failed to save credentials')

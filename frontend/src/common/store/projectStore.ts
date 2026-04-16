@@ -9,7 +9,11 @@ interface ProjectState {
   error: string | null
   
   fetchProjects: () => Promise<void>
-  fetchProject: (projectId: string) => Promise<void>
+  fetchProject: (projectId: string, options?: { force?: boolean }) => Promise<void>
+  /** Merge server project payload (e.g. after PUT) without an extra GET. */
+  setCurrentProject: (project: Project) => void
+  /** GET project by id and update store; does not toggle isLoading (safe under ProjectLayout). */
+  revalidateProject: (projectId: string) => Promise<void>
   selectProject: (projectId: number) => Promise<void>
   clearCurrentProject: () => void
 }
@@ -32,21 +36,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  fetchProject: async (projectId: string) => {
-    // Skip if already loaded
+  fetchProject: async (projectId: string, options?: { force?: boolean }) => {
+    const id = parseInt(projectId, 10)
     const current = get().currentProject
-    if (current && current.id === parseInt(projectId)) {
+    if (!options?.force && current && current.id === id) {
       return
     }
-    
+
     set({ isLoading: true, error: null })
     try {
-      const project = await projectsApi.get(parseInt(projectId))
+      const project = await projectsApi.get(id)
       set({ currentProject: project })
     } catch {
       set({ error: 'Failed to load project', currentProject: null })
     } finally {
       set({ isLoading: false })
+    }
+  },
+
+  setCurrentProject: (project: Project) => {
+    set({ currentProject: project })
+  },
+
+  revalidateProject: async (projectId: string) => {
+    const id = parseInt(projectId, 10)
+    if (Number.isNaN(id)) return
+    try {
+      const project = await projectsApi.get(id)
+      set({ currentProject: project })
+    } catch {
+      // Keep existing store state on silent refresh failure
     }
   },
 
