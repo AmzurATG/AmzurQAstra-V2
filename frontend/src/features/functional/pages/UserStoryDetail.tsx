@@ -14,7 +14,6 @@ import { userStoriesApi } from '../api'
 import type { UserStory } from '../types'
 import { UserStoryEditModal } from '../components/userStories/UserStoryEditModal'
 import { TestGenerationInfoDialog } from '../components/userStories/TestGenerationInfoDialog'
-import { RegenerateTestsDialog } from '../components/userStories/RegenerateTestsDialog'
 import { useUserStoryTestGeneration } from '../hooks/useUserStoryTestGeneration'
 import {
   aiGeneratedTestsExistCopy,
@@ -35,8 +34,6 @@ export default function UserStoryDetail() {
   const [loading, setLoading] = useState(true)
   const [editOpen, setEditOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [regenerateOpen, setRegenerateOpen] = useState(false)
-
   const loadStory = useCallback(async () => {
     if (!projectId || !storyId || Number.isNaN(sid)) return
     setLoading(true)
@@ -141,29 +138,20 @@ export default function UserStoryDetail() {
             <PencilIcon className="mr-1.5 h-4 w-4" />
             Edit
           </Button>
-          {!hasGeneratedTests ? (
-            <Button
-              variant="outline"
-              onClick={handleGenerateTests}
-              disabled={isGenerating}
-              isLoading={isGenerating}
-              title="Create AI test cases from this story"
-            >
-              <SparklesIcon className="mr-1.5 h-4 w-4" />
-              Generate tests
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              onClick={() => setRegenerateOpen(true)}
-              disabled={isGenerating}
-              isLoading={isGenerating}
-              title="Replace existing AI-generated test cases after confirmation"
-            >
-              <SparklesIcon className="mr-1.5 h-4 w-4" />
-              Regenerate tests
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            onClick={handleGenerateTests}
+            disabled={hasGeneratedTests || isGenerating}
+            isLoading={isGenerating}
+            title={
+              hasGeneratedTests
+                ? 'AI test cases already exist. Remove generated cases from Test Cases if you need to generate again.'
+                : 'Create AI test cases from this story'
+            }
+          >
+            <SparklesIcon className="mr-1.5 h-4 w-4" />
+            Generate tests
+          </Button>
           <Button variant="danger" onClick={handleDelete} disabled={deleting} isLoading={deleting}>
             <TrashIcon className="mr-1.5 h-4 w-4" />
             Delete
@@ -238,17 +226,6 @@ export default function UserStoryDetail() {
         isOpen={infoDialogOpen}
         message={infoMessage}
         onClose={closeInfoDialog}
-      />
-
-      <RegenerateTestsDialog
-        isOpen={regenerateOpen}
-        storyLabel={story.external_key || `Story #${story.id}`}
-        isLoading={isGenerating}
-        onClose={() => setRegenerateOpen(false)}
-        onConfirm={async () => {
-          await runGenerate(story.id, true)
-          setRegenerateOpen(false)
-        }}
       />
     </div>
   )

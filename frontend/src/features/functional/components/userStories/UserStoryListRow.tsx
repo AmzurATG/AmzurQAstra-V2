@@ -17,7 +17,6 @@ type Props = {
   generatingStoryId: number | null
   deletingStoryId: number | null
   onGenerateTests: (storyId: number, key: string | null) => void
-  onRegenerateClick: (storyId: number, key: string | null) => void
   onDelete: (storyId: number, key: string | null) => void
 }
 
@@ -28,7 +27,6 @@ export function UserStoryListRow({
   generatingStoryId,
   deletingStoryId,
   onGenerateTests,
-  onRegenerateClick,
   onDelete,
 }: Props) {
   const navigate = useNavigate()
@@ -102,39 +100,25 @@ export function UserStoryListRow({
           <Button variant="outline" size="sm" type="button" onClick={(e) => { e.stopPropagation(); openDetail() }}>
             View
           </Button>
-          {!hasGeneratedTests ? (
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onGenerateTests(story.id, story.external_key ?? null)
-              }}
-              disabled={generatingStoryId === story.id}
-              isLoading={generatingStoryId === story.id}
-              title="Create AI test cases from this story"
-            >
-              {generatingStoryId !== story.id && <SparklesIcon className="mr-1 h-4 w-4" />}
-              Generate tests
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onRegenerateClick(story.id, story.external_key ?? null)
-              }}
-              disabled={generatingStoryId === story.id}
-              isLoading={generatingStoryId === story.id}
-              title="Replace existing AI-generated test cases after confirmation"
-            >
-              {generatingStoryId !== story.id && <SparklesIcon className="mr-1 h-4 w-4" />}
-              Regenerate tests
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onGenerateTests(story.id, story.external_key ?? null)
+            }}
+            disabled={hasGeneratedTests || generatingStoryId === story.id}
+            isLoading={generatingStoryId === story.id}
+            title={
+              hasGeneratedTests
+                ? 'AI test cases already exist. Remove generated cases from Test Cases if you need to generate again.'
+                : 'Create AI test cases from this story'
+            }
+          >
+            {generatingStoryId !== story.id && <SparklesIcon className="mr-1 h-4 w-4" />}
+            Generate tests
+          </Button>
           <Button
             variant="danger"
             size="sm"

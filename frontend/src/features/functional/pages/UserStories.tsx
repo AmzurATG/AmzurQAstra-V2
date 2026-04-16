@@ -14,7 +14,6 @@ import { SyncFromIntegrationModal } from '../components'
 import { UserStoryCreateModal } from '../components/userStories/UserStoryCreateModal'
 import { UserStoryListRow } from '../components/userStories/UserStoryListRow'
 import { TestGenerationInfoDialog } from '../components/userStories/TestGenerationInfoDialog'
-import { RegenerateTestsDialog } from '../components/userStories/RegenerateTestsDialog'
 import { useUserStoryTestGeneration } from '../hooks/useUserStoryTestGeneration'
 import { usePmQuickSync } from '../hooks/usePmQuickSync'
 import { userStoriesApi } from '../api'
@@ -45,10 +44,6 @@ export default function UserStories() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
   const [deletingStoryId, setDeletingStoryId] = useState<number | null>(null)
-  const [regenerateTarget, setRegenerateTarget] = useState<{
-    id: number
-    key: string | null
-  } | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [integrationsReady, setIntegrationsReady] = useState(false)
   const [hasPmIntegration, setHasPmIntegration] = useState(false)
@@ -175,10 +170,6 @@ export default function UserStories() {
 
   const handleGenerateTests = (storyId: number, _storyKey: string | null) => {
     void runGenerate(storyId, false)
-  }
-
-  const handleRegenerateClick = (storyId: number, _key: string | null) => {
-    setRegenerateTarget({ id: storyId, key: _key })
   }
 
   const handleDeleteStory = async (storyId: number, storyKey: string | null) => {
@@ -407,7 +398,6 @@ export default function UserStories() {
                 generatingStoryId={generatingStoryId}
                 deletingStoryId={deletingStoryId}
                 onGenerateTests={handleGenerateTests}
-                onRegenerateClick={handleRegenerateClick}
                 onDelete={handleDeleteStory}
               />
             ))}
@@ -452,25 +442,6 @@ export default function UserStories() {
         isOpen={infoDialogOpen}
         message={infoMessage}
         onClose={closeInfoDialog}
-      />
-
-      <RegenerateTestsDialog
-        isOpen={regenerateTarget !== null}
-        storyLabel={
-          regenerateTarget
-            ? regenerateTarget.key || `Story #${regenerateTarget.id}`
-            : ''
-        }
-        isLoading={
-          regenerateTarget !== null && generatingStoryId === regenerateTarget.id
-        }
-        onClose={() => setRegenerateTarget(null)}
-        onConfirm={async () => {
-          if (!regenerateTarget) return
-          const t = regenerateTarget
-          await runGenerate(t.id, true)
-          setRegenerateTarget(null)
-        }}
       />
     </div>
   )
