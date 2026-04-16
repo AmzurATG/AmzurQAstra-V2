@@ -16,7 +16,13 @@ import { UserStoryEditModal } from '../components/userStories/UserStoryEditModal
 import { TestGenerationInfoDialog } from '../components/userStories/TestGenerationInfoDialog'
 import { RegenerateTestsDialog } from '../components/userStories/RegenerateTestsDialog'
 import { useUserStoryTestGeneration } from '../hooks/useUserStoryTestGeneration'
-import { itemTypeConfig, priorityConfig, sourceConfig, statusConfig } from '../constants/userStoryUi'
+import {
+  aiGeneratedTestsExistCopy,
+  itemTypeConfig,
+  priorityConfig,
+  sourceConfig,
+  statusConfig,
+} from '../constants/userStoryUi'
 import toast from 'react-hot-toast'
 
 export default function UserStoryDetail() {
@@ -129,7 +135,8 @@ export default function UserStoryDetail() {
           <ArrowLeftIcon className="h-4 w-4" />
           Back to list
         </Link>
-        <div className="flex flex-wrap gap-2 lg:ml-auto">
+        <div className="flex flex-col items-stretch gap-2 sm:items-end lg:ml-auto lg:min-w-[20rem]">
+          <div className="flex flex-wrap gap-2 sm:justify-end">
           <Button variant="outline" onClick={() => setEditOpen(true)}>
             <PencilIcon className="mr-1.5 h-4 w-4" />
             Edit
@@ -140,6 +147,7 @@ export default function UserStoryDetail() {
               onClick={handleGenerateTests}
               disabled={isGenerating}
               isLoading={isGenerating}
+              title="Create AI test cases from this story"
             >
               <SparklesIcon className="mr-1.5 h-4 w-4" />
               Generate tests
@@ -150,6 +158,7 @@ export default function UserStoryDetail() {
               onClick={() => setRegenerateOpen(true)}
               disabled={isGenerating}
               isLoading={isGenerating}
+              title="Replace existing AI-generated test cases after confirmation"
             >
               <SparklesIcon className="mr-1.5 h-4 w-4" />
               Regenerate tests
@@ -159,6 +168,12 @@ export default function UserStoryDetail() {
             <TrashIcon className="mr-1.5 h-4 w-4" />
             Delete
           </Button>
+          </div>
+          {hasGeneratedTests && (
+            <p className="text-sm text-gray-600 text-right leading-snug" role="status">
+              {aiGeneratedTestsExistCopy(generatedCount)}
+            </p>
+          )}
         </div>
       </div>
 

@@ -2,7 +2,13 @@ import { useNavigate } from 'react-router-dom'
 import { SparklesIcon, TrashIcon, ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
 import type { UserStory } from '../../types'
-import { itemTypeConfig, priorityConfig, sourceConfig, statusConfig } from '../../constants/userStoryUi'
+import {
+  aiGeneratedTestsExistCopy,
+  itemTypeConfig,
+  priorityConfig,
+  sourceConfig,
+  statusConfig,
+} from '../../constants/userStoryUi'
 
 type Props = {
   story: UserStory
@@ -91,7 +97,8 @@ export function UserStoryListRow({
             </div>
           </button>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:max-w-[min(100%,28rem)]">
+        <div className="flex shrink-0 flex-col items-end gap-1.5 sm:max-w-[min(100%,28rem)]">
+          <div className="flex flex-wrap items-center justify-end gap-2">
           <Button variant="outline" size="sm" type="button" onClick={(e) => { e.stopPropagation(); openDetail() }}>
             View
           </Button>
@@ -106,6 +113,7 @@ export function UserStoryListRow({
               }}
               disabled={generatingStoryId === story.id}
               isLoading={generatingStoryId === story.id}
+              title="Create AI test cases from this story"
             >
               {generatingStoryId !== story.id && <SparklesIcon className="mr-1 h-4 w-4" />}
               Generate tests
@@ -121,6 +129,7 @@ export function UserStoryListRow({
               }}
               disabled={generatingStoryId === story.id}
               isLoading={generatingStoryId === story.id}
+              title="Replace existing AI-generated test cases after confirmation"
             >
               {generatingStoryId !== story.id && <SparklesIcon className="mr-1 h-4 w-4" />}
               Regenerate tests
@@ -140,6 +149,15 @@ export function UserStoryListRow({
             {deletingStoryId !== story.id && <TrashIcon className="mr-1 h-4 w-4" />}
             Delete
           </Button>
+          </div>
+          {hasGeneratedTests && (
+            <p
+              className="text-xs text-gray-500 text-right max-w-[18rem] leading-snug"
+              role="status"
+            >
+              {aiGeneratedTestsExistCopy(generatedCount)}
+            </p>
+          )}
         </div>
       </div>
     </div>
