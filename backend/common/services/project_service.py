@@ -22,6 +22,13 @@ class ProjectService:
             select(Project).where(Project.id == project_id)
         )
         return result.scalar_one_or_none()
+
+    async def get_active_by_id(self, project_id: int) -> Optional[Project]:
+        """Return project only if it exists and is active (not soft-deleted)."""
+        project = await self.get_by_id(project_id)
+        if project is None or not project.is_active:
+            return None
+        return project
     
     async def get_list(
         self,

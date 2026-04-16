@@ -80,7 +80,7 @@ async def get_project(
 ):
     """Get a project by ID."""
     project_service = ProjectService(db)
-    project = await project_service.get_by_id(project_id)
+    project = await project_service.get_active_by_id(project_id)
     
     if not project:
         raise HTTPException(
@@ -107,7 +107,7 @@ async def update_project(
 ):
     """Update a project."""
     project_service = ProjectService(db)
-    project = await project_service.get_by_id(project_id)
+    project = await project_service.get_active_by_id(project_id)
     
     if not project:
         raise HTTPException(
@@ -148,5 +148,8 @@ async def delete_project(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to delete this project",
         )
+
+    if not project.is_active:
+        return None
     
     await project_service.delete(project_id)
