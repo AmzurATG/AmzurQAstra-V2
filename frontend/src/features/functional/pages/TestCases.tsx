@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Card } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
@@ -49,6 +49,44 @@ export default function TestCases() {
   const { revalidateProject } = useProjectStore()
   const pid = Number(projectId)
 
+  const {
+    testCases,
+    isLoading,
+    searchQuery,
+    setSearchQuery,
+    priorityFilter,
+    setPriorityFilter,
+    categoryFilter,
+    setCategoryFilter,
+    statusFilter,
+    setStatusFilter,
+    page,
+    setPage,
+    pagination,
+    loadTestCases
+  } = useTestCaseFilters(projectId)
+
+  const exec = useTestRunExecution()
+
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
+  const [loadingSteps, setLoadingSteps] = useState<Set<number>>(new Set())
+  const [stepsCache, setStepsCache] = useState<Record<number, TestStep[]>>({})
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() =>
+    loadTestCaseSelection(projectId)
+  )
+
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [editingTestCase, setEditingTestCase] = useState<TestCase | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const [showCreds, setShowCreds] = useState(false)
+  const [overrideUser, setOverrideUser] = useState('')
+  const [overridePass, setOverridePass] = useState('')
+
+  const listViewKey = `${page}|${searchQuery}|${priorityFilter}|${categoryFilter}|${statusFilter}`
+  const prevListViewKeyRef = useRef<string | null>(null)
+  const prevPageCaseIdsRef = useRef<Set<number>>(new Set())
+
   useEffect(() => {
     if (projectId) {
       void revalidateProject(projectId)
@@ -71,41 +109,31 @@ export default function TestCases() {
     }
   }, [projectId, selectedIds])
 
-  // Hooks
-  const {
-    testCases,
-    isLoading,
-    searchQuery,
-    setSearchQuery,
-    priorityFilter,
-    setPriorityFilter,
-    categoryFilter,
-    setCategoryFilter,
-    statusFilter,
-    setStatusFilter,
-    page,
-    setPage,
-    pagination,
-    loadTestCases
-  } = useTestCaseFilters(projectId)
+  // After refresh on the same list view, drop selections for rows that disappeared (e.g. delete).
+  useEffect(() => {
+    if (isLoading) return
+    const idsNow = new Set(testCases.map((t) => t.id))
+    const sameView = prevListViewKeyRef.current === listViewKey
+    prevListViewKeyRef.current = listViewKey
 
-  const exec = useTestRunExecution()
+    if (!sameView) {
+      prevPageCaseIdsRef.current = idsNow
+      return
+    }
 
-  // Local State
-  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
-  const [loadingSteps, setLoadingSteps] = useState<Set<number>>(new Set())
-  const [stepsCache, setStepsCache] = useState<Record<number, TestStep[]>>({})
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(() =>
-    loadTestCaseSelection(projectId)
-  )
-  
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
-  const [editingTestCase, setEditingTestCase] = useState<TestCase | null>(null)
-  const [isSaving, setIsSaving] = useState(false)
-  
-  const [showCreds, setShowCreds] = useState(false)
-  const [overrideUser, setOverrideUser] = useState('')
-  const [overridePass, setOverridePass] = useState('')
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      let changed = false
+      for (const id of prevPageCaseIdsRef.current) {
+        if (!idsNow.has(id) && next.has(id)) {
+          next.delete(id)
+          changed = true
+        }
+      }
+      prevPageCaseIdsRef.current = idsNow
+      return changed ? next : prev
+    })
+  }, [testCases, isLoading, listViewKey])
 
   // Handlers
   const toggleRowExpansion = useCallback(async (id: number) => {
