@@ -149,16 +149,14 @@ export default function TestCases() {
   const saveCredentialsToProject = async () => {
     if (!pid || !overrideUser || !overridePass) return
     try {
-      await projectsApi.update(pid, {
+      const updated = await projectsApi.update(pid, {
         app_credentials: {
           username: overrideUser,
           password: overridePass
         }
       })
       toast.success('Credentials saved to project settings')
-      // Refresh project to update header
-      const { fetchProject } = useProjectStore.getState()
-      await fetchProject(projectId!)
+      useProjectStore.getState().setCurrentProject(updated)
       setShowCreds(false)
     } catch (err) {
       toast.error('Failed to save credentials')
