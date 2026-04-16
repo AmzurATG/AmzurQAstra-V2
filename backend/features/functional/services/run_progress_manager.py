@@ -10,6 +10,8 @@ class RunProgressManager:
     
     _instance = None
     _progress: Dict[int, Dict[str, Any]] = {}
+    _cancel_events: Dict[int, threading.Event] = {}
+    _cancel_lock = threading.Lock()
     
     def __new__(cls):
         if cls._instance is None:
@@ -44,6 +46,22 @@ class RunProgressManager:
     def cleanup(self, run_id: int) -> None:
         """Remove progress for a run."""
         self._progress.pop(run_id, None)
+        self.clear_cancel(run_id)
+
+    def request_cancel(self, run_id: int) -> None:
+        """Signal background execution to stop (cross-thread safe)."""
+        with self._cancel_lock:
+            ev = self._cancel_events.setdefault(run_id, threading.Event())
+            ev.set()
+
+    def is_cancel_requested(self, run_id: int) -> bool:
+        with self._cancel_lock:
+            ev = self._cancel_events.get(run_id)
+            return bool(ev and ev.is_set())
+
+    def clear_cancel(self, run_id: int) -> None:
+        with self._cancel_lock:
+            self._cancel_events.pop(run_id, None)
         
     def schedule_cleanup(self, run_id: int, delay_seconds: int = 300) -> None:
         """
