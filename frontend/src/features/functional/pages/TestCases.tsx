@@ -17,6 +17,23 @@ import { CredentialsOverride } from '../components/CredentialsOverride'
 import { TestCaseEditModal } from '../components/TestCaseEditModal'
 import type { TestCase, TestStep, TestRunCreateRequest } from '../types'
 
+const testCaseSelectionKey = (projectId: string) => `qastra:test-case-selection:${projectId}`
+
+function loadTestCaseSelection(projectId: string | undefined): Set<number> {
+  if (!projectId || typeof window === 'undefined') return new Set()
+  try {
+    const raw = sessionStorage.getItem(testCaseSelectionKey(projectId))
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(
+      parsed.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+    )
+  } catch {
+    return new Set()
+  }
+}
+
 /** If store has no app URL, one silent GET may recover after Settings save or another tab. */
 async function ensureProjectHasAppUrl(projectId: string | undefined): Promise<boolean> {
   if (!projectId) return false
@@ -37,6 +54,22 @@ export default function TestCases() {
       void revalidateProject(projectId)
     }
   }, [projectId, revalidateProject])
+
+  useEffect(() => {
+    setSelectedIds(loadTestCaseSelection(projectId))
+  }, [projectId])
+
+  useEffect(() => {
+    if (!projectId) return
+    try {
+      sessionStorage.setItem(
+        testCaseSelectionKey(projectId),
+        JSON.stringify([...selectedIds])
+      )
+    } catch {
+      // ignore quota / private mode
+    }
+  }, [projectId, selectedIds])
 
   // Hooks
   const {
@@ -62,7 +95,9 @@ export default function TestCases() {
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [loadingSteps, setLoadingSteps] = useState<Set<number>>(new Set())
   const [stepsCache, setStepsCache] = useState<Record<number, TestStep[]>>({})
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() =>
+    loadTestCaseSelection(projectId)
+  )
   
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingTestCase, setEditingTestCase] = useState<TestCase | null>(null)
@@ -101,6 +136,11 @@ export default function TestCases() {
     if (!window.confirm(`Delete "${title}"?`)) return
     try {
       await testCasesApi.delete(id)
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
       toast.success('Deleted')
       loadTestCases()
     } catch (err) {
@@ -193,6 +233,21 @@ export default function TestCases() {
   const isRunning = exec.progress && !['completed', 'passed', 'failed', 'error', 'cancelled'].includes(exec.progress.status)
   const isDone = exec.progress && !isRunning
 
+  const handleToggleAll = useCallback(() => {
+    const pageIds = testCases.map((t) => t.id)
+    if (pageIds.length === 0) return
+    setSelectedIds((prev) => {
+      const allOnPage = pageIds.every((id) => prev.has(id))
+      const next = new Set(prev)
+      if (allOnPage) {
+        pageIds.forEach((id) => next.delete(id))
+      } else {
+        pageIds.forEach((id) => next.add(id))
+      }
+      return next
+    })
+  }, [testCases])
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -268,7 +323,7 @@ export default function TestCases() {
               if (next.has(id)) next.delete(id); else next.add(id)
               return next
             })}
-            onToggleAll={() => setSelectedIds(prev => prev.size === testCases.length ? new Set() : new Set(testCases.map(t => t.id)))}
+            onToggleAll={handleToggleAll}
             isRunning={!!isRunning}
             progress={exec.progress}
           />
