@@ -1,4 +1,11 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { Card, CardTitle } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
@@ -9,6 +16,7 @@ import {
   FunnelIcon,
   MagnifyingGlassIcon,
   LinkIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline'
 import { SyncFromIntegrationModal } from '../components'
 import { UserStoryCreateModal } from '../components/userStories/UserStoryCreateModal'
@@ -31,6 +39,23 @@ import {
   sprintIdsQueryFromPrefs,
 } from '../utils/pmSyncPreferences'
 import toast from 'react-hot-toast'
+
+const userStorySelectionKey = (projectId: string) => `qastra:user-story-selection:${projectId}`
+
+function loadUserStorySelection(projectId: string | undefined): Set<number> {
+  if (!projectId || typeof window === 'undefined') return new Set()
+  try {
+    const raw = sessionStorage.getItem(userStorySelectionKey(projectId))
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(
+      parsed.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+    )
+  } catch {
+    return new Set()
+  }
+}
 
 export default function UserStories() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -62,6 +87,14 @@ export default function UserStories() {
   /** Server has sync_scope with issue types — enables Sync now when localStorage is empty (new device/tab). */
   const [remoteQuickSyncAllowed, setRemoteQuickSyncAllowed] = useState(false)
 
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() =>
+    loadUserStorySelection(projectId)
+  )
+  /** When set, user used “select all eligible” across all pages — used for checkbox checked/indeterminate. */
+  const [selectAllEligibleSnapshot, setSelectAllEligibleSnapshot] = useState<number[] | null>(null)
+  const [isSelectingAllEligible, setIsSelectingAllEligible] = useState(false)
+  const selectAllCheckboxRef = useRef<HTMLInputElement>(null)
+
   const reloadStoriesAndStatsRef = useRef<() => void>(() => {})
 
   const {
@@ -75,6 +108,10 @@ export default function UserStories() {
     () => reloadStoriesAndStatsRef.current(),
     remoteQuickSyncAllowed
   )
+
+  const listViewKey = `${page}|${debouncedSearch}|${statusFilter}|${prefsVersion}`
+  const prevListViewKeyRef = useRef<string | null>(null)
+  const prevPageStoryIdsRef = useRef<Set<number>>(new Set())
 
   const loadStats = useCallback(async () => {
     if (!projectId) return
@@ -243,6 +280,167 @@ export default function UserStories() {
     void runGenerate(storyId, false)
   }
 
+  const handleToggleSelect = useCallback((storyId: number) => {
+    setSelectAllEligibleSnapshot(null)
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(storyId)) next.delete(storyId)
+      else next.add(storyId)
+      return next
+    })
+  }, [])
+
+  const isGlobalEligibleSelection = useMemo(() => {
+    if (
+      selectAllEligibleSnapshot === null ||
+      selectAllEligibleSnapshot.length === 0 ||
+      selectedIds.size === 0
+    ) {
+      return false
+    }
+    if (selectAllEligibleSnapshot.length !== selectedIds.size) return false
+    return selectAllEligibleSnapshot.every((id) => selectedIds.has(id))
+  }, [selectAllEligibleSnapshot, selectedIds])
+
+  const handleSelectAllEligibleAcrossPages = useCallback(async () => {
+    if (isGlobalEligibleSelection) {
+      setSelectedIds(new Set())
+      setSelectAllEligibleSnapshot(null)
+      return
+    }
+    if (!projectId) return
+    const pid = Number(projectId)
+    const prefs = getPmSyncPreferences(pid)
+    if (isJiraScopedWithoutSprintSelection(prefs)) {
+      toast.error('Choose a sprint scope in Sync from Integration first.')
+      return
+    }
+    const sprintIds = sprintIdsQueryFromPrefs(prefs)
+    const params: {
+      page: number
+      page_size: number
+      status?: string
+      search?: string
+      sprint_ids?: string
+    } = { page: 1, page_size: 100 }
+    if (statusFilter !== 'all') params.status = statusFilter
+    const q = debouncedSearch.trim()
+    if (q) params.search = q
+    if (sprintIds) params.sprint_ids = sprintIds
+
+    setIsSelectingAllEligible(true)
+    try {
+      const eligible: number[] = []
+      let pageNum = 1
+      let totalPages = 1
+      do {
+        const res = await userStoriesApi.list(pid, { ...params, page: pageNum })
+        const data = res.data
+        totalPages = data.total_pages ?? 1
+        for (const item of data.items ?? []) {
+          if ((item.generated_test_cases ?? 0) === 0) eligible.push(item.id)
+        }
+        pageNum++
+      } while (pageNum <= totalPages)
+
+      setSelectedIds(new Set(eligible))
+      setSelectAllEligibleSnapshot(eligible)
+      if (eligible.length === 0) {
+        toast.success('No stories without generated tests in this list.')
+      }
+    } catch {
+      toast.error('Failed to load stories for selection')
+    } finally {
+      setIsSelectingAllEligible(false)
+    }
+  }, [
+    projectId,
+    statusFilter,
+    debouncedSearch,
+    isGlobalEligibleSelection,
+  ])
+
+  useEffect(() => {
+    const el = selectAllCheckboxRef.current
+    if (!el) return
+    el.indeterminate =
+      selectedIds.size > 0 && !isGlobalEligibleSelection
+  }, [selectedIds, isGlobalEligibleSelection])
+
+  const handleBulkGenerateTests = useCallback(async () => {
+    if (selectedIds.size === 0) return
+    const ids = Array.from(selectedIds)
+    for (const id of ids) {
+      await runGenerate(id, false)
+    }
+  }, [selectedIds, runGenerate])
+
+  useEffect(() => {
+    setSelectedIds(loadUserStorySelection(projectId))
+    setSelectAllEligibleSnapshot(null)
+  }, [projectId])
+
+  useEffect(() => {
+    if (!projectId) return
+    try {
+      sessionStorage.setItem(
+        userStorySelectionKey(projectId),
+        JSON.stringify([...selectedIds])
+      )
+    } catch {
+      // ignore quota / private mode
+    }
+  }, [projectId, selectedIds])
+
+  useEffect(() => {
+    if (isLoading) return
+    const idsNow = new Set(stories.map((s) => s.id))
+    const sameView = prevListViewKeyRef.current === listViewKey
+    prevListViewKeyRef.current = listViewKey
+
+    if (!sameView) {
+      prevPageStoryIdsRef.current = idsNow
+      return
+    }
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      let changed = false
+      for (const id of prevPageStoryIdsRef.current) {
+        if (!idsNow.has(id) && next.has(id)) {
+          next.delete(id)
+          changed = true
+        }
+      }
+      prevPageStoryIdsRef.current = idsNow
+      return changed ? next : prev
+    })
+  }, [stories, isLoading, listViewKey])
+
+  useEffect(() => {
+    setSelectAllEligibleSnapshot(null)
+  }, [listViewKey])
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      let changed = false
+      for (const s of stories) {
+        if ((s.generated_test_cases ?? 0) > 0 && next.has(s.id)) {
+          next.delete(s.id)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [stories])
+
+  useEffect(() => {
+    const snapshotInvalid = stories.some(
+      (s) => (s.generated_test_cases ?? 0) > 0 && selectedIds.has(s.id)
+    )
+    if (snapshotInvalid) setSelectAllEligibleSnapshot(null)
+  }, [stories, selectedIds])
+
   const handleDeleteStory = async (storyId: number, displayKey: string) => {
     const confirmMessage = `Are you sure you want to delete ${displayKey}? This will also delete all related test cases and test steps.`
     if (!window.confirm(confirmMessage)) return
@@ -251,6 +449,11 @@ export default function UserStories() {
     try {
       const response = await userStoriesApi.delete(Number(projectId), storyId)
       toast.success(response.data.message || 'User story deleted successfully')
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        next.delete(storyId)
+        return next
+      })
       loadStories()
       loadStats()
     } catch (error: unknown) {
@@ -312,6 +515,18 @@ export default function UserStories() {
             <PlusIcon className="mr-2 h-4 w-4" />
             Add Manual Story
           </Button>
+          {selectedIds.size > 0 && (
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => void handleBulkGenerateTests()}
+              disabled={generatingStoryId !== null || isQuickSyncing}
+              title="Generate AI test cases for all selected stories (across pages)."
+            >
+              <SparklesIcon className="mr-2 h-4 w-4" />
+              Generate tests ({selectedIds.size})
+            </Button>
+          )}
         </div>
       </div>
 
@@ -464,12 +679,66 @@ export default function UserStories() {
               {pagination.total > 0 ? ` · rows ${rangeStart}–${rangeEnd}` : null}
             </p>
           </div>
+          <div className="mt-4 flex flex-wrap items-center gap-4 border-b border-gray-100 px-2 pb-3">
+            <label className="inline-flex cursor-pointer select-none items-center gap-2 text-sm text-gray-700">
+              <input
+                ref={selectAllCheckboxRef}
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                checked={isGlobalEligibleSelection}
+                onChange={() => void handleSelectAllEligibleAcrossPages()}
+                disabled={
+                  stories.length === 0 ||
+                  isSelectingAllEligible ||
+                  generatingStoryId !== null
+                }
+                aria-label="Select all eligible stories on all pages"
+              />
+              {isSelectingAllEligible ? (
+                <span className="text-gray-500">Selecting…</span>
+              ) : (
+                <span>
+                  Select all eligible{' '}
+                  <span className="text-gray-500">(all pages — stories without generated tests)</span>
+                </span>
+              )}
+            </label>
+            {selectedIds.size > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => void handleBulkGenerateTests()}
+                disabled={generatingStoryId !== null || isQuickSyncing || isSelectingAllEligible}
+                title="Generate tests for every selected story"
+              >
+                <SparklesIcon className="mr-1.5 h-4 w-4" />
+                Generate tests ({selectedIds.size})
+              </Button>
+            )}
+            {selectedIds.size > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                className="text-gray-600"
+                onClick={() => {
+                  setSelectedIds(new Set())
+                  setSelectAllEligibleSnapshot(null)
+                }}
+              >
+                Clear selection
+              </Button>
+            )}
+          </div>
           <div className="mt-4 divide-y divide-gray-100">
             {stories.map((story) => (
               <UserStoryListRow
                 key={story.id}
                 story={story}
                 projectId={projectId!}
+                selected={selectedIds.has(story.id)}
+                onToggleSelect={handleToggleSelect}
                 generatingStoryId={generatingStoryId}
                 deletingStoryId={deletingStoryId}
                 onGenerateTests={handleGenerateTests}

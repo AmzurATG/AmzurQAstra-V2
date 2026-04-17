@@ -2,6 +2,8 @@
 
 from typing import Any, Dict, List, Optional
 
+from features.functional.utils.step_result_display import normalize_display_field
+
 REDACT_TOKEN = "••••••••"
 
 _STEP_STRING_KEYS = frozenset(
@@ -62,9 +64,11 @@ def redact_step_dict(
         return step
     out = dict(step)
     for k in _STEP_STRING_KEYS:
-        v = out.get(k)
-        if isinstance(v, str):
-            out[k] = redact_known_credentials(v, username=username, password=password)
+        if k not in out:
+            continue
+        v = out[k]
+        text = normalize_display_field(v)
+        out[k] = redact_known_credentials(text, username=username, password=password) or ""
     return out
 
 
@@ -82,8 +86,10 @@ def redact_agent_logs_list(
             continue
         e = dict(entry)
         for k in _LOG_STRING_KEYS:
-            v = e.get(k)
-            if isinstance(v, str):
-                e[k] = redact_known_credentials(v, username=username, password=password)
+            if k not in e:
+                continue
+            v = e[k]
+            text = normalize_display_field(v)
+            e[k] = redact_known_credentials(text, username=username, password=password) or ""
         out.append(e)
     return out

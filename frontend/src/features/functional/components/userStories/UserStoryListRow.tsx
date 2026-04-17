@@ -14,6 +14,8 @@ import {
 type Props = {
   story: UserStory
   projectId: string
+  selected: boolean
+  onToggleSelect: (storyId: number) => void
   generatingStoryId: number | null
   deletingStoryId: number | null
   onGenerateTests: (storyId: number, displayKey: string) => void
@@ -23,6 +25,8 @@ type Props = {
 export function UserStoryListRow({
   story,
   projectId,
+  selected,
+  onToggleSelect,
   generatingStoryId,
   deletingStoryId,
   onGenerateTests,
@@ -45,6 +49,28 @@ export function UserStoryListRow({
   return (
     <div className="rounded-lg px-2 py-4 -mx-2 transition-colors hover:bg-gray-50">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex shrink-0 pt-1 sm:pt-0.5">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-40"
+            checked={hasGeneratedTests ? false : selected}
+            disabled={hasGeneratedTests}
+            onChange={() => {
+              if (!hasGeneratedTests) onToggleSelect(story.id)
+            }}
+            onClick={(e) => e.stopPropagation()}
+            title={
+              hasGeneratedTests
+                ? 'Cannot select — test cases already generated for this story'
+                : `Select ${displayKey}`
+            }
+            aria-label={
+              hasGeneratedTests
+                ? `${displayKey} (already has generated tests, cannot select)`
+                : `Select ${displayKey}`
+            }
+          />
+        </div>
         <div className="flex min-w-0 flex-1 gap-3">
           <button
             type="button"

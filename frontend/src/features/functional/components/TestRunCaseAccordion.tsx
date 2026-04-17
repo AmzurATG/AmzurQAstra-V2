@@ -12,6 +12,7 @@ import {
 import type { CompletedCaseResult, TestResult } from '../types'
 import { AgentStepsStrip } from './AgentStepsStrip'
 import { testRunsApi } from '../api'
+import { formatStepDisplayValue } from '../utils/formatStepDisplayValue'
 
 const DETAIL_COL_SPAN = 9
 
@@ -166,7 +167,10 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
                     primaryScreenshotPath={detail.screenshot_path ?? undefined}
                   />
                   {stepRows?.map((s, i) => {
-                    const isAdapted = s.adaptation
+                    const descText = formatStepDisplayValue(s.description)
+                    const actualText = formatStepDisplayValue(s.actual_result)
+                    const adaptText = formatStepDisplayValue(s.adaptation)
+                    const isAdapted = adaptText.length > 0
                     const syncKey = `${result.test_result_id}-${s.step_number}`
                     return (
                       <div
@@ -198,10 +202,10 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
                           </div>
 
                           <div className="mt-1 text-gray-500 italic text-xs">
-                            Original: {s.description || '—'}
+                            Original: {descText || '—'}
                           </div>
 
-                          <p className="text-gray-600 mt-1">{s.actual_result || '—'}</p>
+                          <p className="text-gray-600 mt-1">{actualText || '—'}</p>
 
                           {isAdapted && (
                             <div className="mt-2 p-3 bg-purple-50 rounded-lg border border-purple-100 text-xs shadow-sm">
@@ -214,13 +218,13 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
                                   <p className="text-[10px] text-purple-400 uppercase font-bold">
                                     Original Intent
                                   </p>
-                                  <p className="text-purple-700 italic">&quot;{s.description}&quot;</p>
+                                  <p className="text-purple-700 italic">&quot;{descText}&quot;</p>
                                 </div>
                                 <div>
                                   <p className="text-[10px] text-purple-400 uppercase font-bold">
                                     AI Correction
                                   </p>
-                                  <p className="text-purple-900 font-medium">{s.adaptation}</p>
+                                  <p className="text-purple-900 font-medium">{adaptText}</p>
                                 </div>
                               </div>
                             </div>
