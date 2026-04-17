@@ -128,6 +128,13 @@ export function hydratePmSyncPreferencesFromIntegrations(
   projectId: number,
   integrations: IntegrationRow[]
 ): boolean {
+  const existing = getPmSyncPreferences(projectId)
+  // Do not overwrite a user's already-selected scope in this browser session.
+  // Hydration is intended for first-load/new-device scenarios where prefs are absent.
+  if (existing && Array.isArray(existing.issue_types) && existing.issue_types.length > 0) {
+    return false
+  }
+
   const pm = integrations
     .filter(
       (i) =>
