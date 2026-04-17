@@ -13,6 +13,12 @@ import {
   RemoteProject,
 } from '@common/api/integrations'
 
+function sortJiraProjectsByKey(projects: RemoteProject[]): RemoteProject[] {
+  return [...projects].sort((a, b) =>
+    a.key.localeCompare(b.key, undefined, { sensitivity: 'base' })
+  )
+}
+
 export default function JiraIntegration() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
@@ -76,7 +82,7 @@ export default function JiraIntegration() {
         setIsConnected(true)
         // Store projects if returned
         if (result.projects && result.projects.length > 0) {
-          setJiraProjects(result.projects)
+          setJiraProjects(sortJiraProjectsByKey(result.projects))
         }
         toast.success('Successfully connected to Jira!')
       } else {
