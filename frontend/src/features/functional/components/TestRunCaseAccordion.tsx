@@ -145,8 +145,8 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
       </tr>
       {isExpanded && (
         <tr className="bg-white border-b border-gray-100">
-          <td colSpan={DETAIL_COL_SPAN} className="px-4 py-3">
-            <div className="space-y-3">
+          <td colSpan={DETAIL_COL_SPAN} className="px-4 py-3 min-w-0 w-full align-top">
+            <div className="space-y-3 min-w-0 max-w-full">
               {detailLoading && (
                 <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
                   <ArrowPathIcon className="w-4 h-4 animate-spin" />
