@@ -226,6 +226,7 @@ CREATE INDEX IF NOT EXISTS idx_requirements_project ON requirements(project_id);
 CREATE TABLE IF NOT EXISTS test_cases (
     id SERIAL PRIMARY KEY,
     project_id INTEGER NOT NULL REFERENCES projects(id),
+    case_number INTEGER NOT NULL,
     requirement_id INTEGER REFERENCES requirements(id),
     user_story_id INTEGER REFERENCES user_stories(id),
     title VARCHAR(500) NOT NULL,
@@ -243,7 +244,8 @@ CREATE TABLE IF NOT EXISTS test_cases (
     jira_key VARCHAR(50),
     azure_devops_id INTEGER,
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    CONSTRAINT uq_test_cases_project_case_number UNIQUE (project_id, case_number)
 );
 
 CREATE INDEX IF NOT EXISTS idx_test_cases_project ON test_cases(project_id);
@@ -277,6 +279,7 @@ CREATE INDEX IF NOT EXISTS idx_test_steps_test_case ON test_steps(test_case_id);
 CREATE TABLE IF NOT EXISTS test_runs (
     id SERIAL PRIMARY KEY,
     project_id INTEGER NOT NULL REFERENCES projects(id),
+    run_number INTEGER NOT NULL,
     name VARCHAR(255),
     description VARCHAR(1000),
     status testrunstatus DEFAULT 'pending',
@@ -292,7 +295,8 @@ CREATE TABLE IF NOT EXISTS test_runs (
     config JSONB,
     report_path VARCHAR(500),
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    CONSTRAINT uq_test_runs_project_run_number UNIQUE (project_id, run_number)
 );
 
 CREATE INDEX IF NOT EXISTS idx_test_runs_project ON test_runs(project_id);

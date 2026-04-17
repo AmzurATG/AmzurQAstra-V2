@@ -120,6 +120,7 @@ class GenerateTestsRequest(BaseModel):
 
 class GeneratedTestCaseInfo(BaseModel):
     id: int
+    case_number: int
     title: str
     priority: str
     category: str

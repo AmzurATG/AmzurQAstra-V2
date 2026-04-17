@@ -83,7 +83,7 @@ export default function TestCases() {
   const [overrideUser, setOverrideUser] = useState('')
   const [overridePass, setOverridePass] = useState('')
 
-  const listViewKey = `${page}|${searchQuery}|${priorityFilter}|${categoryFilter}|${statusFilter}`
+  const listViewKey = `${page}|${searchQuery}|${priorityFilter}|${categoryFilter}|${_statusFilter}`
   const prevListViewKeyRef = useRef<string | null>(null)
   const prevPageCaseIdsRef = useRef<Set<number>>(new Set())
 

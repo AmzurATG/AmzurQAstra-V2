@@ -4,6 +4,7 @@ Test Runs Endpoints
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from common.db.database import get_db
 from common.db.models.user import User
@@ -20,7 +21,7 @@ from features.functional.schemas.test_run import (
     LogEntry,
     CompletedCaseResult,
 )
-from features.functional.db.models.test_run import TestRunStatus
+from features.functional.db.models.test_run import TestRun, TestRunStatus
 from features.functional.db.models.test_result import TestResultStatus
 from features.functional.services.test_execution_service import (
     TestExecutionService,
@@ -100,6 +101,10 @@ async def get_live_progress(
     db: AsyncSession = Depends(get_db),
 ):
     """Poll live execution progress. Falls back to DB for completed runs."""
+    run_number_row = (
+        await db.execute(select(TestRun.run_number).where(TestRun.id == run_id))
+    ).scalar_one_or_none()
+
     progress_manager = RunProgressManager()
     progress = progress_manager.get(run_id)
     if progress:
@@ -118,6 +123,7 @@ async def get_live_progress(
             body = live_progress_to_lite(body)
         return LiveProgressResponse(
             run_id=run_id,
+            run_number=run_number_row,
             status=body["status"],
             percentage=body["percentage"],
             current_test_case_index=body["current_test_case_index"],
@@ -135,7 +141,9 @@ async def get_live_progress(
     service = TestExecutionService(db)
     run = await service.get_run_with_results(run_id)
     if not run:
-        return LiveProgressResponse(run_id=run_id, status="not_found")
+        return LiveProgressResponse(
+            run_id=run_id, run_number=run_number_row, status="not_found"
+        )
 
     pct = 100 if run.status in (
         TestRunStatus.PASSED,
@@ -153,6 +161,7 @@ async def get_live_progress(
 
     return LiveProgressResponse(
         run_id=run_id,
+        run_number=run.run_number,
         status=run.status.value,
         percentage=pct,
         total_test_cases=run.total_tests,

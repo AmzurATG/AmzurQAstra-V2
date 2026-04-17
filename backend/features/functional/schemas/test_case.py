@@ -57,6 +57,7 @@ class UserStoryBrief(BaseModel):
 class TestCaseResponse(TestCaseBase):
     """Schema for test case response."""
     id: int
+    case_number: int
     project_id: int
     requirement_id: Optional[int] = None
     user_story_id: Optional[int] = None

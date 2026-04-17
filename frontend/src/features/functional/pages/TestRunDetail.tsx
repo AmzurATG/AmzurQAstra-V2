@@ -96,14 +96,16 @@ export default function TestRunDetail() {
             <ArrowLeftIcon className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Test Run #{runId}</h1>
+            <h1 className="text-2xl font-bold text-gray-900">
+              Test Run #{progress.run_number ?? runId}
+            </h1>
             <p className="text-gray-500 text-sm">
               {isDone
                 ? `Completed — ${passed} passed, ${failed} failed`
                 : progress.current_test_case_title || 'Starting…'}
             </p>
             <p className="text-gray-400 text-xs font-mono mt-0.5">
-              Run ID {numRunId}
+              Internal ref {numRunId}
               {projectId ? ` · Project ${projectId}` : ''}
             </p>
           </div>
@@ -164,7 +166,7 @@ export default function TestRunDetail() {
               <thead className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                 <tr>
                   <th className="px-3 py-3 w-12 text-center">#</th>
-                  <th className="px-3 py-3 whitespace-nowrap">Run ID</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Run #</th>
                   <th className="px-3 py-3 whitespace-nowrap">Case #</th>
                   <th className="px-3 py-3 whitespace-nowrap">Result #</th>
                   <th className="px-3 py-3 w-14">Status</th>
@@ -179,6 +181,7 @@ export default function TestRunDetail() {
                   <TestRunCaseAccordion
                     key={r.test_result_id}
                     runId={numRunId}
+                    runNumber={progress.run_number}
                     result={r}
                     rowNumber={index + 1}
                     isExpanded={!!expanded[r.test_result_id]}

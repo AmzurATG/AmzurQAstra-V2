@@ -215,6 +215,9 @@ export default function TestCaseDetail() {
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-3 mb-1">
+            <span className="inline-flex items-center justify-center min-w-[2.25rem] px-2 py-1 rounded-md bg-gray-100 text-sm font-bold text-gray-900 tabular-nums shrink-0">
+              #{testCase.case_number ?? testCase.id}
+            </span>
             <h1 className="text-2xl font-bold text-gray-900">{testCase.title}</h1>
             {testCase.is_generated && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded">

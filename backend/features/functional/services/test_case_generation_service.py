@@ -11,6 +11,7 @@ from common.db.models.user_story import UserStory
 from features.functional.db.models.test_case import TestCase, TestCasePriority, TestCaseCategory
 from features.functional.schemas.test_case import GenerateTestCasesRequest
 from features.functional.services.requirement_service import RequirementService
+from features.functional.services.test_case_service import TestCaseService
 from features.functional.core.llm_prompts.test_case_generation import TEST_CASE_GENERATION_PROMPT
 
 
@@ -90,11 +91,15 @@ class TestCaseGenerationService:
             # Parse response
             test_cases_data = self._parse_test_cases_response(response.content)
             
+            tc_svc = TestCaseService(self.db)
+            case_numbers = await tc_svc.allocate_case_numbers(project_id, len(test_cases_data))
+            
             # Create test cases
             created_cases = []
-            for tc_data in test_cases_data:
+            for tc_data, case_number in zip(test_cases_data, case_numbers):
                 test_case = TestCase(
                     project_id=project_id,
+                    case_number=case_number,
                     requirement_id=requirement_id,
                     title=tc_data.get("title", ""),
                     description=tc_data.get("description", ""),
@@ -229,9 +234,14 @@ class TestCaseGenerationService:
                     "raw_response": response.content[:500],
                 }
             
+            tc_svc = TestCaseService(self.db)
+            case_numbers = await tc_svc.allocate_case_numbers(
+                user_story.project_id, len(test_cases_data)
+            )
+            
             # Create test cases
             created_cases = []
-            for tc_data in test_cases_data:
+            for tc_data, case_number in zip(test_cases_data, case_numbers):
                 # Map priority safely
                 priority_str = tc_data.get("priority", "medium").lower()
                 if priority_str not in ["critical", "high", "medium", "low"]:
@@ -244,6 +254,7 @@ class TestCaseGenerationService:
                 
                 test_case = TestCase(
                     project_id=user_story.project_id,
+                    case_number=case_number,
                     user_story_id=user_story.id,
                     title=tc_data.get("title", f"Test for {user_story.title}"),
                     description=tc_data.get("description", ""),
@@ -273,6 +284,7 @@ class TestCaseGenerationService:
                 "test_cases": [
                     {
                         "id": tc.id,
+                        "case_number": tc.case_number,
                         "title": tc.title,
                         "priority": tc.priority.value,
                         "category": tc.category.value,

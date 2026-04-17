@@ -154,7 +154,7 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
                 </td>
                 <td className="px-3 py-4">
                   <span className="inline-flex items-center justify-center min-w-[2.25rem] px-2 py-1 rounded-md bg-gray-100 text-sm font-bold text-gray-900 tabular-nums">
-                    #{tc.id}
+                    #{tc.case_number ?? tc.id}
                   </span>
                 </td>
                 <td className="px-4 py-4">

@@ -25,6 +25,8 @@ function screenshotEvidenceCount(r: CompletedCaseResult): number {
 
 interface TestRunCaseAccordionProps {
   runId: number
+  /** Per-project run index for display (optional; falls back to `runId`). */
+  runNumber?: number | null
   result: CompletedCaseResult
   isExpanded: boolean
   onToggle: () => void
@@ -36,6 +38,7 @@ interface TestRunCaseAccordionProps {
 
 export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
   runId,
+  runNumber,
   result,
   isExpanded,
   onToggle,
@@ -89,7 +92,7 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
         </td>
         <td className="px-3 py-3 whitespace-nowrap">
           <span className="inline-flex items-center justify-center min-w-[2.25rem] px-2 py-1 rounded-md bg-white/80 border border-gray-200 text-sm font-bold text-gray-900 tabular-nums shadow-sm">
-            #{runId}
+            #{runNumber ?? runId}
           </span>
         </td>
         <td className="px-3 py-3 whitespace-nowrap">

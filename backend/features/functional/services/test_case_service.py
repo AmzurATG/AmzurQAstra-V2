@@ -41,6 +41,18 @@ class TestCaseService:
             .where(TestCase.id == test_case_id)
         )
         return result.scalar_one_or_none()
+
+    async def allocate_case_numbers(self, project_id: int, count: int) -> List[int]:
+        """Return the next `count` per-project case numbers (1-based), without inserting rows."""
+        if count <= 0:
+            return []
+        result = await self.db.execute(
+            select(func.coalesce(func.max(TestCase.case_number), 0)).where(
+                TestCase.project_id == project_id
+            )
+        )
+        start = int(result.scalar() or 0) + 1
+        return list(range(start, start + count))
     
     async def get_list(
         self,
@@ -96,11 +108,10 @@ class TestCaseService:
         total_result = await self.db.execute(count_query)
         total = total_result.scalar()
         
-        # Apply pagination
+        query = query.order_by(TestCase.case_number.asc(), TestCase.id.asc())
+        
         if pagination:
             query = query.offset(pagination.offset).limit(pagination.page_size)
-        
-        query = query.order_by(TestCase.created_at.desc())
         
         result = await self.db.execute(query)
         test_cases = result.scalars().all()
@@ -131,6 +142,7 @@ class TestCaseService:
             
             responses.append(TestCaseResponse(
                 id=tc.id,
+                case_number=tc.case_number,
                 project_id=tc.project_id,
                 requirement_id=tc.requirement_id,
                 user_story_id=tc.user_story_id,
@@ -144,6 +156,7 @@ class TestCaseService:
                 tags=tc.tags,
                 is_automated=tc.is_automated,
                 is_generated=tc.is_generated,
+                integrity_check=tc.integrity_check,
                 jira_key=tc.jira_key,
                 created_by=tc.created_by,
                 created_at=tc.created_at,
@@ -155,8 +168,10 @@ class TestCaseService:
     
     async def create(self, test_case_data: TestCaseCreate, created_by: int) -> TestCase:
         """Create a new test case."""
+        numbers = await self.allocate_case_numbers(test_case_data.project_id, 1)
         test_case = TestCase(
             **test_case_data.model_dump(),
+            case_number=numbers[0],
             created_by=created_by,
         )
         self.db.add(test_case)

@@ -88,6 +88,15 @@ class TestExecutionService:
         self.db = db
         self.progress_manager = RunProgressManager()
 
+    async def _next_run_number(self, project_id: int) -> int:
+        """Next per-project run index (1-based), stable for display (unlike global `id`)."""
+        r = await self.db.execute(
+            select(func.coalesce(func.max(TestRun.run_number), 0)).where(
+                TestRun.project_id == project_id
+            )
+        )
+        return int(r.scalar() or 0) + 1
+
     async def get_runs(
         self,
         project_id: int,
@@ -115,9 +124,10 @@ class TestExecutionService:
 
         total = (await self.db.execute(count_q)).scalar() or 0
 
+        query = query.order_by(TestRun.run_number.desc(), TestRun.id.desc())
+
         if pagination:
             query = query.offset(pagination.offset).limit(pagination.page_size)
-        query = query.order_by(TestRun.created_at.desc())
 
         return list((await self.db.execute(query)).scalars().all()), total
 
@@ -154,8 +164,10 @@ class TestExecutionService:
             )
             test_cases = list(tc_result.scalars().all())
 
+        run_number = await self._next_run_number(run_data.project_id)
         test_run = TestRun(
             project_id=run_data.project_id,
+            run_number=run_number,
             name=run_data.name or f"Test Run {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
             description=run_data.description,
             status=TestRunStatus.PENDING,

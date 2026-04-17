@@ -134,7 +134,7 @@ export default function TestRuns() {
                 <thead className="bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase">
                   <tr>
                     <th className="px-4 py-3 w-14 text-center">#</th>
-                    <th className="px-4 py-3 w-24">Run ID</th>
+                    <th className="px-4 py-3 w-24">Run #</th>
                     <th className="px-6 py-3">Status</th>
                     <th className="px-6 py-3">Run Name</th>
                     <th className="px-6 py-3 text-center">Results</th>
@@ -158,7 +158,7 @@ export default function TestRuns() {
                         </td>
                         <td className="px-4 py-4">
                           <span className="inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded-md bg-gray-100 text-sm font-bold text-gray-900 tabular-nums">
-                            #{run.id}
+                            #{run.run_number ?? run.id}
                           </span>
                         </td>
                         <td className="px-6 py-4">
