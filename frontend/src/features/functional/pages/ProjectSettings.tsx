@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { Card, CardTitle } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
 import { Input } from '@common/components/ui/Input'
 import { useProjectStore } from '@common/store/projectStore'
 import { projectsApi } from '@common/api/projects'
+import DeleteProjectModal from '@features/functional/components/DeleteProjectModal'
 import { ArrowRightIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 
 export default function ProjectSettings() {
   const { projectId } = useParams<{ projectId: string }>()
-  const { currentProject, fetchProject } = useProjectStore()
+  const navigate = useNavigate()
+  const { currentProject, setCurrentProject, clearCurrentProject, fetchProjects } = useProjectStore()
   
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -18,6 +20,7 @@ export default function ProjectSettings() {
   const [appUsername, setAppUsername] = useState('')
   const [appPassword, setAppPassword] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
 
   useEffect(() => {
     if (currentProject) {
@@ -52,17 +55,32 @@ export default function ProjectSettings() {
         }
       }
       
-      await projectsApi.update(Number(projectId), updateData)
+      const updated = await projectsApi.update(Number(projectId), updateData)
+      setCurrentProject(updated)
       toast.success('Project settings saved successfully')
       // Clear password field after save
       setAppPassword('')
-      // Refresh the project in store
-      await fetchProject(projectId)
     } catch (error: any) {
       const message = error.response?.data?.detail || error.message || 'Failed to save settings'
       toast.error(message)
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleDeleteProject = async () => {
+    if (!projectId) return
+    const id = Number(projectId)
+    try {
+      await projectsApi.delete(id)
+      clearCurrentProject()
+      await fetchProjects()
+      toast.success('Project deleted')
+      setDeleteModalOpen(false)
+      navigate('/projects')
+    } catch (error: any) {
+      const message = error.response?.data?.detail || error.message || 'Failed to delete project'
+      toast.error(message)
     }
   }
 
@@ -165,12 +183,25 @@ export default function ProjectSettings() {
       <Card className="border-red-200">
         <CardTitle className="text-red-600">Danger Zone</CardTitle>
         <p className="text-sm text-gray-500 mt-2 mb-4">
-          Permanently delete this project and all its data
+          Remove this project from your workspace. It will no longer appear in your project list.
         </p>
-        <Button variant="outline" className="border-red-300 text-red-600 hover:bg-red-50">
+        <Button
+          type="button"
+          variant="outline"
+          className="border-red-300 text-red-600 hover:bg-red-50"
+          onClick={() => setDeleteModalOpen(true)}
+        >
           Delete Project
         </Button>
       </Card>
+
+      <DeleteProjectModal
+        isOpen={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        projectId={Number(projectId)}
+        projectName={name || currentProject?.name || ''}
+        onConfirm={handleDeleteProject}
+      />
     </div>
   )
 }

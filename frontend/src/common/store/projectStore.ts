@@ -9,7 +9,8 @@ interface ProjectState {
   error: string | null
   
   fetchProjects: () => Promise<void>
-  fetchProject: (projectId: string) => Promise<void>
+  fetchProject: (projectId: string, options?: { force?: boolean }) => Promise<void>
+  setCurrentProject: (project: Project) => void
   selectProject: (projectId: number) => Promise<void>
   clearCurrentProject: () => void
 }
@@ -32,22 +33,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  fetchProject: async (projectId: string) => {
-    // Skip if already loaded
+  fetchProject: async (projectId: string, options?: { force?: boolean }) => {
+    const id = parseInt(projectId, 10)
     const current = get().currentProject
-    if (current && current.id === parseInt(projectId)) {
+    if (!options?.force && current && current.id === id) {
       return
     }
-    
+
     set({ isLoading: true, error: null })
     try {
-      const project = await projectsApi.get(parseInt(projectId))
+      const project = await projectsApi.get(id)
       set({ currentProject: project })
     } catch {
       set({ error: 'Failed to load project', currentProject: null })
     } finally {
       set({ isLoading: false })
     }
+  },
+
+  setCurrentProject: (project: Project) => {
+    set({ currentProject: project })
   },
 
   selectProject: async (projectId: number) => {

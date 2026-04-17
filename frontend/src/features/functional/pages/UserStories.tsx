@@ -15,7 +15,7 @@ import { UserStoryCreateModal } from '../components/userStories/UserStoryCreateM
 import { UserStoryListRow } from '../components/userStories/UserStoryListRow'
 import { userStoriesApi } from '../api'
 import type { UserStory, UserStoryStats } from '../types'
-import { USER_STORIES_PAGE_SIZE } from '../constants/userStoryUi'
+import { DEFAULT_SYNC_ISSUE_TYPES, USER_STORIES_PAGE_SIZE } from '../constants/userStoryUi'
 import toast from 'react-hot-toast'
 
 export default function UserStories() {
@@ -40,6 +40,7 @@ export default function UserStories() {
   })
   const [isLoading, setIsLoading] = useState(true)
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
+  const [isQuickSyncing, setIsQuickSyncing] = useState(false)
   const [generatingStoryId, setGeneratingStoryId] = useState<number | null>(null)
   const [deletingStoryId, setDeletingStoryId] = useState<number | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
@@ -113,6 +114,45 @@ export default function UserStories() {
     loadStats()
   }
 
+  const handleSyncNow = async () => {
+    if (!projectId) return
+    setIsQuickSyncing(true)
+    try {
+      const integrationsRes = await userStoriesApi.getIntegrations(Number(projectId))
+      const pmIntegrations = integrationsRes.data.filter(
+        (i) => i.is_enabled && ['jira', 'redmine', 'azure_devops'].includes(i.integration_type)
+      )
+      if (pmIntegrations.length === 0) {
+        toast.error('No project management integration connected. Add one under Integrations.')
+        return
+      }
+      const integration = pmIntegrations[0]
+      const syncResponse = await userStoriesApi.sync(Number(projectId), {
+        integration_type: integration.integration_type,
+        issue_types: [...DEFAULT_SYNC_ISSUE_TYPES],
+      })
+      if (syncResponse.data.status === 'success') {
+        const n = syncResponse.data.items_synced
+        if (n === 0) {
+          toast.success('Already up to date — no new or changed issues.')
+        } else {
+          toast.success(`Synced ${n} item${n === 1 ? '' : 's'}.`)
+        }
+        handleSyncComplete()
+      } else {
+        toast.error(syncResponse.data.message || 'Sync completed with errors')
+      }
+    } catch (error: unknown) {
+      const message =
+        error && typeof error === 'object' && 'response' in error
+          ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined
+      toast.error(message || 'Failed to sync')
+    } finally {
+      setIsQuickSyncing(false)
+    }
+  }
+
   const handleGenerateTests = async (storyId: number, storyKey: string | null) => {
     setGeneratingStoryId(storyId)
     try {
@@ -172,7 +212,20 @@ export default function UserStories() {
           <p className="text-gray-600">Browse stories (read-only). Open a story to edit fields.</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-3">
-          <Button variant="outline" onClick={() => setIsSyncModalOpen(true)}>
+          <Button
+            variant="primary"
+            onClick={handleSyncNow}
+            isLoading={isQuickSyncing}
+            disabled={isQuickSyncing}
+          >
+            <ArrowPathIcon className="mr-2 h-4 w-4" />
+            Sync now
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setIsSyncModalOpen(true)}
+            disabled={isQuickSyncing}
+          >
             <ArrowPathIcon className="mr-2 h-4 w-4" />
             Sync from Integration
           </Button>
@@ -250,9 +303,9 @@ export default function UserStories() {
                 Configure Integrations
               </Button>
             </Link>
-            <Button onClick={() => setIsSyncModalOpen(true)}>
+            <Button onClick={handleSyncNow} isLoading={isQuickSyncing} disabled={isQuickSyncing}>
               <ArrowPathIcon className="mr-2 h-4 w-4" />
-              Sync Now
+              Sync now
             </Button>
           </div>
         </Card>

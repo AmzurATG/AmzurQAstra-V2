@@ -480,8 +480,11 @@ export interface SyncRequest {
   integration_type: string
   project_key?: string
   issue_types?: string[]
+  /** Explicit cursor; usually omitted so the server uses last successful sync time */
   updated_since?: string
-  sprint_id?: number | null  // null for all sprints
+  sprint_id?: number | null // null for all sprints
+  /** When true, ignore last sync time and fetch all matching issues */
+  force_full_sync?: boolean
 }
 
 export interface SyncResponse {

@@ -20,6 +20,7 @@ from features.functional.core.llm_prompts.test_execution import (
     format_steps_for_prompt,
     should_inject_project_credentials,
 )
+from features.functional.utils.credentials_redaction import redact_known_credentials
 
 # In-memory store for live polling — keyed by "{run_id}:{test_case_id}"
 _tc_progress: Dict[str, Dict[str, Any]] = {}
@@ -393,26 +394,35 @@ class TestCaseRunner:
                     screenshots.append(path)
 
             desc = action_description_from_output(output)
-            # Log the intent/action for debugging
-            logger.info(f"[TestCaseRunner] Step {step_num} Action: {desc}")
-            
-            # Check for adaptation in the output if available
+            safe_desc = desc
+            if isinstance(desc, str):
+                safe_desc = redact_known_credentials(
+                    desc, username=username, password=password
+                ) or desc
+            logger.info(f"[TestCaseRunner] Step {step_num} Action: {safe_desc}")
+
             adaptation = None
-            if hasattr(output, 'adaptation') and output.adaptation:
-                adaptation = output.adaptation
+            if hasattr(output, "adaptation") and output.adaptation:
+                raw_ad = output.adaptation
+                if isinstance(raw_ad, str):
+                    adaptation = redact_known_credentials(
+                        raw_ad, username=username, password=password
+                    ) or raw_ad
+                else:
+                    adaptation = raw_ad
                 logger.info(f"[TestCaseRunner] AI ADAPTATION: {adaptation}")
 
             agent_logs.append({
                 "timestamp": datetime.utcnow().isoformat(),
                 "agent_step": step_num,
-                "description": desc,
+                "description": safe_desc,
                 "adaptation": adaptation,
                 "screenshot_path": path,
             })
             pct = min(90, 5 + step_num * (85 // max(len(steps) * 2, 1)))
             set_tc_progress(key, {
                 "status": "running", "percentage": pct,
-                "current_step": desc,
+                "current_step": safe_desc,
                 "screenshots": list(screenshots),
                 "logs": list(agent_logs),
             })
