@@ -84,6 +84,9 @@ async def get_user_story_stats(
             func.count(UserStory.id)
             .filter(UserStory.status == UserStoryStatus.blocked)
             .label("blocked"),
+            func.count(UserStory.id)
+            .filter(UserStory.status == UserStoryStatus.closed)
+            .label("closed"),
         ).where(scope)
     )
     row = result.one()
@@ -93,6 +96,7 @@ async def get_user_story_stats(
         in_progress=row.in_progress,
         done=row.done,
         blocked=row.blocked,
+        closed=row.closed,
     )
 
 

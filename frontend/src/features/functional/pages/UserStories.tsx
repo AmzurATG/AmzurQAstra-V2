@@ -18,7 +18,11 @@ import { useUserStoryTestGeneration } from '../hooks/useUserStoryTestGeneration'
 import { usePmQuickSync } from '../hooks/usePmQuickSync'
 import { userStoriesApi } from '../api'
 import type { UserStory, UserStoryStats } from '../types'
-import { USER_STORIES_PAGE_SIZE } from '../constants/userStoryUi'
+import {
+  USER_STORIES_PAGE_SIZE,
+  STATUS_OPTIONS,
+  statusConfig,
+} from '../constants/userStoryUi'
 import {
   getPmSyncPreferences,
   hasValidSyncScopeForQuickSync,
@@ -37,6 +41,7 @@ export default function UserStories() {
     in_progress: 0,
     done: 0,
     blocked: 0,
+    closed: 0,
   })
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -82,6 +87,7 @@ export default function UserStories() {
           in_progress: 0,
           done: 0,
           blocked: 0,
+          closed: 0,
         })
         return
       }
@@ -309,7 +315,7 @@ export default function UserStories() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         <Card className="text-center">
           <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
           <div className="text-sm text-gray-500">Total</div>
@@ -329,6 +335,10 @@ export default function UserStories() {
         <Card className="text-center">
           <div className="text-2xl font-bold text-red-600">{stats.blocked}</div>
           <div className="text-sm text-gray-500">Blocked</div>
+        </Card>
+        <Card className="text-center">
+          <div className="text-2xl font-bold text-gray-600">{stats.closed}</div>
+          <div className="text-sm text-gray-500">Closed</div>
         </Card>
       </div>
 
@@ -353,10 +363,11 @@ export default function UserStories() {
               className="rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-primary-500"
             >
               <option value="all">All Status</option>
-              <option value="open">Open</option>
-              <option value="in_progress">In Progress</option>
-              <option value="done">Done</option>
-              <option value="blocked">Blocked</option>
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {statusConfig[s]?.label ?? s}
+                </option>
+              ))}
             </select>
           </div>
         </div>

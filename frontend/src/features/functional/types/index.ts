@@ -481,6 +481,7 @@ export interface UserStoryStats {
   in_progress: number
   done: number
   blocked: number
+  closed: number
 }
 
 export interface SyncRequest {

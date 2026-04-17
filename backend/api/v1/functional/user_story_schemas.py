@@ -98,6 +98,7 @@ class StoryStatsResponse(BaseModel):
     in_progress: int
     done: int
     blocked: int
+    closed: int
 
 
 class SprintResponse(BaseModel):
