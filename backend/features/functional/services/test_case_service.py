@@ -4,12 +4,13 @@ Test Case Service
 import re
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import or_, select, func
+from sqlalchemy import delete as sa_delete, or_, select, func
 from sqlalchemy.orm import selectinload
 
 from common.api.pagination import PaginationParams
 from common.db.models.user_story import UserStory
 from features.functional.db.models.test_case import TestCase, TestCaseStatus
+from features.functional.db.models.test_result import TestResult
 from features.functional.db.models.test_step import TestStep
 from features.functional.schemas.test_case import (
     TestCaseCreate,
@@ -217,11 +218,15 @@ class TestCaseService:
         return await self.get_by_id_with_steps(test_case_id)
     
     async def delete(self, test_case_id: int) -> bool:
-        """Delete a test case."""
+        """Delete a test case, its steps (ORM cascade), and linked test run results."""
         test_case = await self.get_by_id(test_case_id)
         if not test_case:
             return False
-        
+
+        # test_results references test_cases without ON DELETE CASCADE — remove results first
+        await self.db.execute(
+            sa_delete(TestResult).where(TestResult.test_case_id == test_case_id)
+        )
         await self.db.delete(test_case)
         await self.db.flush()
         return True

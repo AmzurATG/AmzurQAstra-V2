@@ -171,8 +171,13 @@ export default function TestCases() {
       })
       toast.success('Deleted')
       loadTestCases()
-    } catch (err) {
-      toast.error('Delete failed')
+    } catch (err: unknown) {
+      const detail =
+        err &&
+        typeof err === 'object' &&
+        'response' in err &&
+        (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+      toast.error(typeof detail === 'string' ? detail : 'Delete failed')
     }
   }
 

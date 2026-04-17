@@ -24,6 +24,7 @@ from common.integrations import get_integration
 from common.integrations.exceptions import IntegrationError
 from common.utils.security import decrypt_config
 from features.functional.db.models.test_case import TestCase
+from features.functional.services.test_case_service import TestCaseService
 
 from api.v1.functional.user_story_generate import router as user_story_generate_router
 from api.v1.functional.user_story_response_mapper import user_story_to_response
@@ -365,8 +366,9 @@ async def delete_user_story(
     test_cases = test_cases_result.scalars().all()
     test_cases_count = len(test_cases)
 
+    tc_service = TestCaseService(db)
     for test_case in test_cases:
-        await db.delete(test_case)
+        await tc_service.delete(test_case.id)
 
     await db.delete(story)
     await db.commit()
