@@ -599,11 +599,18 @@ class TestCaseRunner:
                     use_vision=True,  # Explicitly enable vision prowess
                 )
 
+                # Re-check cancellation immediately after agent creation to avoid late browser launch.
+                if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
+                    raise TestRunCancelled()
+
                 if browser:
                     try:
                         await browser.start()
                     except Exception:
                         pass
+                    # If cancel arrived while browser was starting, stop before agent.run.
+                    if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
+                        raise TestRunCancelled()
 
                 try:
                     result = await _run_agent_with_cancel(agent)

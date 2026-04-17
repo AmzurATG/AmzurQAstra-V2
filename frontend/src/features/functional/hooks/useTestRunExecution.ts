@@ -69,12 +69,14 @@ export function useTestRunExecution(): UseTestRunExecutionReturn {
     if (!runId) return
     try {
       await testRunsApi.cancel(runId)
-      stopPolling()
-      setProgress((prev) => prev ? { ...prev, status: 'cancelled' } : prev)
+      // Keep polling until backend confirms terminal cancelled state.
+      // This avoids showing "cancelled" while a late-starting browser still opens briefly.
+      setProgress((prev) => prev ? { ...prev, status: 'cancelling' } : prev)
+      startPolling(runId)
     } catch {
       // ignore
     }
-  }, [runId, stopPolling])
+  }, [runId, startPolling])
 
   const reset = useCallback(() => {
     stopPolling()
