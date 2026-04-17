@@ -7,6 +7,7 @@ from sqlalchemy import select, func
 import json
 
 from common.llm import get_llm_client
+from common.utils.logger import logger
 from common.db.models.user_story import UserStory
 from features.functional.db.models.test_case import TestCase, TestCasePriority, TestCaseCategory
 from features.functional.schemas.test_case import GenerateTestCasesRequest
@@ -22,6 +23,31 @@ class TestCaseGenerationService:
         self.db = db
         self.llm = get_llm_client()
         self.requirement_service = RequirementService(db)
+
+    async def _llm_generate_cases_with_retries(self, content: str, max_attempts: int = 3) -> tuple[List[Dict[str, Any]], str]:
+        """Call LLM and parse cases with retry for transient / format variability."""
+        import asyncio
+        from common.llm.base import Message
+
+        last_response = ""
+        for attempt in range(1, max_attempts + 1):
+            response = await asyncio.to_thread(
+                self.llm.chat_sync,
+                messages=[
+                    Message(role="system", content=TEST_CASE_GENERATION_PROMPT),
+                    Message(role="user", content=content),
+                ],
+                temperature=0.3,
+            )
+            text = str(getattr(response, "content", "") or "")
+            last_response = text
+            parsed = self._parse_test_cases_response(text)
+            if parsed:
+                return parsed, text
+            logger.warning(
+                f"[TestCaseGenerationService] Empty/invalid parse from LLM attempt {attempt}/{max_attempts}"
+            )
+        return [], last_response
     
     async def generate_test_cases_from_requirement(
         self, requirement_id: int
@@ -213,26 +239,15 @@ class TestCaseGenerationService:
         content = "\n".join(content_parts)
         
         try:
-            # Call LLM to generate test cases
-            import asyncio
-            from common.llm.base import Message
-            response = await asyncio.to_thread(
-                self.llm.chat_sync,
-                messages=[
-                    Message(role="system", content=TEST_CASE_GENERATION_PROMPT),
-                    Message(role="user", content=content)
-                ],
-                temperature=0.3,
-            )
-            
-            # Parse response
-            test_cases_data = self._parse_test_cases_response(response.content)
+            # Call LLM with retry to tolerate transient provider / formatting variance
+            test_cases_data, raw_text = await self._llm_generate_cases_with_retries(content)
             
             if not test_cases_data:
                 return {
                     "success": False,
                     "error": "LLM did not return valid test cases",
-                    "raw_response": response.content[:500],
+                    "error_code": "invalid_llm_output",
+                    "raw_response": raw_text[:500],
                 }
             
             tc_svc = TestCaseService(self.db)
@@ -242,6 +257,7 @@ class TestCaseGenerationService:
             
             # Create test cases
             created_cases = []
+            step_warnings: List[str] = []
             for tc_data, case_number in zip(test_cases_data, case_numbers):
                 # Map priority safely
                 priority_str = tc_data.get("priority", "medium").lower()
@@ -271,17 +287,29 @@ class TestCaseGenerationService:
                 
                 # Generate steps if requested
                 if include_steps:
-                    step_service = TestStepGenerationService(self.db)
-                    await step_service.generate_test_steps(test_case.id)
+                    try:
+                        step_service = TestStepGenerationService(self.db)
+                        step_res = await step_service.generate_test_steps(test_case.id)
+                        if not step_res.get("success", False):
+                            msg = step_res.get("error") or "unknown step generation error"
+                            step_warnings.append(f"Step generation failed for case #{test_case.case_number}: {msg}")
+                    except Exception as se:
+                        logger.warning(
+                            f"[TestCaseGenerationService] Step generation failed tc_id={test_case.id}: {se}"
+                        )
+                        step_warnings.append(
+                            f"Step generation failed for case #{test_case.case_number}: {str(se)}"
+                        )
             
             await self.db.commit()
             
             return {
                 "success": True,
-                "code": None,
+                "code": "partial_success" if step_warnings else None,
                 "user_story_id": user_story_id,
                 "user_story_key": user_story.external_key or f"US-{user_story.id}",
                 "test_cases_created": len(created_cases),
+                "warnings": step_warnings,
                 "test_cases": [
                     {
                         "id": tc.id,

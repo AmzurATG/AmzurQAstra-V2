@@ -62,9 +62,22 @@ async def generate_tests_from_user_story(
         )
 
     if not result.get("success"):
+        err_code = str(result.get("error_code") or "").lower()
+        detail = result.get("error", "Failed to generate test cases")
+        if err_code == "invalid_llm_output":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=detail,
+            )
+        low = str(detail).lower()
+        if any(k in low for k in ("timeout", "temporar", "rate limit", "connection", "unavailable")):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=detail,
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=result.get("error", "Failed to generate test cases"),
+            detail=detail,
         )
 
     return GenerateTestsResponse(
