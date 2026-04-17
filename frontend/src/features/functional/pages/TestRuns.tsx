@@ -12,6 +12,7 @@ import {
   ChevronRightIcon,
   ChartBarIcon,
 } from '@heroicons/react/24/outline'
+import { formatDateTimeIST } from '@common/utils/dateTime'
 import { useTestRunsList } from '../hooks/useTestRunsList'
 import type { TestRun } from '../types'
 
@@ -189,7 +190,7 @@ export default function TestRuns() {
                           </div>
                         </td>
                         <td className="px-6 py-4 text-xs text-gray-500">
-                          {run.started_at ? new Date(run.started_at).toLocaleString() : '-'}
+                          {run.started_at ? formatDateTimeIST(run.started_at) : '-'}
                         </td>
                         <td className="px-6 py-4 text-right">
                           <ChevronRightIcon className="w-4 h-4 text-gray-300 group-hover:text-primary-500 transition-colors" />

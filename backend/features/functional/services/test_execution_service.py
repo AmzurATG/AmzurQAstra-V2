@@ -6,7 +6,7 @@ so batch runs match single-case behavior (no shared login/DOM state).
 import asyncio
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,6 +34,9 @@ from features.functional.utils.credentials_redaction import (
     redact_known_credentials,
     redact_step_dict,
 )
+
+# India Standard Time (no DST); avoids tzdata/zoneinfo issues on minimal Windows installs.
+_IST = timezone(timedelta(hours=5, minutes=30))
 
 
 async def _mark_remaining_skipped(
@@ -168,7 +171,8 @@ class TestExecutionService:
         test_run = TestRun(
             project_id=run_data.project_id,
             run_number=run_number,
-            name=run_data.name or f"Test Run {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            name=run_data.name
+            or f"Test Run {datetime.now(_IST).strftime('%Y-%m-%d %H:%M')} IST",
             description=run_data.description,
             status=TestRunStatus.PENDING,
             triggered_by=triggered_by,
