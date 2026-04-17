@@ -13,6 +13,18 @@ import {
   RemoteProject,
 } from '@common/api/integrations'
 
+function formatIntegrationApiError(error: unknown, fallback: string): string {
+  const err = error as { response?: { data?: { detail?: unknown } } }
+  const detail = err.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail) && detail.length > 0) {
+    const first = detail[0] as { msg?: string }
+    if (typeof first?.msg === 'string') return first.msg
+  }
+  if (error instanceof Error && error.message) return error.message
+  return fallback
+}
+
 function sortJiraProjectsByKey(projects: RemoteProject[]): RemoteProject[] {
   return [...projects].sort((a, b) =>
     a.key.localeCompare(b.key, undefined, { sensitivity: 'base' })
@@ -88,9 +100,10 @@ export default function JiraIntegration() {
       } else {
         toast.error(result.message || 'Failed to connect to Jira')
       }
-    } catch (error: any) {
-      const message = error.response?.data?.detail || error.message || 'Failed to connect to Jira'
-      toast.error(message)
+    } catch (error: unknown) {
+      toast.error(
+        formatIntegrationApiError(error, 'Could not reach Jira. Check the URL and try again.')
+      )
     } finally {
       setIsConnecting(false)
     }
@@ -125,9 +138,8 @@ export default function JiraIntegration() {
       
       toast.success('Jira integration saved!')
       navigate(`/projects/${projectId}/integrations`)
-    } catch (error: any) {
-      const message = error.response?.data?.detail || error.message || 'Failed to save integration'
-      toast.error(message)
+    } catch (error: unknown) {
+      toast.error(formatIntegrationApiError(error, 'Could not save integration. Check the URL and credentials.'))
     } finally {
       setIsSaving(false)
     }

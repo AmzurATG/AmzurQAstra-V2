@@ -8,6 +8,7 @@ from typing import List, Optional, Type
 from datetime import datetime
 import asyncio
 from functools import partial
+from urllib.parse import urlparse
 import httpx
 from base64 import b64encode
 
@@ -29,6 +30,33 @@ from ..exceptions import (
 from .config import JiraConfig
 
 
+def _friendly_jira_connect_error(exc: Exception) -> str:
+    """Short, user-facing message — avoid raw library / stack traces in the UI."""
+    et = type(exc).__name__
+    if et in ("InvalidURL", "MissingSchema", "InvalidSchema"):
+        return "Use a full URL like https://yourcompany.atlassian.net"
+    if et in (
+        "ConnectionError",
+        "ConnectTimeout",
+        "Timeout",
+        "ReadTimeout",
+        "ProxyError",
+    ):
+        return "Could not reach that server. Check the Jira URL and your network."
+    if et == "SSLError":
+        return "Secure connection failed. Use https:// and your real Jira site URL."
+    msg = str(exc).lower()
+    if "nodename nor servname" in msg or "name or service not known" in msg or "getaddrinfo failed" in msg:
+        return "That site address could not be found. Check spelling (e.g. yourcompany.atlassian.net)."
+    if "connection refused" in msg:
+        return "Connection refused. Check the URL and that Jira is reachable."
+    if "timed out" in msg or "timeout" in msg:
+        return "The request timed out. Check the URL and try again."
+    if "certificate" in msg or "ssl" in msg:
+        return "SSL error — use https:// with a valid Jira URL."
+    return "Could not connect to Jira. Check the site URL, email, and API token."
+
+
 class JiraIntegration(ProjectManagementIntegration):
     """
     Jira integration using the official jira-python library.
@@ -46,9 +74,31 @@ class JiraIntegration(ProjectManagementIntegration):
     @classmethod
     def get_config_schema(cls) -> Type[BaseIntegrationConfig]:
         return JiraConfig
+
+    def _ensure_valid_jira_url(self) -> None:
+        """Normalize base_url and reject obviously invalid values before HTTP calls."""
+        raw = (self.config.base_url or "").strip()
+        if not raw:
+            raise IntegrationConnectionError(
+                "Enter your Jira site URL.",
+                integration_type=self.integration_type,
+            )
+        if not raw.startswith(("http://", "https://")):
+            raise IntegrationConnectionError(
+                "Start with https:// — for example https://yourcompany.atlassian.net",
+                integration_type=self.integration_type,
+            )
+        parsed = urlparse(raw)
+        if not parsed.netloc:
+            raise IntegrationConnectionError(
+                "That URL looks incomplete. Example: https://yourcompany.atlassian.net",
+                integration_type=self.integration_type,
+            )
+        self.config.base_url = raw.rstrip("/")
     
     def _get_client(self) -> JIRA:
         """Create and return a Jira client instance"""
+        self._ensure_valid_jira_url()
         if self._client is None:
             self._client = JIRA(
                 server=self.config.base_url.rstrip("/"),
@@ -68,25 +118,34 @@ class JiraIntegration(ProjectManagementIntegration):
             client = self._get_client()
             await self._run_sync(client.myself)
             return True
+        except IntegrationConnectionError:
+            raise
+        except IntegrationAuthError:
+            raise
         except JIRAError as e:
             if e.status_code == 401:
                 raise IntegrationAuthError(
-                    "Invalid Jira credentials. Please check your email and API token.",
+                    "Invalid email or API token.",
                     integration_type=self.integration_type
                 )
             elif e.status_code == 403:
                 raise IntegrationAuthError(
-                    "Access denied. Your API token may not have sufficient permissions.",
+                    "Access denied — your token may need more Jira permissions.",
+                    integration_type=self.integration_type
+                )
+            elif e.status_code == 404:
+                raise IntegrationConnectionError(
+                    "Jira did not respond at that URL. Confirm your Cloud/Server site address.",
                     integration_type=self.integration_type
                 )
             else:
                 raise IntegrationConnectionError(
-                    f"Failed to connect to Jira: {str(e)}",
+                    "Could not reach Jira. Check the site URL (https://…atlassian.net).",
                     integration_type=self.integration_type
                 )
         except Exception as e:
             raise IntegrationConnectionError(
-                f"Failed to connect to Jira: {str(e)}",
+                _friendly_jira_connect_error(e),
                 integration_type=self.integration_type
             )
     

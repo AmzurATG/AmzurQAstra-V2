@@ -449,16 +449,19 @@ async def test_integration_connection(
             projects=projects if projects else None
         )
     except IntegrationAuthError as e:
-        return TestConnectionResponse(success=False, message=f"Authentication failed: {str(e)}")
+        return TestConnectionResponse(success=False, message=str(e))
     except IntegrationConnectionError as e:
-        return TestConnectionResponse(success=False, message=f"Connection failed: {str(e)}")
+        return TestConnectionResponse(success=False, message=str(e))
     except IntegrationNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
-    except Exception as e:
-        return TestConnectionResponse(success=False, message=f"Error: {str(e)}")
+    except Exception:
+        return TestConnectionResponse(
+            success=False,
+            message="Could not verify the connection. Check the URL and credentials, then try again.",
+        )
 
 
 @router.get("/{project_id}/{integration_type}/projects", response_model=ProjectListResponse)
