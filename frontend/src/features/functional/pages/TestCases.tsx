@@ -224,6 +224,7 @@ export default function TestCases() {
   }
 
   const runSingle = async (tcId: number) => {
+    if (exec.isCreating || isRunning) return
     if (!(await ensureProjectHasAppUrl(projectId))) {
       toast.error('Set App URL first')
       return
@@ -236,6 +237,7 @@ export default function TestCases() {
   }
 
   const runSelected = async () => {
+    if (exec.isCreating || isRunning) return
     if (!(await ensureProjectHasAppUrl(projectId))) {
       toast.error('Set App URL first')
       return
@@ -249,6 +251,7 @@ export default function TestCases() {
   }
 
   const runAll = async () => {
+    if (exec.isCreating || isRunning) return
     if (!(await ensureProjectHasAppUrl(projectId))) {
       toast.error('Set App URL first')
       return
@@ -307,11 +310,11 @@ export default function TestCases() {
             <ArrowPathIcon className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} /> Refresh
           </Button>
           {selectedIds.size > 0 && (
-            <Button variant="outline" onClick={runSelected} disabled={!!isRunning}>
+            <Button variant="outline" onClick={runSelected} disabled={!!isRunning || exec.isCreating}>
               <PlayIcon className="w-4 h-4 mr-1" /> Run ({selectedIds.size})
             </Button>
           )}
-          <Button onClick={runAll} disabled={!!isRunning || testCases.length === 0}>
+          <Button onClick={runAll} disabled={!!isRunning || exec.isCreating || testCases.length === 0}>
             <PlayIcon className="w-4 h-4 mr-2" /> Run All
           </Button>
           <Button>
@@ -374,6 +377,7 @@ export default function TestCases() {
             })}
             onToggleAll={handleToggleAll}
             isRunning={!!isRunning}
+            isCreating={exec.isCreating}
             progress={exec.progress}
           />
         )}

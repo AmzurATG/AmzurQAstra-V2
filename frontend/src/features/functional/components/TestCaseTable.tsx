@@ -29,6 +29,7 @@ interface TestCaseTableProps {
   onToggleSelect: (id: number) => void
   onToggleAll: () => void
   isRunning?: boolean
+  isCreating?: boolean
   progress?: LiveProgressResponse | null
 }
 
@@ -85,6 +86,7 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
   onToggleSelect,
   onToggleAll,
   isRunning,
+  isCreating,
   progress
 }) => {
   const allCurrentPageSelected =
@@ -211,7 +213,7 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
                     variant="ghost"
                     size="sm"
                     onClick={() => onRunSingle(tc.id)}
-                    disabled={isRunning}
+                    disabled={isRunning || isCreating}
                     title="Run this test case"
                   >
                     <PlayIcon className="w-4 h-4 text-green-600" />
