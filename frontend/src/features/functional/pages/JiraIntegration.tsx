@@ -31,6 +31,53 @@ function sortJiraProjectsByKey(projects: RemoteProject[]): RemoteProject[] {
   )
 }
 
+type JiraImportOptions = {
+  importStories: boolean
+  importEpics: boolean
+  importBugs: boolean
+  syncTestResults: boolean
+}
+
+const DEFAULT_IMPORT_OPTIONS: JiraImportOptions = {
+  importStories: true,
+  importEpics: true,
+  importBugs: false,
+  syncTestResults: true,
+}
+
+/** Maps UI toggles → Jira `issue_types` (backend sync filter). */
+function buildIssueTypesFromImportOptions(opts: JiraImportOptions): string[] | null {
+  const types: string[] = []
+  if (opts.importStories) {
+    types.push('Story', 'Task')
+  }
+  if (opts.importEpics) {
+    types.push('Epic')
+  }
+  if (opts.importBugs) {
+    types.push('Bug')
+  }
+  if (types.length === 0) return null
+  return [...new Set(types)]
+}
+
+function parseImportOptionsFromConfig(
+  cfg: Record<string, unknown> | undefined | null
+): JiraImportOptions {
+  if (!cfg) return { ...DEFAULT_IMPORT_OPTIONS }
+  const raw = cfg.issue_types
+  if (!Array.isArray(raw)) {
+    return { ...DEFAULT_IMPORT_OPTIONS }
+  }
+  const set = new Set(raw.map((x) => String(x)))
+  return {
+    importStories: set.has('Story') || set.has('Task'),
+    importEpics: set.has('Epic'),
+    importBugs: set.has('Bug'),
+    syncTestResults: cfg.sync_comments !== false && cfg.sync_comments !== 'false',
+  }
+}
+
 export default function JiraIntegration() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
@@ -47,6 +94,7 @@ export default function JiraIntegration() {
   const [isSaving, setIsSaving] = useState(false)
   const [existingIntegration, setExistingIntegration] = useState<boolean>(false)
   const [jiraProjects, setJiraProjects] = useState<RemoteProject[]>([])
+  const [importOptions, setImportOptions] = useState<JiraImportOptions>({ ...DEFAULT_IMPORT_OPTIONS })
 
   // Load existing integration if any
   useEffect(() => {
@@ -56,13 +104,15 @@ export default function JiraIntegration() {
         const integration = await getProjectIntegration(Number(projectId), 'jira')
         if (integration && integration.config) {
           setExistingIntegration(true)
+          const cfg = integration.config as Record<string, unknown>
           setConfig({
-            base_url: integration.config.base_url || '',
-            email: integration.config.email || '',
+            base_url: (cfg.base_url as string) || '',
+            email: (cfg.email as string) || '',
             api_token: '', // API token is redacted by backend, user must re-enter to update
-            project_key: integration.config.project_key || '',
-            project_name: integration.config.project_name || '',
+            project_key: (cfg.project_key as string) || '',
+            project_name: (cfg.project_name as string) || '',
           })
+          setImportOptions(parseImportOptionsFromConfig(cfg))
           setIsConnected(true)
         }
       } catch {
@@ -115,6 +165,12 @@ export default function JiraIntegration() {
       return
     }
 
+    const issue_types = buildIssueTypesFromImportOptions(importOptions)
+    if (!issue_types) {
+      toast.error('Select at least one import type: Stories, Epics, or Bugs.')
+      return
+    }
+
     setIsSaving(true)
     try {
       const integrationData = {
@@ -126,6 +182,9 @@ export default function JiraIntegration() {
           api_token: config.api_token,
           project_key: config.project_key,
           project_name: config.project_name,
+          issue_types,
+          sync_comments: importOptions.syncTestResults,
+          sync_labels: true,
         },
         is_enabled: true,
       }
@@ -312,20 +371,48 @@ export default function JiraIntegration() {
           </p>
 
           <div className="space-y-3">
-            <label className="flex items-center gap-3">
-              <input type="checkbox" defaultChecked className="rounded" />
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={importOptions.importStories}
+                onChange={(e) =>
+                  setImportOptions((prev) => ({ ...prev, importStories: e.target.checked }))
+                }
+                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
               <span className="text-sm">Import Stories as Requirements</span>
             </label>
-            <label className="flex items-center gap-3">
-              <input type="checkbox" defaultChecked className="rounded" />
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={importOptions.importEpics}
+                onChange={(e) =>
+                  setImportOptions((prev) => ({ ...prev, importEpics: e.target.checked }))
+                }
+                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
               <span className="text-sm">Import Epics as Requirement Groups</span>
             </label>
-            <label className="flex items-center gap-3">
-              <input type="checkbox" className="rounded" />
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={importOptions.importBugs}
+                onChange={(e) =>
+                  setImportOptions((prev) => ({ ...prev, importBugs: e.target.checked }))
+                }
+                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
               <span className="text-sm">Import Bugs for Regression Testing</span>
             </label>
-            <label className="flex items-center gap-3">
-              <input type="checkbox" defaultChecked className="rounded" />
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={importOptions.syncTestResults}
+                onChange={(e) =>
+                  setImportOptions((prev) => ({ ...prev, syncTestResults: e.target.checked }))
+                }
+                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
               <span className="text-sm">Sync Test Results back to Jira</span>
             </label>
           </div>
