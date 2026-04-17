@@ -138,8 +138,9 @@ class TestCaseGenerationService:
                 TestCase.is_generated.is_(True),
             )
         )
+        tc_svc = TestCaseService(self.db)
         for tc in r.scalars().all():
-            await self.db.delete(tc)
+            await tc_svc.delete(tc.id)
         await self.db.flush()
 
     async def generate_test_cases_from_user_story(

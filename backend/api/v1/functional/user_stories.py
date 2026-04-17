@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.api.deps import get_current_active_user
@@ -367,11 +368,17 @@ async def delete_user_story(
     test_cases_count = len(test_cases)
 
     tc_service = TestCaseService(db)
-    for test_case in test_cases:
-        await tc_service.delete(test_case.id)
-
-    await db.delete(story)
-    await db.commit()
+    try:
+        for test_case in test_cases:
+            await tc_service.delete(test_case.id)
+        await db.delete(story)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Could not delete user story due to linked execution records. Please retry after active runs complete.",
+        )
 
     return DeleteUserStoryResponse(
         message=f"User story and {test_cases_count} related test case(s) deleted successfully",
