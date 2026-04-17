@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from 'react'
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
 import { XMarkIcon, ArrowPathIcon, CheckIcon } from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
@@ -29,6 +29,21 @@ const ITEM_TYPES = [
 
 const DEFAULT_SELECTED_TYPES: string[] = [...DEFAULT_SYNC_ISSUE_TYPES]
 
+function resetSyncModalFormState() {
+  return {
+    integrations: [] as ProjectIntegrationInfo[],
+    selectedIntegration: null as ProjectIntegrationInfo | null,
+    selectedTypes: [...DEFAULT_SELECTED_TYPES] as string[],
+    sprints: [] as Sprint[],
+    jiraAllSprints: false,
+    jiraSelectedSprintIds: [] as number[],
+    isLoadingSprints: false,
+    isLoading: true,
+    isSyncing: false,
+    error: null as string | null,
+  }
+}
+
 export default function SyncFromIntegrationModal({
   isOpen,
   onClose,
@@ -47,68 +62,32 @@ export default function SyncFromIntegrationModal({
   const [isSyncing, setIsSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Load integrations when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      loadIntegrations()
-    }
-  }, [isOpen, projectId])
+  /** Bumps when the dialog closes so in-flight GETs cannot repopulate state after Cancel. */
+  const modalSessionRef = useRef(0)
+  const wasOpenRef = useRef(false)
 
-  // Load sprints when integration is selected or modal reopens (refresh list)
-  useEffect(() => {
-    if (!isOpen || !selectedIntegration || selectedIntegration.integration_type !== 'jira') {
-      if (selectedIntegration && selectedIntegration.integration_type !== 'jira') {
-        setSprints([])
-        setJiraAllSprints(false)
-        setJiraSelectedSprintIds([])
-      }
-      return
-    }
-    loadSprints()
-  }, [selectedIntegration, isOpen])
+  const applyResetState = useCallback(() => {
+    const next = resetSyncModalFormState()
+    setIntegrations(next.integrations)
+    setSelectedIntegration(next.selectedIntegration)
+    setSelectedTypes(next.selectedTypes)
+    setSprints(next.sprints)
+    setJiraAllSprints(next.jiraAllSprints)
+    setJiraSelectedSprintIds(next.jiraSelectedSprintIds)
+    setIsLoadingSprints(next.isLoadingSprints)
+    setIsLoading(next.isLoading)
+    setIsSyncing(next.isSyncing)
+    setError(next.error)
+  }, [])
 
-  // Drop sprint ids that no longer exist on the board (never promote to "All sprints" — that hid user scope)
-  useEffect(() => {
-    if (selectedIntegration?.integration_type !== 'jira' || !sprints.length || jiraAllSprints) return
-    if (isLoadingSprints) return
-    const valid = jiraSelectedSprintIds.filter((id) =>
-      sprints.some((s) => Number(s.id) === Number(id))
-    )
-    if (valid.length === jiraSelectedSprintIds.length) return
-    if (valid.length === 0) {
-      setJiraAllSprints(false)
-      setJiraSelectedSprintIds([])
-    } else {
-      setJiraSelectedSprintIds(valid)
-    }
-  }, [
-    sprints,
-    selectedIntegration?.integration_type,
-    jiraAllSprints,
-    jiraSelectedSprintIds,
-    isLoadingSprints,
-  ])
-
-  const loadSprints = async () => {
-    if (!selectedIntegration) return
-    setIsLoadingSprints(true)
-    try {
-      const response = await userStoriesApi.getSprints(projectId, selectedIntegration.integration_type)
-      setSprints(response.data)
-    } catch (err) {
-      console.error('Failed to load sprints:', err)
-      setSprints([])
-    } finally {
-      setIsLoadingSprints(false)
-    }
-  }
-
-  const loadIntegrations = async () => {
+  const loadIntegrations = useCallback(async () => {
+    const session = modalSessionRef.current
     setIsLoading(true)
     setError(null)
     try {
       const response = await userStoriesApi.getIntegrations(projectId)
-      // Filter only PM integrations that are enabled
+      if (session !== modalSessionRef.current) return
+
       const pmIntegrations = response.data.filter(
         (i) => i.is_enabled && ['jira', 'redmine', 'azure_devops'].includes(i.integration_type)
       )
@@ -139,12 +118,81 @@ export default function SyncFromIntegrationModal({
         }
       }
     } catch (err: any) {
+      if (session !== modalSessionRef.current) return
       setError('Failed to load integrations')
       console.error(err)
     } finally {
+      if (session !== modalSessionRef.current) return
       setIsLoading(false)
     }
-  }
+  }, [projectId])
+
+  const loadSprints = useCallback(async () => {
+    if (!selectedIntegration) return
+    const session = modalSessionRef.current
+    setIsLoadingSprints(true)
+    try {
+      const response = await userStoriesApi.getSprints(projectId, selectedIntegration.integration_type)
+      if (session !== modalSessionRef.current) return
+      setSprints(response.data)
+    } catch (err) {
+      if (session !== modalSessionRef.current) return
+      console.error('Failed to load sprints:', err)
+      setSprints([])
+    } finally {
+      if (session !== modalSessionRef.current) return
+      setIsLoadingSprints(false)
+    }
+  }, [projectId, selectedIntegration])
+
+  // Open: load integrations. Close (from open): invalidate async work and clear draft state.
+  useEffect(() => {
+    if (!isOpen) {
+      if (wasOpenRef.current) {
+        modalSessionRef.current += 1
+        applyResetState()
+      }
+      wasOpenRef.current = false
+      return
+    }
+    wasOpenRef.current = true
+    loadIntegrations()
+  }, [isOpen, projectId, loadIntegrations, applyResetState])
+
+  // Load sprints when integration is selected or modal reopens (refresh list)
+  useEffect(() => {
+    if (!isOpen || !selectedIntegration || selectedIntegration.integration_type !== 'jira') {
+      if (selectedIntegration && selectedIntegration.integration_type !== 'jira') {
+        setSprints([])
+        setJiraAllSprints(false)
+        setJiraSelectedSprintIds([])
+      }
+      return
+    }
+    loadSprints()
+  }, [selectedIntegration, isOpen, loadSprints])
+
+  // Drop sprint ids that no longer exist on the board (never promote to "All sprints" — that hid user scope)
+  useEffect(() => {
+    if (selectedIntegration?.integration_type !== 'jira' || !sprints.length || jiraAllSprints) return
+    if (isLoadingSprints) return
+    const valid = jiraSelectedSprintIds.filter((id) =>
+      sprints.some((s) => Number(s.id) === Number(id))
+    )
+    if (valid.length === jiraSelectedSprintIds.length) return
+    if (valid.length === 0) {
+      setJiraAllSprints(false)
+      setJiraSelectedSprintIds([])
+    } else {
+      setJiraSelectedSprintIds(valid)
+    }
+  }, [
+    sprints,
+    selectedIntegration?.integration_type,
+    jiraAllSprints,
+    jiraSelectedSprintIds,
+    isLoadingSprints,
+  ])
 
   const handleTypeToggle = (typeId: string) => {
     setSelectedTypes((prev) =>
@@ -487,7 +535,8 @@ export default function SyncFromIntegrationModal({
                         {selectedIntegration?.last_sync_at
                           ? formatDate(selectedIntegration.last_sync_at)
                           : 'never'}
-                        .
+                        . Cancel closes without syncing; when you open again, fields reflect your last
+                        successful sync (saved scope) or defaults.
                       </p>
                     </>
                   )}
