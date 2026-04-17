@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { Card, CardTitle } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
@@ -13,9 +13,20 @@ import {
 import { SyncFromIntegrationModal } from '../components'
 import { UserStoryCreateModal } from '../components/userStories/UserStoryCreateModal'
 import { UserStoryListRow } from '../components/userStories/UserStoryListRow'
+import { TestGenerationInfoDialog } from '../components/userStories/TestGenerationInfoDialog'
+import { RegenerateTestsDialog } from '../components/userStories/RegenerateTestsDialog'
+import { useUserStoryTestGeneration } from '../hooks/useUserStoryTestGeneration'
+import { usePmQuickSync } from '../hooks/usePmQuickSync'
 import { userStoriesApi } from '../api'
 import type { UserStory, UserStoryStats } from '../types'
-import { DEFAULT_SYNC_ISSUE_TYPES, USER_STORIES_PAGE_SIZE } from '../constants/userStoryUi'
+import { USER_STORIES_PAGE_SIZE } from '../constants/userStoryUi'
+import {
+  getPmSyncPreferences,
+  hasValidSyncScopeForQuickSync,
+  hydratePmSyncPreferencesFromIntegrations,
+  isJiraScopedWithoutSprintSelection,
+  sprintIdsQueryFromPrefs,
+} from '../utils/pmSyncPreferences'
 import toast from 'react-hot-toast'
 
 export default function UserStories() {
@@ -40,30 +51,78 @@ export default function UserStories() {
   })
   const [isLoading, setIsLoading] = useState(true)
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
-  const [isQuickSyncing, setIsQuickSyncing] = useState(false)
-  const [generatingStoryId, setGeneratingStoryId] = useState<number | null>(null)
   const [deletingStoryId, setDeletingStoryId] = useState<number | null>(null)
+  const [regenerateTarget, setRegenerateTarget] = useState<{
+    id: number
+    key: string | null
+  } | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [integrationsReady, setIntegrationsReady] = useState(false)
+  const [hasPmIntegration, setHasPmIntegration] = useState(false)
+  /** Server has sync_scope with issue types — enables Sync now when localStorage is empty (new device/tab). */
+  const [remoteQuickSyncAllowed, setRemoteQuickSyncAllowed] = useState(false)
+
+  const reloadStoriesAndStatsRef = useRef<() => void>(() => {})
+
+  const {
+    isQuickSyncing,
+    syncNow: handleSyncNow,
+    hasConfiguredSync,
+    refreshPreferences,
+    prefsVersion,
+  } = usePmQuickSync(
+    projectId,
+    () => reloadStoriesAndStatsRef.current(),
+    remoteQuickSyncAllowed
+  )
 
   const loadStats = useCallback(async () => {
     if (!projectId) return
     try {
-      const response = await userStoriesApi.getStats(Number(projectId))
+      const prefs = getPmSyncPreferences(Number(projectId))
+      if (isJiraScopedWithoutSprintSelection(prefs)) {
+        setStats({
+          total: 0,
+          open: 0,
+          in_progress: 0,
+          done: 0,
+          blocked: 0,
+        })
+        return
+      }
+      const sprintIds = sprintIdsQueryFromPrefs(prefs)
+      const response = await userStoriesApi.getStats(
+        Number(projectId),
+        sprintIds ? { sprint_ids: sprintIds } : undefined
+      )
       setStats(response.data)
     } catch (error) {
       console.error('Failed to load stats:', error)
     }
-  }, [projectId])
+  }, [projectId, prefsVersion])
 
   const loadStories = useCallback(async () => {
     if (!projectId) return
     setIsLoading(true)
     try {
+      const prefs = getPmSyncPreferences(Number(projectId))
+      if (isJiraScopedWithoutSprintSelection(prefs)) {
+        setStories([])
+        setPagination({
+          total: 0,
+          total_pages: 1,
+          has_next: false,
+          has_prev: false,
+        })
+        return
+      }
+      const sprintIds = sprintIdsQueryFromPrefs(prefs)
       const params: {
         page: number
         page_size: number
         status?: string
         search?: string
+        sprint_ids?: string
       } = {
         page,
         page_size: USER_STORIES_PAGE_SIZE,
@@ -71,6 +130,7 @@ export default function UserStories() {
       if (statusFilter !== 'all') params.status = statusFilter
       const q = debouncedSearch.trim()
       if (q) params.search = q
+      if (sprintIds) params.sprint_ids = sprintIds
 
       const response = await userStoriesApi.list(Number(projectId), params)
       const data = response.data
@@ -86,7 +146,7 @@ export default function UserStories() {
     } finally {
       setIsLoading(false)
     }
-  }, [projectId, page, statusFilter, debouncedSearch])
+  }, [projectId, page, statusFilter, debouncedSearch, prefsVersion])
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 400)
@@ -95,7 +155,7 @@ export default function UserStories() {
 
   useLayoutEffect(() => {
     setPage(1)
-  }, [projectId, statusFilter, debouncedSearch])
+  }, [projectId, statusFilter, debouncedSearch, prefsVersion])
 
   useEffect(() => {
     if (projectId) loadStats()
@@ -105,78 +165,85 @@ export default function UserStories() {
     if (projectId) loadStories()
   }, [projectId, loadStories])
 
+  useEffect(() => {
+    if (!projectId) return
+    let cancelled = false
+    setIntegrationsReady(false)
+    setRemoteQuickSyncAllowed(false)
+    ;(async () => {
+      try {
+        const res = await userStoriesApi.getIntegrations(Number(projectId))
+        if (cancelled) return
+        const pm = res.data.filter(
+          (i) =>
+            i.is_enabled && ['jira', 'redmine', 'azure_devops'].includes(i.integration_type)
+        )
+        setHasPmIntegration(pm.length > 0)
+        setRemoteQuickSyncAllowed(
+          res.data.some(
+            (i) =>
+              i.is_enabled &&
+              ['jira', 'redmine', 'azure_devops'].includes(i.integration_type) &&
+              hasValidSyncScopeForQuickSync(i.config as Record<string, unknown> | null)
+          )
+        )
+        const hydrated = hydratePmSyncPreferencesFromIntegrations(Number(projectId), res.data)
+        if (hydrated) {
+          refreshPreferences()
+        }
+      } catch {
+        if (!cancelled) {
+          setHasPmIntegration(false)
+          setRemoteQuickSyncAllowed(false)
+        }
+      } finally {
+        if (!cancelled) setIntegrationsReady(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [projectId, refreshPreferences])
+
+  const onTestGenerationSuccess = useCallback(() => {
+    loadStories()
+    loadStats()
+  }, [loadStories, loadStats])
+
+  const {
+    generatingStoryId,
+    runGenerate,
+    infoDialogOpen,
+    infoMessage,
+    closeInfoDialog,
+  } = useUserStoryTestGeneration(projectId ? Number(projectId) : undefined, {
+    onSuccess: onTestGenerationSuccess,
+  })
+
   const handleSearch = () => setDebouncedSearch(searchQuery.trim())
 
   const hasListFilters = statusFilter !== 'all' || debouncedSearch.length > 0
 
-  const handleSyncComplete = () => {
+  const reloadStoriesAndStats = useCallback(() => {
     loadStories()
     loadStats()
+  }, [loadStories, loadStats])
+
+  useEffect(() => {
+    reloadStoriesAndStatsRef.current = reloadStoriesAndStats
+  }, [reloadStoriesAndStats])
+
+  const handleIntegrationSyncComplete = useCallback(() => {
+    refreshPreferences()
+    reloadStoriesAndStats()
+  }, [refreshPreferences, reloadStoriesAndStats])
+
+  const handleGenerateTests = (storyId: number, _storyKey: string | null) => {
+    void runGenerate(storyId, false)
   }
 
-  const handleSyncNow = async () => {
-    if (!projectId) return
-    setIsQuickSyncing(true)
-    try {
-      const integrationsRes = await userStoriesApi.getIntegrations(Number(projectId))
-      const pmIntegrations = integrationsRes.data.filter(
-        (i) => i.is_enabled && ['jira', 'redmine', 'azure_devops'].includes(i.integration_type)
-      )
-      if (pmIntegrations.length === 0) {
-        toast.error('No project management integration connected. Add one under Integrations.')
-        return
-      }
-      const integration = pmIntegrations[0]
-      const syncResponse = await userStoriesApi.sync(Number(projectId), {
-        integration_type: integration.integration_type,
-        issue_types: [...DEFAULT_SYNC_ISSUE_TYPES],
-      })
-      if (syncResponse.data.status === 'success') {
-        const n = syncResponse.data.items_synced
-        if (n === 0) {
-          toast.success('Already up to date — no new or changed issues.')
-        } else {
-          toast.success(`Synced ${n} item${n === 1 ? '' : 's'}.`)
-        }
-        handleSyncComplete()
-      } else {
-        toast.error(syncResponse.data.message || 'Sync completed with errors')
-      }
-    } catch (error: unknown) {
-      const message =
-        error && typeof error === 'object' && 'response' in error
-          ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : undefined
-      toast.error(message || 'Failed to sync')
-    } finally {
-      setIsQuickSyncing(false)
-    }
-  }
-
-  const handleGenerateTests = async (storyId: number, storyKey: string | null) => {
-    setGeneratingStoryId(storyId)
-    try {
-      const response = await userStoriesApi.generateTests(Number(projectId), storyId, {
-        include_steps: true,
-      })
-
-      if (response.data.success) {
-        toast.success(
-          `Generated ${response.data.test_cases_created} test case(s) for ${storyKey || `Story #${storyId}`}`
-        )
-        loadStories()
-      } else {
-        toast.error(response.data.error || 'Failed to generate tests')
-      }
-    } catch (error: unknown) {
-      const message =
-        error && typeof error === 'object' && 'response' in error
-          ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : undefined
-      toast.error(message || 'Failed to generate tests')
-    } finally {
-      setGeneratingStoryId(null)
-    }
+  const handleRegenerateClick = (storyId: number, _key: string | null) => {
+    setRegenerateTarget({ id: storyId, key: _key })
   }
 
   const handleDeleteStory = async (storyId: number, storyKey: string | null) => {
@@ -204,6 +271,15 @@ export default function UserStories() {
     pagination.total === 0 ? 0 : (page - 1) * USER_STORIES_PAGE_SIZE + 1
   const rangeEnd = Math.min(page * USER_STORIES_PAGE_SIZE, pagination.total)
 
+  const syncFromIntegrationIsPrimary = hasPmIntegration && !hasConfiguredSync
+  const syncNowVariant = hasConfiguredSync ? 'primary' : 'outline'
+  const syncFromIntegrationVariant = syncFromIntegrationIsPrimary ? 'primary' : 'outline'
+
+  const syncNowTooltip =
+    !hasConfiguredSync
+      ? 'Use Sync from Integration first to choose integration, item types, and sprint (Jira).'
+      : undefined
+
   return (
     <div className="min-w-0 space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -213,18 +289,24 @@ export default function UserStories() {
         </div>
         <div className="flex shrink-0 flex-wrap gap-3">
           <Button
-            variant="primary"
+            variant={syncNowVariant}
             onClick={handleSyncNow}
             isLoading={isQuickSyncing}
-            disabled={isQuickSyncing}
+            disabled={isQuickSyncing || !hasConfiguredSync}
+            title={syncNowTooltip}
           >
             <ArrowPathIcon className="mr-2 h-4 w-4" />
             Sync now
           </Button>
           <Button
-            variant="outline"
+            variant={syncFromIntegrationVariant}
             onClick={() => setIsSyncModalOpen(true)}
             disabled={isQuickSyncing}
+            title={
+              syncFromIntegrationIsPrimary
+                ? 'Choose integration, item types, and sprint — then you can use Sync now.'
+                : undefined
+            }
           >
             <ArrowPathIcon className="mr-2 h-4 w-4" />
             Sync from Integration
@@ -289,25 +371,78 @@ export default function UserStories() {
         </div>
       </Card>
 
-      {!isLoading && pagination.total === 0 && !hasListFilters && (
+      {!isLoading && !integrationsReady && pagination.total === 0 && !hasListFilters && (
+        <Card className="py-12 text-center">
+          <ArrowPathIcon className="mx-auto mb-4 h-8 w-8 animate-spin text-primary-500" />
+          <p className="text-gray-500">Loading…</p>
+        </Card>
+      )}
+
+      {!isLoading && integrationsReady && pagination.total === 0 && !hasListFilters && (
         <Card className="py-12 text-center">
           <LinkIcon className="mx-auto mb-4 h-12 w-12 text-gray-300" />
           <h3 className="mb-2 text-lg font-medium text-gray-900">No User Stories Yet</h3>
-          <p className="mb-4 text-gray-500">
-            Connect to Jira or Redmine to import user stories, or add them manually.
-          </p>
-          <div className="flex justify-center gap-3">
-            <Link to={`/projects/${projectId}/integrations`}>
-              <Button variant="outline">
-                <LinkIcon className="mr-2 h-4 w-4" />
-                Configure Integrations
-              </Button>
-            </Link>
-            <Button onClick={handleSyncNow} isLoading={isQuickSyncing} disabled={isQuickSyncing}>
-              <ArrowPathIcon className="mr-2 h-4 w-4" />
-              Sync now
-            </Button>
-          </div>
+          {hasPmIntegration ? (
+            <>
+              <p className="mb-4 max-w-md mx-auto text-gray-500">
+                Your project is connected to a tool, but no work items have been imported yet. Use{' '}
+                <span className="font-medium text-gray-700">Sync from Integration</span> to choose
+                what to import (and for Jira, which sprint). After that,{' '}
+                <span className="font-medium text-gray-700">Sync now</span> repeats the same scope.
+              </p>
+              <div className="flex flex-wrap justify-center gap-3">
+                <Button
+                  variant={syncFromIntegrationVariant}
+                  onClick={() => setIsSyncModalOpen(true)}
+                  disabled={isQuickSyncing}
+                >
+                  <ArrowPathIcon className="mr-2 h-4 w-4" />
+                  Sync from Integration
+                </Button>
+                <Button
+                  variant={syncNowVariant}
+                  onClick={handleSyncNow}
+                  isLoading={isQuickSyncing}
+                  disabled={isQuickSyncing || !hasConfiguredSync}
+                  title={syncNowTooltip}
+                >
+                  <ArrowPathIcon className="mr-2 h-4 w-4" />
+                  Sync now
+                </Button>
+                <Link to={`/projects/${projectId}/integrations`}>
+                  <Button variant="outline">
+                    <LinkIcon className="mr-2 h-4 w-4" />
+                    Manage integrations
+                  </Button>
+                </Link>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="mb-4 max-w-md mx-auto text-gray-500">
+                Connect to Jira, Redmine, or Azure DevOps to import user stories, or add them
+                manually.
+              </p>
+              <div className="flex flex-wrap justify-center gap-3">
+                <Link to={`/projects/${projectId}/integrations`}>
+                  <Button variant="primary">
+                    <LinkIcon className="mr-2 h-4 w-4" />
+                    Configure Integrations
+                  </Button>
+                </Link>
+                <Button
+                  variant="outline"
+                  onClick={handleSyncNow}
+                  isLoading={isQuickSyncing}
+                  disabled={isQuickSyncing || !hasConfiguredSync}
+                  title={syncNowTooltip}
+                >
+                  <ArrowPathIcon className="mr-2 h-4 w-4" />
+                  Sync now
+                </Button>
+              </div>
+            </>
+          )}
         </Card>
       )}
 
@@ -337,6 +472,7 @@ export default function UserStories() {
                 generatingStoryId={generatingStoryId}
                 deletingStoryId={deletingStoryId}
                 onGenerateTests={handleGenerateTests}
+                onRegenerateClick={handleRegenerateClick}
                 onDelete={handleDeleteStory}
               />
             ))}
@@ -364,7 +500,7 @@ export default function UserStories() {
         isOpen={isSyncModalOpen}
         onClose={() => setIsSyncModalOpen(false)}
         projectId={Number(projectId)}
-        onSyncComplete={handleSyncComplete}
+        onSyncComplete={handleIntegrationSyncComplete}
       />
 
       <UserStoryCreateModal
@@ -374,6 +510,31 @@ export default function UserStories() {
         onCreated={() => {
           loadStories()
           loadStats()
+        }}
+      />
+
+      <TestGenerationInfoDialog
+        isOpen={infoDialogOpen}
+        message={infoMessage}
+        onClose={closeInfoDialog}
+      />
+
+      <RegenerateTestsDialog
+        isOpen={regenerateTarget !== null}
+        storyLabel={
+          regenerateTarget
+            ? regenerateTarget.key || `Story #${regenerateTarget.id}`
+            : ''
+        }
+        isLoading={
+          regenerateTarget !== null && generatingStoryId === regenerateTarget.id
+        }
+        onClose={() => setRegenerateTarget(null)}
+        onConfirm={async () => {
+          if (!regenerateTarget) return
+          const t = regenerateTarget
+          await runGenerate(t.id, true)
+          setRegenerateTarget(null)
         }}
       />
     </div>

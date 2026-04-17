@@ -6,14 +6,21 @@ Uses Strategy Pattern - each integration implements these interfaces.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Any, Type
-from pydantic import BaseModel
+from typing import List, Optional, Any, Type, Dict
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 
 class BaseIntegrationConfig(BaseModel):
     """Base configuration schema that all integrations extend"""
-    
+
+    sync_scope: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "Persisted sync preferences (non-sensitive): issue types, sprint scope, etc."
+        ),
+    )
+
     class Config:
         extra = "forbid"  # Reject unknown fields
 

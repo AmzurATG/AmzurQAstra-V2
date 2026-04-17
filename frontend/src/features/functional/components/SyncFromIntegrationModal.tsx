@@ -5,6 +5,11 @@ import { Button } from '@common/components/ui/Button'
 import { userStoriesApi } from '../api'
 import type { ProjectIntegrationInfo, SyncRequest, Sprint } from '../types'
 import { DEFAULT_SYNC_ISSUE_TYPES } from '../constants/userStoryUi'
+import {
+  getPmSyncPreferences,
+  jiraSprintStateFromPrefs,
+  setPmSyncPreferences,
+} from '../utils/pmSyncPreferences'
 import toast from 'react-hot-toast'
 
 interface SyncFromIntegrationModalProps {
@@ -33,9 +38,10 @@ export default function SyncFromIntegrationModal({
   const [integrations, setIntegrations] = useState<ProjectIntegrationInfo[]>([])
   const [selectedIntegration, setSelectedIntegration] = useState<ProjectIntegrationInfo | null>(null)
   const [selectedTypes, setSelectedTypes] = useState<string[]>(DEFAULT_SELECTED_TYPES)
-  const [forceFullResync, setForceFullResync] = useState(false)
   const [sprints, setSprints] = useState<Sprint[]>([])
-  const [selectedSprintId, setSelectedSprintId] = useState<number | null>(null) // null = all sprints
+  /** Jira: user must opt in to All sprints or pick specific sprints */
+  const [jiraAllSprints, setJiraAllSprints] = useState(false)
+  const [jiraSelectedSprintIds, setJiraSelectedSprintIds] = useState<number[]>([])
   const [isLoadingSprints, setIsLoadingSprints] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isSyncing, setIsSyncing] = useState(false)
@@ -44,20 +50,44 @@ export default function SyncFromIntegrationModal({
   // Load integrations when modal opens
   useEffect(() => {
     if (isOpen) {
-      setForceFullResync(false)
       loadIntegrations()
     }
   }, [isOpen, projectId])
 
-  // Load sprints when integration is selected
+  // Load sprints when integration is selected or modal reopens (refresh list)
   useEffect(() => {
-    if (selectedIntegration && selectedIntegration.integration_type === 'jira') {
-      loadSprints()
-    } else {
-      setSprints([])
-      setSelectedSprintId(null)
+    if (!isOpen || !selectedIntegration || selectedIntegration.integration_type !== 'jira') {
+      if (selectedIntegration && selectedIntegration.integration_type !== 'jira') {
+        setSprints([])
+        setJiraAllSprints(false)
+        setJiraSelectedSprintIds([])
+      }
+      return
     }
-  }, [selectedIntegration])
+    loadSprints()
+  }, [selectedIntegration, isOpen])
+
+  // Drop sprint ids that no longer exist on the board (never promote to "All sprints" — that hid user scope)
+  useEffect(() => {
+    if (selectedIntegration?.integration_type !== 'jira' || !sprints.length || jiraAllSprints) return
+    if (isLoadingSprints) return
+    const valid = jiraSelectedSprintIds.filter((id) =>
+      sprints.some((s) => Number(s.id) === Number(id))
+    )
+    if (valid.length === jiraSelectedSprintIds.length) return
+    if (valid.length === 0) {
+      setJiraAllSprints(false)
+      setJiraSelectedSprintIds([])
+    } else {
+      setJiraSelectedSprintIds(valid)
+    }
+  }, [
+    sprints,
+    selectedIntegration?.integration_type,
+    jiraAllSprints,
+    jiraSelectedSprintIds,
+    isLoadingSprints,
+  ])
 
   const loadSprints = async () => {
     if (!selectedIntegration) return
@@ -83,10 +113,30 @@ export default function SyncFromIntegrationModal({
         (i) => i.is_enabled && ['jira', 'redmine', 'azure_devops'].includes(i.integration_type)
       )
       setIntegrations(pmIntegrations)
-      
-      // Auto-select first integration
+
       if (pmIntegrations.length > 0) {
-        setSelectedIntegration(pmIntegrations[0])
+        const prefs = getPmSyncPreferences(projectId)
+        const match =
+          prefs && pmIntegrations.find((i) => i.integration_type === prefs.integration_type)
+        if (match && prefs) {
+          setSelectedIntegration(match)
+          if (prefs.issue_types?.length) {
+            setSelectedTypes([...prefs.issue_types])
+          }
+          if (match.integration_type === 'jira') {
+            const st = jiraSprintStateFromPrefs(prefs)
+            setJiraAllSprints(st.allSprints)
+            setJiraSelectedSprintIds(st.selectedIds.map((id) => Number(id)))
+          } else {
+            setJiraAllSprints(true)
+            setJiraSelectedSprintIds([])
+          }
+        } else {
+          setSelectedIntegration(pmIntegrations[0])
+          setSelectedTypes(DEFAULT_SELECTED_TYPES)
+          setJiraAllSprints(false)
+          setJiraSelectedSprintIds([])
+        }
       }
     } catch (err: any) {
       setError('Failed to load integrations')
@@ -104,9 +154,31 @@ export default function SyncFromIntegrationModal({
     )
   }
 
+  const toggleJiraSprint = (sprintId: number) => {
+    if (jiraAllSprints) {
+      // Leave "all" mode: keep every loaded sprint except the one toggled off
+      const allIds = sprints.map((s) => Number(s.id))
+      setJiraAllSprints(false)
+      setJiraSelectedSprintIds(allIds.filter((id) => id !== sprintId))
+      return
+    }
+    setJiraSelectedSprintIds((prev) =>
+      prev.includes(sprintId) ? prev.filter((id) => id !== sprintId) : [...prev, sprintId]
+    )
+  }
+
   const handleSync = async () => {
     if (!selectedIntegration || selectedTypes.length === 0) {
       toast.error('Please select at least one item type')
+      return
+    }
+
+    if (
+      selectedIntegration.integration_type === 'jira' &&
+      !jiraAllSprints &&
+      jiraSelectedSprintIds.length === 0
+    ) {
+      toast.error('Select at least one sprint, or choose All sprints.')
       return
     }
 
@@ -115,8 +187,10 @@ export default function SyncFromIntegrationModal({
       const syncRequest: SyncRequest = {
         integration_type: selectedIntegration.integration_type,
         issue_types: selectedTypes,
-        sprint_id: selectedSprintId, // null means all sprints
-        force_full_sync: forceFullResync,
+        force_full_sync: true,
+      }
+      if (selectedIntegration.integration_type === 'jira' && !jiraAllSprints) {
+        syncRequest.sprint_ids = [...jiraSelectedSprintIds]
       }
 
       const response = await userStoriesApi.sync(projectId, syncRequest)
@@ -127,6 +201,21 @@ export default function SyncFromIntegrationModal({
           toast.success('Already up to date — no new or changed issues.')
         } else {
           toast.success(`Synced ${n} item${n === 1 ? '' : 's'} successfully.`)
+        }
+        if (selectedIntegration.integration_type === 'jira') {
+          setPmSyncPreferences(projectId, {
+            integration_type: selectedIntegration.integration_type,
+            issue_types: [...selectedTypes],
+            force_full_sync: true,
+            all_sprints: jiraAllSprints,
+            ...(jiraAllSprints ? {} : { sprint_ids: [...jiraSelectedSprintIds] }),
+          })
+        } else {
+          setPmSyncPreferences(projectId, {
+            integration_type: selectedIntegration.integration_type,
+            issue_types: [...selectedTypes],
+            force_full_sync: true,
+          })
         }
         onSyncComplete()
         onClose()
@@ -199,7 +288,7 @@ export default function SyncFromIntegrationModal({
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-xl bg-white shadow-2xl transition-all">
+              <Dialog.Panel className="w-full max-w-lg transform overflow-hidden rounded-xl bg-white shadow-2xl transition-all">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
                   <Dialog.Title className="text-lg font-semibold text-gray-900 flex items-center gap-2">
@@ -325,7 +414,7 @@ export default function SyncFromIntegrationModal({
                       {selectedIntegration?.integration_type === 'jira' && (
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Sprint
+                            Sprints
                           </label>
                           {isLoadingSprints ? (
                             <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
@@ -333,76 +422,73 @@ export default function SyncFromIntegrationModal({
                               <span className="text-sm text-gray-500">Loading sprints...</span>
                             </div>
                           ) : (
-                            <select
-                              value={selectedSprintId ?? 'all'}
-                              onChange={(e) => setSelectedSprintId(e.target.value === 'all' ? null : Number(e.target.value))}
-                              className="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-primary-500 focus:border-primary-500"
-                            >
-                              <option value="all">All Sprints</option>
-                              {sprints.length > 0 && (
-                                <>
-                                  {sprints.filter(s => s.state === 'active').length > 0 && (
-                                    <optgroup label="Active">
-                                      {sprints.filter(s => s.state === 'active').map(sprint => (
-                                        <option key={sprint.id} value={sprint.id}>
+                            <div className="rounded-lg border border-gray-200 bg-white max-h-52 overflow-y-auto">
+                              <label className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 cursor-pointer border-b border-gray-200">
+                                <input
+                                  type="checkbox"
+                                  checked={jiraAllSprints}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setJiraAllSprints(true)
+                                      setJiraSelectedSprintIds([])
+                                    } else {
+                                      setJiraAllSprints(false)
+                                    }
+                                  }}
+                                  className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                                />
+                                <span className="text-sm font-medium text-gray-900">All sprints</span>
+                              </label>
+                              {['active', 'future', 'closed'].map((state) => {
+                                const group = sprints.filter((s) => s.state === state)
+                                if (group.length === 0) return null
+                                return (
+                                  <div key={state}>
+                                    <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 sticky top-0 border-b border-gray-100">
+                                      {state}
+                                    </div>
+                                    {group.map((sprint) => (
+                                      <label
+                                        key={sprint.id}
+                                        className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={
+                                            jiraAllSprints ||
+                                            jiraSelectedSprintIds.some(
+                                              (id) => Number(id) === Number(sprint.id)
+                                            )
+                                          }
+                                          onChange={() => toggleJiraSprint(sprint.id)}
+                                          className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                                        />
+                                        <span className="text-sm text-gray-900 flex-1 min-w-0 truncate">
                                           {sprint.name}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                  {sprints.filter(s => s.state === 'future').length > 0 && (
-                                    <optgroup label="Future">
-                                      {sprints.filter(s => s.state === 'future').map(sprint => (
-                                        <option key={sprint.id} value={sprint.id}>
-                                          {sprint.name}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                  {sprints.filter(s => s.state === 'closed').length > 0 && (
-                                    <optgroup label="Closed">
-                                      {sprints.filter(s => s.state === 'closed').map(sprint => (
-                                        <option key={sprint.id} value={sprint.id}>
-                                          {sprint.name}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                </>
-                              )}
-                            </select>
+                                        </span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                )
+                              })}
+                            </div>
                           )}
                           <p className="mt-1 text-xs text-gray-500">
-                            Select a specific sprint or "All Sprints" to sync everything
+                            With <span className="font-medium">All sprints</span>, every sprint below is included
+                            (all boxes checked). Uncheck a sprint to limit scope, or pick only the sprints you
+                            need.
                           </p>
                         </div>
                       )}
 
                       <p className="text-xs text-gray-500 leading-relaxed">
-                        By default, imports new and updated work items since the last successful sync
+                        Fetches all matching work items from the tool for your selections. Last successful
+                        sync:{' '}
                         {selectedIntegration?.last_sync_at
-                          ? ` (${formatDate(selectedIntegration.last_sync_at)})`
-                          : ' (first sync loads everything matching your selections)'}
+                          ? formatDate(selectedIntegration.last_sync_at)
+                          : 'never'}
                         .
                       </p>
-
-                      <div>
-                        <label className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={forceFullResync}
-                            onChange={(e) => setForceFullResync(e.target.checked)}
-                            className="mt-0.5 w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-                          />
-                          <div>
-                            <span className="text-sm font-medium text-gray-900">Full resync</span>
-                            <span className="text-xs text-gray-500 block mt-0.5">
-                              Re-fetch all matching issues from the tool, ignoring last sync time. Use if
-                              nothing new appears or data looks stale.
-                            </span>
-                          </div>
-                        </label>
-                      </div>
                     </>
                   )}
                 </div>
@@ -415,7 +501,14 @@ export default function SyncFromIntegrationModal({
                   <Button
                     onClick={handleSync}
                     isLoading={isSyncing}
-                    disabled={!selectedIntegration || selectedTypes.length === 0 || isLoading}
+                    disabled={
+                      !selectedIntegration ||
+                      selectedTypes.length === 0 ||
+                      isLoading ||
+                      (selectedIntegration?.integration_type === 'jira' &&
+                        !jiraAllSprints &&
+                        jiraSelectedSprintIds.length === 0)
+                    }
                   >
                     <ArrowPathIcon className="w-4 h-4 mr-2" />
                     Start Sync

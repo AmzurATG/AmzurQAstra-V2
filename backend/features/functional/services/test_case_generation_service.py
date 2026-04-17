@@ -3,7 +3,7 @@ Test Case Generation Service - LLM-powered test case generation
 """
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 import json
 
 from common.llm import get_llm_client
@@ -117,10 +117,31 @@ class TestCaseGenerationService:
         except Exception as e:
             return {"success": False, "error": str(e)}
     
+    async def _count_generated_test_cases_for_user_story(self, user_story_id: int) -> int:
+        r = await self.db.execute(
+            select(func.count(TestCase.id)).where(
+                TestCase.user_story_id == user_story_id,
+                TestCase.is_generated.is_(True),
+            )
+        )
+        return int(r.scalar() or 0)
+
+    async def _delete_generated_test_cases_for_user_story(self, user_story_id: int) -> None:
+        r = await self.db.execute(
+            select(TestCase).where(
+                TestCase.user_story_id == user_story_id,
+                TestCase.is_generated.is_(True),
+            )
+        )
+        for tc in r.scalars().all():
+            await self.db.delete(tc)
+        await self.db.flush()
+
     async def generate_test_cases_from_user_story(
         self,
         user_story_id: int,
         include_steps: bool = True,
+        force_regenerate: bool = False,
     ) -> Dict[str, Any]:
         """
         Generate test cases from a user story.
@@ -128,6 +149,7 @@ class TestCaseGenerationService:
         Args:
             user_story_id: ID of the user story to generate tests from
             include_steps: Whether to also generate test steps
+            force_regenerate: If True, remove existing story test cases first
         
         Returns:
             Dict with success status, test cases created, and details
@@ -143,6 +165,24 @@ class TestCaseGenerationService:
         
         if not user_story:
             return {"success": False, "error": "User story not found"}
+
+        existing_n = await self._count_generated_test_cases_for_user_story(user_story_id)
+        if existing_n > 0 and not force_regenerate:
+            return {
+                "success": False,
+                "code": "already_exists",
+                "error": (
+                    "Test cases are already generated for this user story. "
+                    "Use Regenerate to replace them."
+                ),
+                "user_story_id": user_story_id,
+                "user_story_key": user_story.external_key or f"US-{user_story.id}",
+                "test_cases_created": 0,
+                "test_cases": [],
+            }
+
+        if existing_n > 0 and force_regenerate:
+            await self._delete_generated_test_cases_for_user_story(user_story_id)
         
         # Build content for LLM
         content_parts = [
@@ -226,6 +266,7 @@ class TestCaseGenerationService:
             
             return {
                 "success": True,
+                "code": None,
                 "user_story_id": user_story_id,
                 "user_story_key": user_story.external_key or f"US-{user_story.id}",
                 "test_cases_created": len(created_cases),
