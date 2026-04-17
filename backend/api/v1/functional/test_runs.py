@@ -137,7 +137,12 @@ async def get_live_progress(
     if not run:
         return LiveProgressResponse(run_id=run_id, status="not_found")
 
-    pct = 100 if run.status in (TestRunStatus.PASSED, TestRunStatus.FAILED, TestRunStatus.ERROR) else 0
+    pct = 100 if run.status in (
+        TestRunStatus.PASSED,
+        TestRunStatus.FAILED,
+        TestRunStatus.ERROR,
+        TestRunStatus.CANCELLED,
+    ) else 0
     completed_raw = []
     for r in (run.test_results or []):
         if r.status != TestResultStatus.SKIPPED:

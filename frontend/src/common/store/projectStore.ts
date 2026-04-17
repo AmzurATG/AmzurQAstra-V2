@@ -10,7 +10,10 @@ interface ProjectState {
   
   fetchProjects: () => Promise<void>
   fetchProject: (projectId: string, options?: { force?: boolean }) => Promise<void>
+  /** Merge server project payload (e.g. after PUT) without an extra GET. */
   setCurrentProject: (project: Project) => void
+  /** GET project by id and update store; does not toggle isLoading (safe under ProjectLayout). */
+  revalidateProject: (projectId: string) => Promise<void>
   selectProject: (projectId: number) => Promise<void>
   clearCurrentProject: () => void
 }
@@ -53,6 +56,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setCurrentProject: (project: Project) => {
     set({ currentProject: project })
+  },
+
+  revalidateProject: async (projectId: string) => {
+    const id = parseInt(projectId, 10)
+    if (Number.isNaN(id)) return
+    try {
+      const project = await projectsApi.get(id)
+      set({ currentProject: project })
+    } catch {
+      // Keep existing store state on silent refresh failure
+    }
   },
 
   selectProject: async (projectId: number) => {

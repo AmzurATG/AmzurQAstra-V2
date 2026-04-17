@@ -8,8 +8,8 @@ type Options = {
 }
 
 /**
- * Handles LLM test generation for a user story: blocks duplicates unless
- * `forceRegenerate` is true, and surfaces the server "already_exists" message in a dialog.
+ * Handles LLM test generation for a user story: blocks duplicates when generated
+ * cases already exist, and surfaces the server "already_exists" message in a dialog.
  */
 export function useUserStoryTestGeneration(projectId: number | undefined, { onSuccess }: Options) {
   const [generatingStoryId, setGeneratingStoryId] = useState<number | null>(null)
@@ -30,7 +30,7 @@ export function useUserStoryTestGeneration(projectId: number | undefined, { onSu
         if (!data.success && data.code === 'already_exists') {
           setInfoMessage(
             data.error ||
-              'Test cases are already generated for this user story. Use Regenerate to replace them.'
+              'Test cases are already generated for this user story. Remove generated test cases in Test Cases if you need to run generation again.'
           )
           setInfoDialogOpen(true)
           return

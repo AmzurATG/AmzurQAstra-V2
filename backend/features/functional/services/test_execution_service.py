@@ -35,6 +35,52 @@ from features.functional.utils.credentials_redaction import (
     redact_step_dict,
 )
 
+
+async def _mark_remaining_skipped(
+    db: AsyncSession,
+    ordered_results: List[TestResult],
+    start_idx: int,
+    tc_map: Dict[int, TestCase],
+    reason: str,
+    completed_results: List[Dict[str, Any]],
+) -> None:
+    """Mark not-yet-finished results as skipped and append to live progress list."""
+    for j in range(start_idx, len(ordered_results)):
+        tr = ordered_results[j]
+        if tr.status in (
+            TestResultStatus.PASSED,
+            TestResultStatus.FAILED,
+            TestResultStatus.ERROR,
+        ):
+            continue
+        tc = tc_map.get(tr.test_case_id)
+        tc_title = (tc.title if tc else None) or f"Test Case #{tr.test_case_id}"
+        tr.status = TestResultStatus.SKIPPED
+        tr.error_message = reason
+        tr.completed_at = datetime.utcnow()
+        tr.duration_ms = tr.duration_ms or 0
+        tr.step_results = []
+        tr.failed_step = None
+        completed_results.append(
+            completed_case_dict(
+                test_result_id=tr.id,
+                test_case_id=tr.test_case_id,
+                title=tc_title,
+                status="skipped",
+                steps_total=0,
+                steps_passed=0,
+                steps_failed=0,
+                duration_ms=0,
+                step_results=[],
+                adapted_steps=[],
+                original_steps=[],
+                agent_logs=None,
+                screenshot_path=None,
+            )
+        )
+    await db.commit()
+
+
 class TestExecutionService:
     """Manages test run lifecycle: create → execute (background) → poll → results."""
 
@@ -242,6 +288,23 @@ class TestExecutionService:
                 if not run:
                     return
 
+                if run.status == TestRunStatus.CANCELLED:
+                    _log("Run was cancelled before execution started.")
+                    self.progress_manager.set(run_id, {
+                        "status": "cancelled",
+                        "percentage": 100,
+                        "current_test_case_index": 0,
+                        "total_test_cases": len(run.test_results or []),
+                        "current_test_case_title": None,
+                        "current_step_info": None,
+                        "completed_results": [],
+                        "logs": list(logs),
+                        "error": None,
+                    })
+                    self.progress_manager.clear_cancel(run_id)
+                    self.progress_manager.schedule_cleanup(run_id, delay_seconds=300)
+                    return
+
                 run.status = TestRunStatus.RUNNING
                 run.started_at = datetime.utcnow()
                 await db.commit()
@@ -319,8 +382,25 @@ class TestExecutionService:
                 failed = 0
                 runner = TestCaseRunner()
                 _log("🚀 Test run started — each case uses its own browser (isolated session)")
+                aborted_cancel = False
 
                 for idx, test_result in enumerate(ordered_results):
+                        await db.refresh(run)
+                        if (
+                            run.status == TestRunStatus.CANCELLED
+                            or self.progress_manager.is_cancel_requested(run_id)
+                        ):
+                            await _mark_remaining_skipped(
+                                db,
+                                ordered_results,
+                                idx,
+                                tc_map,
+                                "Run cancelled by user.",
+                                completed_results,
+                            )
+                            aborted_cancel = True
+                            break
+
                         tc = tc_map.get(test_result.test_case_id)
                         if not tc:
                             _log(f"✗ Test case id={test_result.test_case_id} not found — marking ERROR", test_result.test_case_id)
@@ -450,6 +530,7 @@ class TestExecutionService:
                             headless=headless,
                             browser_context=None,
                             on_step_callback=_on_tc_step,
+                            execution_run_id=run_id,
                         )
 
                         tc_status = result.get("overall", "error")
@@ -479,6 +560,7 @@ class TestExecutionService:
                         test_result.status = (
                             TestResultStatus.PASSED if tc_status == "passed"
                             else TestResultStatus.FAILED if tc_status == "failed"
+                            else TestResultStatus.SKIPPED if tc_status == "cancelled"
                             else TestResultStatus.ERROR
                         )
                         test_result.duration_ms = duration
@@ -490,10 +572,14 @@ class TestExecutionService:
                         # First screenshot for legacy consumers; full trail in agent_logs
                         test_result.screenshot_path = (result.get("screenshots") or [None])[0]
                         test_result.agent_logs = safe_agent_logs
-                        test_result.error_message = redact_known_credentials(
-                            result.get("error"),
-                            username=username,
-                            password=password,
+                        test_result.error_message = (
+                            "Run cancelled by user"
+                            if tc_status == "cancelled"
+                            else redact_known_credentials(
+                                result.get("error"),
+                                username=username,
+                                password=password,
+                            )
                         )
                         test_result.failed_step = next(
                             (s["step_number"] for s in final_step_results if s.get("status") != "passed"),
@@ -504,6 +590,8 @@ class TestExecutionService:
                         if tc_status == "passed":
                             passed += 1
                             _log(f"✓ {tc_title} — PASSED ({duration}ms)", tc.id)
+                        elif tc_status == "cancelled":
+                            _log(f"⏹ {tc_title} — CANCELLED ({duration}ms)", tc.id)
                         else:
                             failed += 1
                             _log(f"✗ {tc_title} — {tc_status.upper()} ({duration}ms)", tc.id)
@@ -527,26 +615,64 @@ class TestExecutionService:
                         )
                         cleanup_tc_progress(f"{run_uuid}:{tc.id}")
 
-                run.status = TestRunStatus.PASSED if failed == 0 else TestRunStatus.FAILED
-                run.completed_at = datetime.utcnow()
-                run.passed_tests = passed
-                run.failed_tests = failed
-                await db.commit()
+                        if tc_status == "cancelled":
+                            await _mark_remaining_skipped(
+                                db,
+                                ordered_results,
+                                idx + 1,
+                                tc_map,
+                                "Run cancelled by user.",
+                                completed_results,
+                            )
+                            aborted_cancel = True
+                            break
 
-                _log(f"Run complete — {passed} passed, {failed} failed")
-                self.progress_manager.set(run_id, {
-                    "status": "completed",
-                    "percentage": 100,
-                    "current_test_case_index": total,
-                    "total_test_cases": total,
-                    "current_test_case_title": None,
-                    "current_step_info": "Completed",
-                    "completed_results": completed_results,
-                    "logs": list(logs),
-                    "error": None,
-                })
-                # Schedule cleanup after 5 minutes
-                self.progress_manager.schedule_cleanup(run_id, delay_seconds=300)
+                if aborted_cancel:
+                    skipped_n = sum(
+                        1 for r in ordered_results if r.status == TestResultStatus.SKIPPED
+                    )
+                    run.status = TestRunStatus.CANCELLED
+                    run.completed_at = datetime.utcnow()
+                    run.passed_tests = passed
+                    run.failed_tests = failed
+                    run.skipped_tests = skipped_n
+                    await db.commit()
+                    _log(f"Run cancelled — {passed} passed, {failed} failed, {skipped_n} skipped")
+                    self.progress_manager.set(run_id, {
+                        "status": "cancelled",
+                        "percentage": 100,
+                        "current_test_case_index": total,
+                        "total_test_cases": total,
+                        "current_test_case_title": None,
+                        "current_step_info": "Cancelled",
+                        "completed_results": completed_results,
+                        "logs": list(logs),
+                        "error": None,
+                    })
+                    self.progress_manager.clear_cancel(run_id)
+                    self.progress_manager.schedule_cleanup(run_id, delay_seconds=300)
+                else:
+                    run.status = TestRunStatus.PASSED if failed == 0 else TestRunStatus.FAILED
+                    run.completed_at = datetime.utcnow()
+                    run.passed_tests = passed
+                    run.failed_tests = failed
+                    await db.commit()
+
+                    _log(f"Run complete — {passed} passed, {failed} failed")
+                    self.progress_manager.set(run_id, {
+                        "status": "completed",
+                        "percentage": 100,
+                        "current_test_case_index": total,
+                        "total_test_cases": total,
+                        "current_test_case_title": None,
+                        "current_step_info": "Completed",
+                        "completed_results": completed_results,
+                        "logs": list(logs),
+                        "error": None,
+                    })
+                    self.progress_manager.clear_cancel(run_id)
+                    # Schedule cleanup after 5 minutes
+                    self.progress_manager.schedule_cleanup(run_id, delay_seconds=300)
             except Exception as e:
                 logger.error(f"[TestExecutionService] Fatal error in background execution: {str(e)}")
                 _log(f"✗ FATAL ERROR: {str(e)}")
@@ -566,19 +692,28 @@ class TestExecutionService:
                         run.status = TestRunStatus.ERROR
                         run.completed_at = datetime.utcnow()
                         await db.commit()
-                except:
+                except Exception:
                     pass
+                self.progress_manager.clear_cancel(run_id)
                 self.progress_manager.schedule_cleanup(run_id, delay_seconds=300)
 
     async def cancel_run(self, run_id: int) -> Optional[TestRun]:
+        self.progress_manager.request_cancel(run_id)
+        existing = self.progress_manager.get(run_id) or {}
+        self.progress_manager.set(run_id, {
+            **existing,
+            "status": "cancelling",
+            "current_step_info": existing.get("current_step_info") or "Stopping…",
+        })
         run = await self.get_run_with_results(run_id)
-        if not run or run.status not in (TestRunStatus.PENDING, TestRunStatus.RUNNING):
+        if not run:
+            return None
+        if run.status not in (TestRunStatus.PENDING, TestRunStatus.RUNNING):
             return run
         run.status = TestRunStatus.CANCELLED
         run.completed_at = datetime.utcnow()
-        await self.db.flush()
+        await self.db.commit()
         await self.db.refresh(run)
-        self.progress_manager.cleanup(run_id)
         return run
 
     async def get_results(self, run_id: int) -> List[TestResult]:

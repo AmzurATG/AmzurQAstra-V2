@@ -63,3 +63,11 @@ export const itemTypeConfig = {
   feature: { label: 'Feature', color: 'bg-green-100 text-green-700' },
   requirement: { label: 'Requirement', color: 'bg-indigo-100 text-indigo-700' },
 }
+
+/** Shown when the story already has AI-generated test cases (`generated_test_cases` from API). */
+export function aiGeneratedTestsExistCopy(generatedCount: number): string {
+  const n = Math.max(0, generatedCount)
+  if (n === 1) return 'Test case already generated for this story.'
+  if (n > 1) return `Test cases already generated for this story (${n}).`
+  return 'Test cases already generated for this story.'
+}

@@ -93,6 +93,9 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
   isRunning,
   progress
 }) => {
+  const allCurrentPageSelected =
+    testCases.length > 0 && testCases.every((tc) => selectedIds.has(tc.id))
+
   return (
     <table className="w-full">
       <thead className="bg-gray-50 border-b border-gray-200">
@@ -101,7 +104,7 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
             <input 
               type="checkbox" 
               className="rounded" 
-              checked={selectedIds.size === testCases.length && testCases.length > 0} 
+              checked={allCurrentPageSelected}
               onChange={onToggleAll} 
             />
           </th>

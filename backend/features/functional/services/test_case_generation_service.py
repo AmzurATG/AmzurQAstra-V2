@@ -173,7 +173,7 @@ class TestCaseGenerationService:
                 "code": "already_exists",
                 "error": (
                     "Test cases are already generated for this user story. "
-                    "Use Regenerate to replace them."
+                    "Remove generated test cases in Test Cases if you need to generate again."
                 ),
                 "user_story_id": user_story_id,
                 "user_story_key": user_story.external_key or f"US-{user_story.id}",
