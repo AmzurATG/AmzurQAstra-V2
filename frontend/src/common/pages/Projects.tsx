@@ -9,11 +9,25 @@ import { PageLoader } from '@common/components/ui/Loader'
 import { PlusIcon, FolderIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 
+function emptyProjectForm() {
+  return { name: '', description: '', app_url: '' }
+}
+
 export default function Projects() {
   const { projects, isLoading, fetchProjects } = useProjectStore()
   const [showCreate, setShowCreate] = useState(false)
-  const [newProject, setNewProject] = useState({ name: '', description: '', app_url: '' })
+  const [newProject, setNewProject] = useState(emptyProjectForm)
   const [creating, setCreating] = useState(false)
+
+  const openCreateForm = () => {
+    setNewProject(emptyProjectForm())
+    setShowCreate(true)
+  }
+
+  const closeCreateForm = () => {
+    setShowCreate(false)
+    setNewProject(emptyProjectForm())
+  }
 
   useEffect(() => {
     fetchProjects()
@@ -25,8 +39,7 @@ export default function Projects() {
     try {
       await projectsApi.create(newProject)
       toast.success('Project created!')
-      setShowCreate(false)
-      setNewProject({ name: '', description: '', app_url: '' })
+      closeCreateForm()
       fetchProjects()
     } catch (error: unknown) {
       const detail =
@@ -49,7 +62,7 @@ export default function Projects() {
           <h1 className="text-2xl font-bold text-gray-900">Projects</h1>
           <p className="text-gray-600">Manage your testing projects</p>
         </div>
-        <Button onClick={() => setShowCreate(true)}>
+        <Button onClick={openCreateForm}>
           <PlusIcon className="w-4 h-4 mr-2" />
           New Project
         </Button>
@@ -79,7 +92,9 @@ export default function Projects() {
             />
             <div className="flex gap-2">
               <Button type="submit" isLoading={creating}>Create</Button>
-              <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={closeCreateForm}>
+                Cancel
+              </Button>
             </div>
           </form>
         </Card>
@@ -114,7 +129,7 @@ export default function Projects() {
           <FolderIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900">No projects yet</h3>
           <p className="text-gray-500 mt-1">Create your first project to get started</p>
-          <Button onClick={() => setShowCreate(true)} className="mt-4">
+          <Button onClick={openCreateForm} className="mt-4">
             <PlusIcon className="w-4 h-4 mr-2" />
             Create Project
           </Button>
