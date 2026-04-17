@@ -256,7 +256,7 @@ class TestCaseGenerationService:
             )
             
             # Create test cases
-            created_cases = []
+            created_case_payloads: List[Dict[str, Any]] = []
             step_warnings: List[str] = []
             for tc_data, case_number in zip(test_cases_data, case_numbers):
                 # Map priority safely
@@ -283,7 +283,17 @@ class TestCaseGenerationService:
                 )
                 self.db.add(test_case)
                 await self.db.flush()
-                created_cases.append(test_case)
+                # Snapshot response fields before commit to avoid async ORM lazy refresh
+                # issues (MissingGreenlet) when attributes are accessed post-commit.
+                created_case_payloads.append(
+                    {
+                        "id": int(test_case.id),
+                        "case_number": int(test_case.case_number),
+                        "title": str(test_case.title),
+                        "priority": test_case.priority.value,
+                        "category": test_case.category.value,
+                    }
+                )
                 
                 # Generate steps if requested
                 if include_steps:
@@ -292,13 +302,13 @@ class TestCaseGenerationService:
                         step_res = await step_service.generate_test_steps(test_case.id)
                         if not step_res.get("success", False):
                             msg = step_res.get("error") or "unknown step generation error"
-                            step_warnings.append(f"Step generation failed for case #{test_case.case_number}: {msg}")
+                            step_warnings.append(f"Step generation failed for case #{case_number}: {msg}")
                     except Exception as se:
                         logger.warning(
                             f"[TestCaseGenerationService] Step generation failed tc_id={test_case.id}: {se}"
                         )
                         step_warnings.append(
-                            f"Step generation failed for case #{test_case.case_number}: {str(se)}"
+                            f"Step generation failed for case #{case_number}: {str(se)}"
                         )
             
             await self.db.commit()
@@ -308,18 +318,9 @@ class TestCaseGenerationService:
                 "code": "partial_success" if step_warnings else None,
                 "user_story_id": user_story_id,
                 "user_story_key": user_story.external_key or f"US-{user_story.id}",
-                "test_cases_created": len(created_cases),
+                "test_cases_created": len(created_case_payloads),
                 "warnings": step_warnings,
-                "test_cases": [
-                    {
-                        "id": tc.id,
-                        "case_number": tc.case_number,
-                        "title": tc.title,
-                        "priority": tc.priority.value,
-                        "category": tc.category.value,
-                    }
-                    for tc in created_cases
-                ],
+                "test_cases": created_case_payloads,
             }
         
         except Exception as e:
