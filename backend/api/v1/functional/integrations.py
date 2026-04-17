@@ -366,16 +366,20 @@ async def update_project_integration(
     if data.is_enabled is not None:
         integration.is_enabled = data.is_enabled
     if data.config is not None:
-        # Validate new config
+        # Merge incoming config onto existing decrypted config so operational fields
+        # such as sync_scope are preserved unless explicitly changed.
+        existing_cfg = decrypt_config(integration.config or {}) or {}
+        merged_cfg = {**existing_cfg, **data.config}
+        # Validate merged config
         try:
-            get_integration(integration_type, data.config)
+            get_integration(integration_type, merged_cfg)
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid configuration: {str(e)}"
             )
         # Encrypt sensitive fields before storage
-        integration.config = encrypt_config(data.config)
+        integration.config = encrypt_config(merged_cfg)
     
     await db.commit()
     await db.refresh(integration)

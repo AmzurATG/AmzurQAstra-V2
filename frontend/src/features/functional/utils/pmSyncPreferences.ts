@@ -129,11 +129,6 @@ export function hydratePmSyncPreferencesFromIntegrations(
   integrations: IntegrationRow[]
 ): boolean {
   const existing = getPmSyncPreferences(projectId)
-  // Do not overwrite a user's already-selected scope in this browser session.
-  // Hydration is intended for first-load/new-device scenarios where prefs are absent.
-  if (existing && Array.isArray(existing.issue_types) && existing.issue_types.length > 0) {
-    return false
-  }
 
   const pm = integrations
     .filter(
@@ -178,6 +173,20 @@ export function hydratePmSyncPreferencesFromIntegrations(
       } else {
         // Server payload missing sprint list — do not assume "all sprints" (that overwrote scoped prefs)
         base.all_sprints = false
+      }
+    }
+    // Avoid rewriting when local and server scopes already match.
+    if (existing) {
+      const sameIntegration = existing.integration_type === base.integration_type
+      const sameIssueTypes =
+        JSON.stringify([...(existing.issue_types || [])].sort()) ===
+        JSON.stringify([...(base.issue_types || [])].sort())
+      const sameAllSprints = (existing.all_sprints ?? false) === (base.all_sprints ?? false)
+      const sameSprintIds =
+        JSON.stringify([...(existing.sprint_ids || [])].map(Number).sort((a, b) => a - b)) ===
+        JSON.stringify([...(base.sprint_ids || [])].map(Number).sort((a, b) => a - b))
+      if (sameIntegration && sameIssueTypes && sameAllSprints && sameSprintIds) {
+        return false
       }
     }
     setPmSyncPreferences(projectId, base)
