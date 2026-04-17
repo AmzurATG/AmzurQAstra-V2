@@ -53,7 +53,8 @@ class IntegrityCheckService:
 
         username = request.credentials.username if request.credentials else None
         password = request.credentials.password if request.credentials else None
-        use_google = request.use_google_signin
+        # Google Sign-In for BIC is disabled until a supported flow ships (UI forces false too).
+        use_google = False
 
         asyncio.create_task(
             self._run_and_persist(
