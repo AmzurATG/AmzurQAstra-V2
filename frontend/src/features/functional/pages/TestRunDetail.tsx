@@ -11,6 +11,7 @@ import { testRunsApi } from '../api'
 import type { LiveProgressResponse } from '../types'
 import toast from 'react-hot-toast'
 import { TestRunCaseAccordion } from '../components/TestRunCaseAccordion'
+import { useProjectStore } from '@common/store/projectStore'
 
 const POLL_MS = 3000
 const TERMINAL_STATES = ['completed', 'passed', 'failed', 'error', 'cancelled', 'not_found']
@@ -18,6 +19,9 @@ const TERMINAL_STATES = ['completed', 'passed', 'failed', 'error', 'cancelled', 
 export default function TestRunDetail() {
   const { projectId, runId } = useParams<{ projectId: string; runId: string }>()
   const navigate = useNavigate()
+  const currentProject = useProjectStore((s) => s.currentProject)
+  const projectDisplayName =
+    projectId && currentProject?.id === Number(projectId) ? currentProject.name : null
   const [progress, setProgress] = useState<LiveProgressResponse | null>(null)
   const [expanded, setExpanded] = useState<Record<number, boolean>>({})
   const [syncing, setSyncing] = useState<Record<string, boolean>>({})
@@ -104,9 +108,14 @@ export default function TestRunDetail() {
                 ? `Completed — ${passed} passed, ${failed} failed`
                 : progress.current_test_case_title || 'Starting…'}
             </p>
-            <p className="text-gray-400 text-xs font-mono mt-0.5">
-              Internal ref {numRunId}
-              {projectId ? ` · Project ${projectId}` : ''}
+            <p className="text-gray-400 text-xs mt-0.5">
+              <span className="font-mono">Internal ref {numRunId}</span>
+              {projectId && (
+                <span className="text-gray-500">
+                  {' '}
+                  · {projectDisplayName ?? `Project #${projectId}`}
+                </span>
+              )}
             </p>
           </div>
         </div>
