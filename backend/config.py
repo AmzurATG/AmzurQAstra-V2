@@ -169,13 +169,17 @@ class Settings(BaseSettings):
     def _resolve_runtime_dir(cls, v: str) -> str:
         """
         Ensure runtime data directories are absolute.
-        In frozen mode, resolve relative paths against the exe directory
-        (not CWD, which is the temp _MEIPASS folder).
+        Relative paths in .env are resolved against _BACKEND_DIR (where .env
+        lives), so that '../logs' correctly points to the project root's logs/.
+        In frozen mode, relative paths resolve against the exe directory.
         """
         p = Path(v)
         if not p.is_absolute():
-            p = _APP_ROOT / p
-        return str(p)
+            if getattr(sys, 'frozen', False):
+                p = Path(sys.executable).parent / p
+            else:
+                p = _BACKEND_DIR / p
+        return str(p.resolve())
 
 
 settings = Settings()

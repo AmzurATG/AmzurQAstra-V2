@@ -113,6 +113,30 @@ The user edits `.env` with their database URL, secret keys, and LLM config, then
 
 ---
 
+## Push Changes to GitHub
+
+Before pushing, pull the latest changes and resolve any conflicts:
+
+```powershell
+# From the project root
+git pull origin main
+```
+
+If there are merge conflicts, resolve them in your editor, then:
+
+```powershell
+git add .
+git commit -m "Resolve merge conflicts"
+```
+
+Once conflicts are resolved (or if there were none), push:
+
+```powershell
+git push origin main
+```
+
+---
+
 ## Troubleshooting
 
 | Issue | Fix |
