@@ -4,6 +4,7 @@ Each test case runs sequentially with an isolated browser (fresh session per cas
 so batch runs match single-case behavior (no shared login/DOM state).
 """
 import asyncio
+import re
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -771,18 +772,50 @@ class TestExecutionService:
         step = step_result.scalar_one_or_none()
         if not step:
             return False
-            
-        # Update the step target/value based on adaptation
-        # Note: This is a simple implementation, in a real scenario we'd parse the adaptation string
-        # or have the agent return structured adaptation data.
-        # For now, we'll assume the adaptation string contains the new target.
-        adaptation_text = adapted.get("adaptation", "")
-        if "Adapted: found '" in adaptation_text and "' instead" in adaptation_text:
-            new_target = adaptation_text.split("found '")[1].split("' instead")[0]
-            step.target = new_target
+
+        adaptation_text = str(adapted.get("adaptation") or "").strip()
+        if not adaptation_text:
+            return False
+
+        # Support varied LLM phrasings instead of one rigid sentence template.
+        # Example accepted phrasings:
+        # - "Adapted: found 'Sign In' instead"
+        # - "Used 'Submit' button"
+        # - "Changed selector to '#login-btn'"
+        # - "Entered value 'john@example.com'"
+        quoted = re.findall(r"['\"]([^'\"]{1,200})['\"]", adaptation_text)
+        candidate_target = quoted[-1].strip() if quoted else ""
+
+        # Prefer explicit keyword-based extraction when present.
+        m = re.search(r"(?:found|use(?:d)?|click(?:ed)?|selector|target)\s+['\"]([^'\"]+)['\"]", adaptation_text, re.IGNORECASE)
+        if m:
+            candidate_target = m.group(1).strip()
+
+        m_val = re.search(r"(?:value|input|entered|typed)\s+['\"]([^'\"]+)['\"]", adaptation_text, re.IGNORECASE)
+        candidate_value = m_val.group(1).strip() if m_val else ""
+
+        action_value = str(getattr(step, "action", "")).lower()
+        is_input_action = any(tok in action_value for tok in ("type", "input", "fill"))
+
+        updated = False
+        if candidate_value and is_input_action:
+            step.value = candidate_value
+            updated = True
+        elif candidate_target:
+            step.target = candidate_target
+            updated = True
+
+        # Fallback: persist adaptation note so "Sync to Case" never silently fails
+        # when parser cannot infer a concrete target/value.
+        if not updated:
+            existing_desc = (step.description or "").strip()
+            note = f"[Synced adaptation] {adaptation_text}"
+            step.description = f"{existing_desc}\n{note}".strip() if existing_desc else note
+            updated = True
+
+        if updated:
             await self.db.commit()
             return True
-            
         return False
 
     async def get_primary_screenshot_file(

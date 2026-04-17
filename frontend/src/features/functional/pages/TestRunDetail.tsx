@@ -68,8 +68,12 @@ export default function TestRunDetail() {
     try {
       await testRunsApi.syncStep(resultId, stepNumber)
       toast.success(`Step ${stepNumber} synced to Test Case #${tcId}`)
-    } catch {
-      toast.error('Failed to sync step')
+    } catch (error: unknown) {
+      const message =
+        error && typeof error === 'object' && 'response' in error
+          ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined
+      toast.error(message || 'Failed to sync step')
     } finally {
       setSyncing((prev) => ({ ...prev, [key]: false }))
     }
