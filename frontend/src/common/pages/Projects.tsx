@@ -28,8 +28,13 @@ export default function Projects() {
       setShowCreate(false)
       setNewProject({ name: '', description: '', app_url: '' })
       fetchProjects()
-    } catch (error) {
-      toast.error('Failed to create project')
+    } catch (error: unknown) {
+      const detail =
+        error &&
+        typeof error === 'object' &&
+        'response' in error &&
+        (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+      toast.error(typeof detail === 'string' ? detail : 'Failed to create project')
     } finally {
       setCreating(false)
     }

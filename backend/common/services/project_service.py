@@ -68,9 +68,35 @@ class ProjectService:
         projects = result.scalars().all()
         
         return list(projects), total
+
+    async def active_name_exists_for_owner(
+        self,
+        owner_id: int,
+        name: str,
+        *,
+        exclude_project_id: Optional[int] = None,
+    ) -> bool:
+        """True if another active project for this owner already uses the same name (trimmed, case-insensitive)."""
+        raw = (name or "").strip()
+        if not raw:
+            return False
+        normalized = raw.lower()
+        stmt = (
+            select(Project.id)
+            .where(Project.owner_id == owner_id)
+            .where(Project.is_active == True)
+            .where(func.lower(func.trim(Project.name)) == normalized)
+        )
+        if exclude_project_id is not None:
+            stmt = stmt.where(Project.id != exclude_project_id)
+        stmt = stmt.limit(1)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none() is not None
     
     async def create(self, project_data: ProjectCreate, owner_id: int) -> Project:
         """Create a new project."""
+        if await self.active_name_exists_for_owner(owner_id, project_data.name):
+            raise ValueError("duplicate_project_name")
         project = Project(
             **project_data.model_dump(),
             owner_id=owner_id,
@@ -89,6 +115,14 @@ class ProjectService:
             return None
         
         update_data = project_data.model_dump(exclude_unset=True)
+
+        if "name" in update_data and update_data["name"] is not None:
+            if await self.active_name_exists_for_owner(
+                project.owner_id,
+                update_data["name"],
+                exclude_project_id=project_id,
+            ):
+                raise ValueError("duplicate_project_name")
         
         # Handle credentials merge - keep existing values if not provided
         if 'app_credentials' in update_data and update_data['app_credentials']:
