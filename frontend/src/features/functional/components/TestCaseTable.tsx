@@ -53,13 +53,6 @@ const categoryColors = {
   sanity: 'bg-gray-100 text-gray-700',
 }
 
-const itemTypeColors = {
-  epic: 'bg-purple-100 text-purple-700',
-  story: 'bg-blue-100 text-blue-700',
-  bug: 'bg-red-100 text-red-700',
-  task: 'bg-gray-100 text-gray-700',
-}
-
 const actionIcons: Record<string, string> = {
   navigate: '🌐',
   click: '👆',
@@ -115,7 +108,9 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
           </th>
           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
-          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User Story</th>
+          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+            User story #
+          </th>
           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Priority</th>
           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Steps</th>
@@ -186,14 +181,13 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
                 </td>
               <td className="px-4 py-4">
                 {tc.user_story ? (
-                  <div className="inline-flex items-center gap-1 text-sm">
-                    <span className={`px-1.5 py-0.5 text-xs rounded ${itemTypeColors[tc.user_story.item_type as keyof typeof itemTypeColors] || 'bg-gray-100 text-gray-700'}`}>
-                      {tc.user_story.item_type}
-                    </span>
-                    <span className="text-gray-600 font-mono text-xs">
-                      {userStoryDisplayKey(tc.user_story.external_key, tc.user_story.id)}
-                    </span>
-                  </div>
+                  <Link
+                    to={`/projects/${projectId}/user-stories/${tc.user_story.id}`}
+                    className="inline-flex min-w-[5rem] max-w-[14rem] items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-center text-sm font-mono font-semibold tabular-nums text-slate-800 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-800"
+                    title={`Open user story ${userStoryDisplayKey(tc.user_story.external_key, tc.user_story.id)}`}
+                  >
+                    {userStoryDisplayKey(tc.user_story.external_key, tc.user_story.id)}
+                  </Link>
                 ) : (
                   <span className="text-gray-400 text-sm">—</span>
                 )}

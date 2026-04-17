@@ -322,7 +322,9 @@ export default function TestCases() {
       <Card>
         <div className="flex flex-col md:flex-row gap-4 mb-4">
           <input
-            type="text" placeholder="Search..." value={searchQuery}
+            type="text"
+            placeholder="Search title, Jira key, US-#, or story id…"
+            value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
           />

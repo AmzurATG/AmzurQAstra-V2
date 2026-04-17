@@ -1,9 +1,10 @@
 """
 Test Case Service
 """
+import re
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import or_, select, func
 from sqlalchemy.orm import selectinload
 
 from common.api.pagination import PaginationParams
@@ -100,9 +101,29 @@ class TestCaseService:
             count_query = count_query.where(TestCase.category == category)
         
         if search:
-            search_filter = f"%{search}%"
-            query = query.where(TestCase.title.ilike(search_filter))
-            count_query = count_query.where(TestCase.title.ilike(search_filter))
+            raw = (search or "").strip()
+            if raw:
+                term = f"%{raw}%"
+                query = query.outerjoin(
+                    UserStory, TestCase.user_story_id == UserStory.id
+                )
+                count_query = count_query.outerjoin(
+                    UserStory, TestCase.user_story_id == UserStory.id
+                )
+
+                or_conditions = [
+                    TestCase.title.ilike(term),
+                    UserStory.external_key.ilike(term),
+                ]
+                # US-42 / us-42 / US42 / us 42 — same display label as the UI
+                us_match = re.match(r"^us\s*-?\s*(\d+)\s*$", raw, re.IGNORECASE)
+                if us_match:
+                    or_conditions.append(UserStory.id == int(us_match.group(1)))
+                elif raw.isdigit():
+                    or_conditions.append(UserStory.id == int(raw))
+
+                query = query.where(or_(*or_conditions))
+                count_query = count_query.where(or_(*or_conditions))
         
         # Get total count
         total_result = await self.db.execute(count_query)
