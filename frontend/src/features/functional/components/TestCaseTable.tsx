@@ -13,6 +13,7 @@ import {
 import { Button } from '@common/components/ui/Button'
 import { Link } from 'react-router-dom'
 import type { TestCase, TestStep, LiveProgressResponse } from '../types'
+import { userStoryDisplayKey } from '../constants/userStoryUi'
 
 interface TestCaseTableProps {
   projectId: string | undefined
@@ -190,7 +191,7 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
                       {tc.user_story.item_type}
                     </span>
                     <span className="text-gray-600 font-mono text-xs">
-                      {tc.user_story.external_key || `US-${tc.user_story.id}`}
+                      {userStoryDisplayKey(tc.user_story.external_key, tc.user_story.id)}
                     </span>
                   </div>
                 ) : (

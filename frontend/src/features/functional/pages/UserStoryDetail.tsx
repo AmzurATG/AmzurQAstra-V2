@@ -21,6 +21,7 @@ import {
   priorityConfig,
   sourceConfig,
   statusConfig,
+  userStoryDisplayKey,
 } from '../constants/userStoryUi'
 import toast from 'react-hot-toast'
 
@@ -73,10 +74,10 @@ export default function UserStoryDetail() {
 
   const handleDelete = async () => {
     if (!story) return
-    const key = story.external_key
+    const key = userStoryDisplayKey(story.external_key, story.id)
     if (
       !window.confirm(
-        `Delete ${key || `story #${story.id}`}? Related test cases and steps will be removed.`
+        `Delete ${key}? Related test cases and steps will be removed.`
       )
     ) {
       return
@@ -121,6 +122,7 @@ export default function UserStoryDetail() {
   const priorityCfg = priorityConfig[story.priority] || priorityConfig.medium
   const sourceCfg = sourceConfig[story.source] || sourceConfig.manual
   const itemTypeCfg = itemTypeConfig[story.item_type] || itemTypeConfig.story
+  const storyDisplayKey = userStoryDisplayKey(story.external_key, story.id)
 
   return (
     <div className="min-w-0 space-y-6">
@@ -167,9 +169,9 @@ export default function UserStoryDetail() {
 
       <Card className="min-w-0">
         <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 pb-4">
-          {story.external_key && (
-            <span className="font-mono text-lg text-primary-600">{story.external_key}</span>
-          )}
+          <span className="font-mono text-lg text-primary-600 break-all" title={storyDisplayKey}>
+            {storyDisplayKey}
+          </span>
           <span title={sourceCfg.label}>{sourceCfg.icon}</span>
           <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${itemTypeCfg.color}`}>
             {itemTypeCfg.label}

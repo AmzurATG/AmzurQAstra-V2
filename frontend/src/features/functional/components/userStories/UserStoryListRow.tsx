@@ -8,22 +8,21 @@ import {
   priorityConfig,
   sourceConfig,
   statusConfig,
+  userStoryDisplayKey,
 } from '../../constants/userStoryUi'
 
 type Props = {
   story: UserStory
   projectId: string
-  serial: number
   generatingStoryId: number | null
   deletingStoryId: number | null
-  onGenerateTests: (storyId: number, key: string | null) => void
-  onDelete: (storyId: number, key: string | null) => void
+  onGenerateTests: (storyId: number, displayKey: string) => void
+  onDelete: (storyId: number, displayKey: string) => void
 }
 
 export function UserStoryListRow({
   story,
   projectId,
-  serial,
   generatingStoryId,
   deletingStoryId,
   onGenerateTests,
@@ -39,6 +38,7 @@ export function UserStoryListRow({
   const priorityCfg = priorityConfig[story.priority] || priorityConfig.medium
   const sourceCfg = sourceConfig[story.source] || sourceConfig.manual
   const itemTypeCfg = itemTypeConfig[story.item_type] || itemTypeConfig.story
+  const displayKey = userStoryDisplayKey(story.external_key, story.id)
 
   const openDetail = () => navigate(detailPath)
 
@@ -46,21 +46,18 @@ export function UserStoryListRow({
     <div className="rounded-lg px-2 py-4 -mx-2 transition-colors hover:bg-gray-50">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-1 gap-3">
-          <span
-            className="w-9 shrink-0 pt-0.5 text-right text-sm tabular-nums text-gray-400"
-            aria-hidden
-          >
-            {serial}.
-          </span>
           <button
             type="button"
             onClick={openDetail}
             className="min-w-0 flex-1 rounded-md text-left outline-none ring-primary-500 focus-visible:ring-2"
           >
             <div className="flex flex-wrap items-center gap-2 mb-1">
-              {story.external_key && (
-                <span className="font-mono text-sm text-primary-600">{story.external_key}</span>
-              )}
+              <span
+                className="font-mono text-sm text-primary-600 truncate max-w-[min(100%,18rem)] sm:max-w-none"
+                title={displayKey}
+              >
+                {displayKey}
+              </span>
               <span className="text-xs" title={sourceCfg.label}>
                 {sourceCfg.icon}
               </span>
@@ -106,7 +103,7 @@ export function UserStoryListRow({
             type="button"
             onClick={(e) => {
               e.stopPropagation()
-              onGenerateTests(story.id, story.external_key ?? null)
+              onGenerateTests(story.id, displayKey)
             }}
             disabled={hasGeneratedTests || generatingStoryId === story.id}
             isLoading={generatingStoryId === story.id}
@@ -125,7 +122,7 @@ export function UserStoryListRow({
             type="button"
             onClick={(e) => {
               e.stopPropagation()
-              onDelete(story.id, story.external_key ?? null)
+              onDelete(story.id, displayKey)
             }}
             disabled={deletingStoryId === story.id}
             isLoading={deletingStoryId === story.id}

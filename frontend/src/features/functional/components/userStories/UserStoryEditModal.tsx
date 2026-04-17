@@ -11,6 +11,7 @@ import {
   itemTypeConfig,
   priorityConfig,
   statusConfig,
+  userStoryDisplayKey,
 } from '../../constants/userStoryUi'
 import toast from 'react-hot-toast'
 
@@ -102,14 +103,19 @@ export function UserStoryEditModal({ projectId, isOpen, onClose, story, onSaved 
 
                 {draft && (
                   <div className="max-h-[60vh] space-y-4 overflow-y-auto px-6 py-4">
-                    {draft.external_key && (
-                      <div>
-                        <label className="mb-1 block text-sm font-medium text-gray-700">External key</label>
-                        <div className="rounded-lg bg-gray-100 px-3 py-2 font-mono text-sm text-gray-600">
-                          {draft.external_key}
-                        </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">
+                        {draft.external_key?.trim() ? 'External key' : 'Story reference'}
+                      </label>
+                      <div className="rounded-lg bg-gray-100 px-3 py-2 font-mono text-sm text-gray-600 break-all">
+                        {userStoryDisplayKey(draft.external_key, draft.id)}
                       </div>
-                    )}
+                      {!draft.external_key?.trim() && (
+                        <p className="mt-1 text-xs text-gray-500">
+                          Internal id for manual stories; matches test case traceability labels.
+                        </p>
+                      )}
+                    </div>
 
                     <div>
                       <label className="mb-1 block text-sm font-medium text-gray-700">Title *</label>

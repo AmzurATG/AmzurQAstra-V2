@@ -8,6 +8,7 @@ import {
   ChevronRightIcon,
 } from '@heroicons/react/24/outline'
 import type { IntegrityCheckPreview } from '../types'
+import { userStoryDisplayKey } from '../constants/userStoryUi'
 
 type Props = {
   preview: IntegrityCheckPreview | null
@@ -65,9 +66,9 @@ export default function IntegrityCheckExecutionPreview({
                     <ChevronRightIcon className="w-4 h-4 text-gray-500" />
                   )}
                   <BookOpenIcon className="w-4 h-4 text-blue-500" />
-                  {us.external_key && (
-                    <span className="text-sm font-mono text-primary-600">{us.external_key}</span>
-                  )}
+                  <span className="shrink-0 text-sm font-mono text-primary-600 truncate max-w-[12rem] sm:max-w-[18rem]" title={userStoryDisplayKey(us.external_key, us.id)}>
+                    {userStoryDisplayKey(us.external_key, us.id)}
+                  </span>
                   <span className="font-medium text-gray-900 text-sm">{us.title}</span>
                 </div>
                 <span className="text-xs text-gray-500">{us.test_cases.length} test cases</span>

@@ -6,6 +6,19 @@ import {
 } from '@heroicons/react/24/outline'
 import type { UserStoryItemType, UserStoryPriority, UserStoryStatus } from '../types'
 
+/**
+ * Stable label for lists and traceability: PM key when set, otherwise `US-{id}`.
+ * Trims whitespace-only external keys to the fallback (edge case).
+ */
+export function userStoryDisplayKey(
+  externalKey: string | null | undefined,
+  id: number
+): string {
+  const trimmed = typeof externalKey === 'string' ? externalKey.trim() : ''
+  if (trimmed.length > 0) return trimmed
+  return `US-${id}`
+}
+
 /** Kept small so the list stays scannable (max rows per request / page). */
 export const USER_STORIES_PAGE_SIZE = 5
 

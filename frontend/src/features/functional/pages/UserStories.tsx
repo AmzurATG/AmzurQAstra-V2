@@ -239,12 +239,12 @@ export default function UserStories() {
     reloadStoriesAndStats()
   }, [refreshPreferences, reloadStoriesAndStats])
 
-  const handleGenerateTests = (storyId: number, _storyKey: string | null) => {
+  const handleGenerateTests = (storyId: number, _displayKey: string) => {
     void runGenerate(storyId, false)
   }
 
-  const handleDeleteStory = async (storyId: number, storyKey: string | null) => {
-    const confirmMessage = `Are you sure you want to delete ${storyKey || `Story #${storyId}`}? This will also delete all related test cases and test steps.`
+  const handleDeleteStory = async (storyId: number, displayKey: string) => {
+    const confirmMessage = `Are you sure you want to delete ${displayKey}? This will also delete all related test cases and test steps.`
     if (!window.confirm(confirmMessage)) return
 
     setDeletingStoryId(storyId)
@@ -465,12 +465,11 @@ export default function UserStories() {
             </p>
           </div>
           <div className="mt-4 divide-y divide-gray-100">
-            {stories.map((story, index) => (
+            {stories.map((story) => (
               <UserStoryListRow
                 key={story.id}
                 story={story}
                 projectId={projectId!}
-                serial={(page - 1) * USER_STORIES_PAGE_SIZE + index + 1}
                 generatingStoryId={generatingStoryId}
                 deletingStoryId={deletingStoryId}
                 onGenerateTests={handleGenerateTests}

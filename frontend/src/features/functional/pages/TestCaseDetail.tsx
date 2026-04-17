@@ -16,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { testCasesApi, testStepsApi } from '../api'
 import type { TestCase, TestStep, TestStepAction } from '../types'
+import { userStoryDisplayKey } from '../constants/userStoryUi'
 import toast from 'react-hot-toast'
 
 const ACTION_OPTIONS: TestStepAction[] = [
@@ -277,11 +278,14 @@ export default function TestCaseDetail() {
               <div>
                 <dt className="text-sm text-gray-500">User Story</dt>
                 <dd>
-                  <Link 
-                    to={`/projects/${projectId}/user-stories`}
-                    className="text-primary-600 hover:underline font-mono text-sm"
+                  <Link
+                    to={`/projects/${projectId}/user-stories/${testCase.user_story.id}`}
+                    className="text-primary-600 hover:underline font-mono text-sm break-all"
                   >
-                    {testCase.user_story.external_key || `US-${testCase.user_story.id}`}
+                    {userStoryDisplayKey(
+                      testCase.user_story.external_key,
+                      testCase.user_story.id
+                    )}
                   </Link>
                 </dd>
               </div>
