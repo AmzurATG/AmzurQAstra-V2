@@ -4,16 +4,19 @@ import { InputHTMLAttributes, forwardRef } from 'react'
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string
   error?: string
+  /** Red asterisk on label without setting native `required` (e.g. conditional validation). */
+  requiredMark?: boolean
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, label, error, id, required, ...props }, ref) => {
+  ({ className, label, error, id, required, requiredMark, ...props }, ref) => {
+    const showStar = Boolean(required || requiredMark)
     return (
       <div className="w-full">
         {label && (
           <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
             {label}
-            {required ? (
+            {showStar ? (
               <span className="text-red-500 ml-0.5" aria-hidden="true">
                 *
               </span>

@@ -171,15 +171,19 @@ export default function JiraIntegration() {
 
         <div className="space-y-4">
           <Input
-            label="Jira Base URL *"
+            id="jira-base-url"
+            label="Jira Base URL"
+            required
             value={config.base_url}
             onChange={(e) => setConfig({ ...config, base_url: e.target.value })}
             placeholder="https://your-company.atlassian.net"
           />
           
           <Input
-            label="Email *"
+            id="jira-email"
+            label="Email"
             type="email"
+            required
             value={config.email}
             onChange={(e) => setConfig({ ...config, email: e.target.value })}
             placeholder="your-email@company.com"
@@ -187,8 +191,10 @@ export default function JiraIntegration() {
           
           <div>
             <Input
-              label={existingIntegration ? "API Token * (enter to update)" : "API Token *"}
+              id="jira-api-token"
+              label={existingIntegration ? 'API Token (enter to update)' : 'API Token'}
               type="password"
+              required={!existingIntegration}
               value={config.api_token}
               onChange={(e) => setConfig({ ...config, api_token: e.target.value })}
               placeholder={existingIntegration ? "Enter token to re-authenticate" : "Your Jira API token"}
@@ -228,10 +234,14 @@ export default function JiraIntegration() {
           <div className="space-y-4">
             {jiraProjects.length > 0 ? (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Jira Project *
+                <label htmlFor="jira-project-select" className="block text-sm font-medium text-gray-700 mb-1">
+                  Jira Project
+                  <span className="text-red-500 ml-0.5" aria-hidden="true">
+                    *
+                  </span>
                 </label>
                 <select
+                  id="jira-project-select"
                   value={config.project_key}
                   onChange={(e) => {
                     const selectedProject = jiraProjects.find(p => p.key === e.target.value)
@@ -265,7 +275,9 @@ export default function JiraIntegration() {
             ) : (
               <>
                 <Input
-                  label="Jira Project Key *"
+                  id="jira-project-key"
+                  label="Jira Project Key"
+                  required
                   value={config.project_key}
                   onChange={(e) => setConfig({ ...config, project_key: e.target.value, project_name: '' })}
                   placeholder="e.g., PROJ, TEST, MYPROJECT"
