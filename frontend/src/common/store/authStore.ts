@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import { User } from '@common/types/auth'
 import { authApi } from '@common/api/auth'
 
@@ -69,6 +69,7 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'qastra-auth',
+      storage: createJSONStorage(() => sessionStorage),
       partialize: (state) => ({
         token: state.token,
         refreshToken: state.refreshToken,
