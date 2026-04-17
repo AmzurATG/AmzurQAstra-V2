@@ -109,20 +109,6 @@ export default function TestCases() {
     }
   }, [projectId, selectedIds])
 
-  // Keep selection aligned with currently loaded rows so Run(#) reflects visible/available cases.
-  useEffect(() => {
-    if (isLoading) return
-    const currentIds = new Set(testCases.map((t) => t.id))
-    setSelectedIds((prev) => {
-      if (prev.size === 0) return prev
-      const next = new Set<number>()
-      for (const id of prev) {
-        if (currentIds.has(id)) next.add(id)
-      }
-      return next.size === prev.size ? prev : next
-    })
-  }, [testCases, isLoading])
-
   // After refresh on the same list view, drop selections for rows that disappeared (e.g. delete).
   useEffect(() => {
     if (isLoading) return
