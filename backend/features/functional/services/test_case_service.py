@@ -1,14 +1,16 @@
 """
 Test Case Service
 """
+import re
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import delete as sa_delete, or_, select, func
 from sqlalchemy.orm import selectinload
 
 from common.api.pagination import PaginationParams
 from common.db.models.user_story import UserStory
 from features.functional.db.models.test_case import TestCase, TestCaseStatus
+from features.functional.db.models.test_result import TestResult
 from features.functional.db.models.test_step import TestStep
 from features.functional.schemas.test_case import (
     TestCaseCreate,
@@ -41,6 +43,18 @@ class TestCaseService:
             .where(TestCase.id == test_case_id)
         )
         return result.scalar_one_or_none()
+
+    async def allocate_case_numbers(self, project_id: int, count: int) -> List[int]:
+        """Return the next `count` per-project case numbers (1-based), without inserting rows."""
+        if count <= 0:
+            return []
+        result = await self.db.execute(
+            select(func.coalesce(func.max(TestCase.case_number), 0)).where(
+                TestCase.project_id == project_id
+            )
+        )
+        start = int(result.scalar() or 0) + 1
+        return list(range(start, start + count))
     
     async def get_list(
         self,
@@ -88,19 +102,38 @@ class TestCaseService:
             count_query = count_query.where(TestCase.category == category)
         
         if search:
-            search_filter = f"%{search}%"
-            query = query.where(TestCase.title.ilike(search_filter))
-            count_query = count_query.where(TestCase.title.ilike(search_filter))
+            raw = (search or "").strip()
+            if raw:
+                term = f"%{raw}%"
+                query = query.outerjoin(
+                    UserStory, TestCase.user_story_id == UserStory.id
+                )
+                count_query = count_query.outerjoin(
+                    UserStory, TestCase.user_story_id == UserStory.id
+                )
+
+                or_conditions = [
+                    TestCase.title.ilike(term),
+                    UserStory.external_key.ilike(term),
+                ]
+                # US-42 / us-42 / US42 / us 42 — same display label as the UI
+                us_match = re.match(r"^us\s*-?\s*(\d+)\s*$", raw, re.IGNORECASE)
+                if us_match:
+                    or_conditions.append(UserStory.id == int(us_match.group(1)))
+                elif raw.isdigit():
+                    or_conditions.append(UserStory.id == int(raw))
+
+                query = query.where(or_(*or_conditions))
+                count_query = count_query.where(or_(*or_conditions))
         
         # Get total count
         total_result = await self.db.execute(count_query)
         total = total_result.scalar()
         
-        # Apply pagination
+        query = query.order_by(TestCase.case_number.asc(), TestCase.id.asc())
+        
         if pagination:
             query = query.offset(pagination.offset).limit(pagination.page_size)
-        
-        query = query.order_by(TestCase.created_at.desc())
         
         result = await self.db.execute(query)
         test_cases = result.scalars().all()
@@ -131,6 +164,7 @@ class TestCaseService:
             
             responses.append(TestCaseResponse(
                 id=tc.id,
+                case_number=tc.case_number,
                 project_id=tc.project_id,
                 requirement_id=tc.requirement_id,
                 user_story_id=tc.user_story_id,
@@ -144,6 +178,7 @@ class TestCaseService:
                 tags=tc.tags,
                 is_automated=tc.is_automated,
                 is_generated=tc.is_generated,
+                integrity_check=tc.integrity_check,
                 jira_key=tc.jira_key,
                 created_by=tc.created_by,
                 created_at=tc.created_at,
@@ -155,8 +190,10 @@ class TestCaseService:
     
     async def create(self, test_case_data: TestCaseCreate, created_by: int) -> TestCase:
         """Create a new test case."""
+        numbers = await self.allocate_case_numbers(test_case_data.project_id, 1)
         test_case = TestCase(
             **test_case_data.model_dump(),
+            case_number=numbers[0],
             created_by=created_by,
         )
         self.db.add(test_case)
@@ -181,11 +218,15 @@ class TestCaseService:
         return await self.get_by_id_with_steps(test_case_id)
     
     async def delete(self, test_case_id: int) -> bool:
-        """Delete a test case."""
+        """Delete a test case, its steps (ORM cascade), and linked test run results."""
         test_case = await self.get_by_id(test_case_id)
         if not test_case:
             return False
-        
+
+        # test_results references test_cases without ON DELETE CASCADE — remove results first
+        await self.db.execute(
+            sa_delete(TestResult).where(TestResult.test_case_id == test_case_id)
+        )
         await self.db.delete(test_case)
         await self.db.flush()
         return True

@@ -10,7 +10,9 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from common.db.models.project import Project
 from features.functional.db.models.integrity_check_result import IntegrityCheckResult
+from features.functional.utils.credentials_redaction import redact_known_credentials
 from features.functional.schemas.integrity_check import (
     IntegrityCheckRequest,
     RunStartResponse,
@@ -21,6 +23,17 @@ from features.functional.core.browser.agent_service import (
     get_progress,
 )
 from common.utils.logger import logger
+
+
+def _redact_ic_text(
+    text: Optional[str],
+    username: Optional[str],
+    password: Optional[str],
+) -> str:
+    if not text:
+        return ""
+    out = redact_known_credentials(text, username=username, password=password)
+    return out if out is not None else ""
 
 
 class IntegrityCheckService:
@@ -53,7 +66,8 @@ class IntegrityCheckService:
 
         username = request.credentials.username if request.credentials else None
         password = request.credentials.password if request.credentials else None
-        use_google = request.use_google_signin
+        # Google Sign-In for BIC is disabled until a supported flow ships (UI forces false too).
+        use_google = False
 
         asyncio.create_task(
             self._run_and_persist(
@@ -86,7 +100,7 @@ class IntegrityCheckService:
             result = {
                 "status": "error",
                 "overall_status": "error",
-                "error": str(exc),
+                "error": _redact_ic_text(str(exc), username, password),
                 "screenshots": [],
                 "steps": [],
                 "steps_total": 0,
@@ -109,20 +123,48 @@ class IntegrityCheckService:
                 record.steps_total = result.get("steps_total", 0)
                 record.steps_passed = result.get("steps_passed", 0)
                 record.steps_failed = result.get("steps_failed", 0)
-                record.summary = result.get("summary", "")
-                record.error_message = result.get("error")
+                record.summary = _redact_ic_text(
+                    result.get("summary") or "", username, password
+                )
+                record.error_message = _redact_ic_text(
+                    result.get("error"), username, password
+                ) or None
                 record.duration_ms = result.get("duration_ms")
                 record.completed_at = datetime.utcnow()
                 await db.commit()
 
     # ── Poll status ───────────────────────────────────────────────────────────
 
+    async def _project_credential_strings_for_ic_run(
+        self, run_id: str
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Best-effort username/password from project app_credentials for redacting API responses."""
+        row_result = await self.db.execute(
+            select(IntegrityCheckResult).where(IntegrityCheckResult.run_id == run_id)
+        )
+        rec = row_result.scalar_one_or_none()
+        if not rec:
+            return None, None
+        prow = await self.db.execute(select(Project).where(Project.id == rec.project_id))
+        proj = prow.scalar_one_or_none()
+        if not proj or not proj.app_credentials:
+            return None, None
+        c = proj.app_credentials or {}
+        return c.get("username"), c.get("password")
+
     async def get_run_status(self, run_id: str) -> RunStatusResponse:
         """
         Check in-memory store first (live run), fall back to DB (historical).
+        Summary and error fields are redacted using project credentials when available.
         """
+        bu, bp = await self._project_credential_strings_for_ic_run(run_id)
+
         progress = get_progress(run_id)
         if progress:
+            s_raw = progress.get("summary")
+            e_raw = progress.get("error")
+            summ_p = _redact_ic_text(s_raw, bu, bp) if s_raw else ""
+            err_p = _redact_ic_text(e_raw, bu, bp) if e_raw else ""
             return RunStatusResponse(
                 run_id=run_id,
                 status=progress.get("status", "running"),
@@ -134,8 +176,8 @@ class IntegrityCheckService:
                 steps_total=progress.get("steps_total", 0),
                 steps_passed=progress.get("steps_passed", 0),
                 steps_failed=progress.get("steps_failed", 0),
-                summary=progress.get("summary"),
-                error=progress.get("error"),
+                summary=summ_p or None,
+                error=err_p or None,
                 duration_ms=progress.get("duration_ms"),
             )
 
@@ -148,6 +190,10 @@ class IntegrityCheckService:
             return RunStatusResponse(run_id=run_id, status="not_found", percentage=0)
 
         pct = 100 if record.status in ("completed", "error") else 0
+        summ = _redact_ic_text(record.summary, bu, bp) if record.summary else ""
+        err = _redact_ic_text(record.error_message, bu, bp) if record.error_message else ""
+        summ = summ or None
+        err = err or None
         return RunStatusResponse(
             run_id=run_id,
             status=record.status,
@@ -158,8 +204,8 @@ class IntegrityCheckService:
             steps_total=record.steps_total or 0,
             steps_passed=record.steps_passed or 0,
             steps_failed=record.steps_failed or 0,
-            summary=record.summary,
-            error=record.error_message,
+            summary=summ,
+            error=err,
             duration_ms=record.duration_ms,
         )
 

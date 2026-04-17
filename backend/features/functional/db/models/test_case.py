@@ -1,7 +1,7 @@
 """
 Test Case Model
 """
-from sqlalchemy import Column, String, Text, Integer, ForeignKey, Enum, Boolean
+from sqlalchemy import Column, String, Text, Integer, ForeignKey, Enum, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
 import enum
 
@@ -36,8 +36,13 @@ class TestCase(BaseModel):
     """Test case model."""
     
     __tablename__ = "test_cases"
-    
+    __table_args__ = (
+        UniqueConstraint("project_id", "case_number", name="uq_test_cases_project_case_number"),
+    )
+
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    #: Per-project sequence (1, 2, 3 …); stable display number independent of primary key.
+    case_number = Column(Integer, nullable=False)
     requirement_id = Column(Integer, ForeignKey("requirements.id"), nullable=True)
     user_story_id = Column(Integer, ForeignKey("user_stories.id"), nullable=True)
     

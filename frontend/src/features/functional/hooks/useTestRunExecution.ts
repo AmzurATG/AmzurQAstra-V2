@@ -20,6 +20,7 @@ export function useTestRunExecution(): UseTestRunExecutionReturn {
   const [progress, setProgress] = useState<LiveProgressResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const createInFlightRef = useRef(false)
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -49,6 +50,10 @@ export function useTestRunExecution(): UseTestRunExecutionReturn {
   }, [poll, stopPolling])
 
   const startRun = useCallback(async (data: TestRunCreateRequest) => {
+    if (createInFlightRef.current) {
+      return
+    }
+    createInFlightRef.current = true
     setIsCreating(true)
     setError(null)
     setProgress(null)
@@ -61,6 +66,7 @@ export function useTestRunExecution(): UseTestRunExecutionReturn {
       const msg = err.response?.data?.detail || err.message || 'Failed to start test run'
       setError(msg)
     } finally {
+      createInFlightRef.current = false
       setIsCreating(false)
     }
   }, [startPolling])
@@ -69,12 +75,14 @@ export function useTestRunExecution(): UseTestRunExecutionReturn {
     if (!runId) return
     try {
       await testRunsApi.cancel(runId)
-      stopPolling()
-      setProgress((prev) => prev ? { ...prev, status: 'cancelled' } : prev)
+      // Keep polling until backend confirms terminal cancelled state.
+      // This avoids showing "cancelled" while a late-starting browser still opens briefly.
+      setProgress((prev) => prev ? { ...prev, status: 'cancelling' } : prev)
+      startPolling(runId)
     } catch {
       // ignore
     }
-  }, [runId, stopPolling])
+  }, [runId, startPolling])
 
   const reset = useCallback(() => {
     stopPolling()

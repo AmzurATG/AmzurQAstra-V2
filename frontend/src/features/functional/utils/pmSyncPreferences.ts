@@ -128,6 +128,8 @@ export function hydratePmSyncPreferencesFromIntegrations(
   projectId: number,
   integrations: IntegrationRow[]
 ): boolean {
+  const existing = getPmSyncPreferences(projectId)
+
   const pm = integrations
     .filter(
       (i) =>
@@ -171,6 +173,20 @@ export function hydratePmSyncPreferencesFromIntegrations(
       } else {
         // Server payload missing sprint list — do not assume "all sprints" (that overwrote scoped prefs)
         base.all_sprints = false
+      }
+    }
+    // Avoid rewriting when local and server scopes already match.
+    if (existing) {
+      const sameIntegration = existing.integration_type === base.integration_type
+      const sameIssueTypes =
+        JSON.stringify([...(existing.issue_types || [])].sort()) ===
+        JSON.stringify([...(base.issue_types || [])].sort())
+      const sameAllSprints = (existing.all_sprints ?? false) === (base.all_sprints ?? false)
+      const sameSprintIds =
+        JSON.stringify([...(existing.sprint_ids || [])].map(Number).sort((a, b) => a - b)) ===
+        JSON.stringify([...(base.sprint_ids || [])].map(Number).sort((a, b) => a - b))
+      if (sameIntegration && sameIssueTypes && sameAllSprints && sameSprintIds) {
+        return false
       }
     }
     setPmSyncPreferences(projectId, base)

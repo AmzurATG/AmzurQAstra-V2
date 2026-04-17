@@ -14,9 +14,15 @@ import { userStoriesApi } from '../api'
 import type { UserStory } from '../types'
 import { UserStoryEditModal } from '../components/userStories/UserStoryEditModal'
 import { TestGenerationInfoDialog } from '../components/userStories/TestGenerationInfoDialog'
-import { RegenerateTestsDialog } from '../components/userStories/RegenerateTestsDialog'
 import { useUserStoryTestGeneration } from '../hooks/useUserStoryTestGeneration'
-import { itemTypeConfig, priorityConfig, sourceConfig, statusConfig } from '../constants/userStoryUi'
+import {
+  aiGeneratedTestsExistCopy,
+  itemTypeConfig,
+  priorityConfig,
+  sourceConfig,
+  statusConfig,
+  userStoryDisplayKey,
+} from '../constants/userStoryUi'
 import toast from 'react-hot-toast'
 
 export default function UserStoryDetail() {
@@ -29,8 +35,6 @@ export default function UserStoryDetail() {
   const [loading, setLoading] = useState(true)
   const [editOpen, setEditOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [regenerateOpen, setRegenerateOpen] = useState(false)
-
   const loadStory = useCallback(async () => {
     if (!projectId || !storyId || Number.isNaN(sid)) return
     setLoading(true)
@@ -70,10 +74,10 @@ export default function UserStoryDetail() {
 
   const handleDelete = async () => {
     if (!story) return
-    const key = story.external_key
+    const key = userStoryDisplayKey(story.external_key, story.id)
     if (
       !window.confirm(
-        `Delete ${key || `story #${story.id}`}? Related test cases and steps will be removed.`
+        `Delete ${key}? Related test cases and steps will be removed.`
       )
     ) {
       return
@@ -118,6 +122,7 @@ export default function UserStoryDetail() {
   const priorityCfg = priorityConfig[story.priority] || priorityConfig.medium
   const sourceCfg = sourceConfig[story.source] || sourceConfig.manual
   const itemTypeCfg = itemTypeConfig[story.item_type] || itemTypeConfig.story
+  const storyDisplayKey = userStoryDisplayKey(story.external_key, story.id)
 
   return (
     <div className="min-w-0 space-y-6">
@@ -129,44 +134,44 @@ export default function UserStoryDetail() {
           <ArrowLeftIcon className="h-4 w-4" />
           Back to list
         </Link>
-        <div className="flex flex-wrap gap-2 lg:ml-auto">
+        <div className="flex flex-col items-stretch gap-2 sm:items-end lg:ml-auto lg:min-w-[20rem]">
+          <div className="flex flex-wrap gap-2 sm:justify-end">
           <Button variant="outline" onClick={() => setEditOpen(true)}>
             <PencilIcon className="mr-1.5 h-4 w-4" />
             Edit
           </Button>
-          {!hasGeneratedTests ? (
-            <Button
-              variant="outline"
-              onClick={handleGenerateTests}
-              disabled={isGenerating}
-              isLoading={isGenerating}
-            >
-              <SparklesIcon className="mr-1.5 h-4 w-4" />
-              Generate tests
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              onClick={() => setRegenerateOpen(true)}
-              disabled={isGenerating}
-              isLoading={isGenerating}
-            >
-              <SparklesIcon className="mr-1.5 h-4 w-4" />
-              Regenerate tests
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            onClick={handleGenerateTests}
+            disabled={hasGeneratedTests || isGenerating}
+            isLoading={isGenerating}
+            title={
+              hasGeneratedTests
+                ? 'Test cases already generated for this story'
+                : 'Create AI test cases from this story'
+            }
+          >
+            <SparklesIcon className="mr-1.5 h-4 w-4" />
+            Generate tests
+          </Button>
           <Button variant="danger" onClick={handleDelete} disabled={deleting} isLoading={deleting}>
             <TrashIcon className="mr-1.5 h-4 w-4" />
             Delete
           </Button>
+          </div>
+          {hasGeneratedTests && (
+            <p className="text-sm text-gray-600 text-right leading-snug" role="status">
+              {aiGeneratedTestsExistCopy(generatedCount)}
+            </p>
+          )}
         </div>
       </div>
 
       <Card className="min-w-0">
         <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 pb-4">
-          {story.external_key && (
-            <span className="font-mono text-lg text-primary-600">{story.external_key}</span>
-          )}
+          <span className="font-mono text-lg text-primary-600 break-all" title={storyDisplayKey}>
+            {storyDisplayKey}
+          </span>
           <span title={sourceCfg.label}>{sourceCfg.icon}</span>
           <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${itemTypeCfg.color}`}>
             {itemTypeCfg.label}
@@ -223,17 +228,6 @@ export default function UserStoryDetail() {
         isOpen={infoDialogOpen}
         message={infoMessage}
         onClose={closeInfoDialog}
-      />
-
-      <RegenerateTestsDialog
-        isOpen={regenerateOpen}
-        storyLabel={story.external_key || `Story #${story.id}`}
-        isLoading={isGenerating}
-        onClose={() => setRegenerateOpen(false)}
-        onConfirm={async () => {
-          await runGenerate(story.id, true)
-          setRegenerateOpen(false)
-        }}
       />
     </div>
   )

@@ -1,5 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { PhotoIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import {
+  PhotoIcon,
+  XMarkIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+} from '@heroicons/react/24/outline'
 import type { AgentLogEntry } from '../types'
 import { fetchScreenshotBlobUrl } from '../utils/screenshotFetch'
 
@@ -12,18 +17,22 @@ function LazyAgentThumb({
   runId,
   testResultId,
   entry,
+  index,
   onLoaded,
   onOpen,
   blobUrl,
+  registerThumb,
 }: {
   runId: number
   testResultId: number
   entry: AgentLogEntry
+  index: number
   onLoaded: (step: number, url: string) => void
-  onOpen: (entry: AgentLogEntry) => void
+  onOpen: (entry: AgentLogEntry, index: number) => void
   blobUrl: string | undefined
+  registerThumb: (index: number, el: HTMLButtonElement | null) => void
 }) {
-  const ref = useRef<HTMLButtonElement>(null)
+  const ref = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     if (blobUrl) return
@@ -61,11 +70,19 @@ function LazyAgentThumb({
     }
   }, [runId, testResultId, entry.agent_step, entry.screenshot_path, blobUrl, onLoaded])
 
+  const setButtonRef = useCallback(
+    (el: HTMLButtonElement | null) => {
+      ref.current = el
+      registerThumb(index, el)
+    },
+    [index, registerThumb]
+  )
+
   return (
     <button
-      ref={ref}
+      ref={setButtonRef}
       type="button"
-      onClick={() => onOpen(entry)}
+      onClick={() => onOpen(entry, index)}
       className="shrink-0 w-24 rounded-lg border border-gray-200 overflow-hidden bg-gray-50 hover:ring-2 hover:ring-primary-400 transition-shadow text-left"
     >
       <div className="aspect-video bg-gray-200 flex items-center justify-center">
@@ -109,13 +126,22 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
   )
   const [blobByStep, setBlobByStep] = useState<Record<number, string>>({})
   const [primaryBlobUrl, setPrimaryBlobUrl] = useState<string | null>(null)
-  const [lightbox, setLightbox] = useState<AgentLogEntry | null>(null)
+  /** Index into `withShots` when viewing agent step gallery; null = closed */
+  const [galleryIndex, setGalleryIndex] = useState<number | null>(null)
   const [primaryLightbox, setPrimaryLightbox] = useState(false)
   const [lightboxLoading, setLightboxLoading] = useState(false)
   const blobsRef = useRef<Record<number, string>>({})
+  const stripScrollRef = useRef<HTMLDivElement>(null)
+  const thumbRefs = useRef<Map<number, HTMLButtonElement>>(new Map())
+
   useEffect(() => {
     blobsRef.current = blobByStep
   }, [blobByStep])
+
+  const registerThumb = useCallback((index: number, el: HTMLButtonElement | null) => {
+    if (el) thumbRefs.current.set(index, el)
+    else thumbRefs.current.delete(index)
+  }, [])
 
   const primaryName = primaryScreenshotPath ? screenshotBasename(primaryScreenshotPath) : ''
 
@@ -123,9 +149,8 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
     setBlobByStep((prev) => (prev[step] ? prev : { ...prev, [step]: url }))
   }, [])
 
-  const openAgentLightbox = useCallback(
-    async (entry: AgentLogEntry) => {
-      setLightbox(entry)
+  const loadBlobForEntry = useCallback(
+    async (entry: AgentLogEntry): Promise<void> => {
       const step = entry.agent_step
       if (blobsRef.current[step]) return
       const fn = entry.screenshot_path ? screenshotBasename(entry.screenshot_path) : ''
@@ -148,6 +173,69 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
     },
     [runId, testResultId]
   )
+
+  const openGalleryAtIndex = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= withShots.length) return
+      setGalleryIndex(index)
+    },
+    [withShots.length]
+  )
+
+  const onThumbOpen = useCallback(
+    (_entry: AgentLogEntry, index: number) => {
+      openGalleryAtIndex(index)
+    },
+    [openGalleryAtIndex]
+  )
+
+  useEffect(() => {
+    if (galleryIndex === null) return
+    const entry = withShots[galleryIndex]
+    if (!entry) return
+    let cancelled = false
+    ;(async () => {
+      await loadBlobForEntry(entry)
+      if (cancelled) return
+      requestAnimationFrame(() => {
+        thumbRefs.current.get(galleryIndex)?.scrollIntoView({
+          inline: 'nearest',
+          behavior: 'smooth',
+          block: 'nearest',
+        })
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [galleryIndex, withShots, loadBlobForEntry])
+
+  useEffect(() => {
+    if (galleryIndex === null) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setGalleryIndex(null)
+        return
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        setGalleryIndex((i) => (i !== null && i > 0 ? i - 1 : i))
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        setGalleryIndex((i) =>
+          i !== null && i < withShots.length - 1 ? i + 1 : i
+        )
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [galleryIndex, withShots.length])
+
+  const scrollStrip = (delta: number) => {
+    stripScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' })
+  }
 
   useEffect(() => {
     if (!enabled || !primaryName) {
@@ -185,10 +273,14 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
     )
   }
 
+  const galleryEntry = galleryIndex !== null ? withShots[galleryIndex] : null
+  const galleryHasPrev = galleryIndex !== null && galleryIndex > 0
+  const galleryHasNext = galleryIndex !== null && galleryIndex < withShots.length - 1
+
   return (
-    <div className="mt-3 border-t border-gray-100 pt-3 space-y-3">
+    <div className="mt-3 border-t border-gray-100 pt-3 space-y-3 w-full min-w-0 max-w-full">
       {primaryName && (
-        <div>
+        <div className="min-w-0">
           <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
             <PhotoIcon className="w-3.5 h-3.5" /> Run snapshot
           </p>
@@ -215,22 +307,47 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
       )}
 
       {withShots.length > 0 && (
-        <div>
+        <div className="min-w-0 max-w-full">
           <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
             <PhotoIcon className="w-3.5 h-3.5" /> Agent steps (screenshots load as you scroll)
           </p>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {withShots.map((entry) => (
-              <LazyAgentThumb
-                key={`${entry.agent_step}-${entry.timestamp}`}
-                runId={runId}
-                testResultId={testResultId}
-                entry={entry}
-                blobUrl={blobByStep[entry.agent_step]}
-                onLoaded={onThumbLoaded}
-                onOpen={openAgentLightbox}
-              />
-            ))}
+          <div className="flex items-center gap-1 min-w-0 max-w-full">
+            <button
+              type="button"
+              className="shrink-0 rounded-lg border border-gray-200 bg-white p-1.5 text-gray-600 shadow-sm hover:bg-gray-50 disabled:opacity-40"
+              aria-label="Scroll screenshots left"
+              onClick={() => scrollStrip(-280)}
+            >
+              <ChevronLeftIcon className="w-5 h-5" />
+            </button>
+            <div
+              ref={stripScrollRef}
+              className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain pb-1 [scrollbar-width:thin]"
+            >
+              <div className="flex w-max min-w-0 gap-2 pr-1">
+                {withShots.map((entry, index) => (
+                  <LazyAgentThumb
+                    key={`${entry.agent_step}-${entry.timestamp}`}
+                    runId={runId}
+                    testResultId={testResultId}
+                    entry={entry}
+                    index={index}
+                    blobUrl={blobByStep[entry.agent_step]}
+                    onLoaded={onThumbLoaded}
+                    onOpen={onThumbOpen}
+                    registerThumb={registerThumb}
+                  />
+                ))}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 rounded-lg border border-gray-200 bg-white p-1.5 text-gray-600 shadow-sm hover:bg-gray-50 disabled:opacity-40"
+              aria-label="Scroll screenshots right"
+              onClick={() => scrollStrip(280)}
+            >
+              <ChevronRightIcon className="w-5 h-5" />
+            </button>
           </div>
         </div>
       )}
@@ -263,38 +380,71 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
         </div>
       )}
 
-      {lightbox && (
+      {galleryEntry && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
           role="dialog"
           aria-modal
+          aria-labelledby="agent-gallery-title"
         >
           <button
             type="button"
-            className="absolute top-4 right-4 text-white p-2 rounded-full hover:bg-white/10"
-            onClick={() => setLightbox(null)}
+            className="absolute top-4 right-4 text-white p-2 rounded-full hover:bg-white/10 z-[60]"
+            onClick={() => setGalleryIndex(null)}
             aria-label="Close"
           >
             <XMarkIcon className="w-6 h-6" />
           </button>
-          <div className="max-w-4xl max-h-[90vh] flex flex-col gap-2 bg-white rounded-lg overflow-hidden shadow-xl">
-            {lightboxLoading && !blobByStep[lightbox.agent_step] ? (
+          {galleryHasPrev && (
+            <button
+              type="button"
+              className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 z-[60] rounded-full bg-white/90 p-2 text-gray-800 shadow-lg hover:bg-white"
+              aria-label="Previous screenshot"
+              onClick={() => setGalleryIndex((i) => (i !== null && i > 0 ? i - 1 : i))}
+            >
+              <ChevronLeftIcon className="w-8 h-8" />
+            </button>
+          )}
+          {galleryHasNext && (
+            <button
+              type="button"
+              className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 z-[60] rounded-full bg-white/90 p-2 text-gray-800 shadow-lg hover:bg-white"
+              aria-label="Next screenshot"
+              onClick={() =>
+                setGalleryIndex((i) =>
+                  i !== null && i < withShots.length - 1 ? i + 1 : i
+                )
+              }
+            >
+              <ChevronRightIcon className="w-8 h-8" />
+            </button>
+          )}
+          <div className="max-w-4xl max-h-[90vh] w-full flex flex-col gap-2 bg-white rounded-lg overflow-hidden shadow-xl relative">
+            {lightboxLoading && galleryEntry && !blobByStep[galleryEntry.agent_step] ? (
               <div className="p-16 text-gray-500 text-sm">Loading image…</div>
-            ) : blobByStep[lightbox.agent_step] ? (
+            ) : galleryEntry && blobByStep[galleryEntry.agent_step] ? (
               <img
-                src={blobByStep[lightbox.agent_step]}
+                src={blobByStep[galleryEntry.agent_step]}
                 alt=""
                 className="max-h-[70vh] w-full object-contain bg-gray-900"
               />
             ) : (
               <div className="p-16 text-gray-500 text-sm">Could not load image.</div>
             )}
-            <div className="p-4 text-sm">
-              <p className="font-semibold text-gray-900">Agent step {lightbox.agent_step}</p>
-              <p className="text-gray-600 mt-1">{lightbox.description}</p>
-              {lightbox.adaptation && (
-                <p className="text-xs text-purple-700 mt-2">{lightbox.adaptation}</p>
+            <div className="p-4 text-sm border-t border-gray-100">
+              <p id="agent-gallery-title" className="font-semibold text-gray-900">
+                Agent step {galleryEntry.agent_step}
+                <span className="text-gray-500 font-normal text-xs ml-2">
+                  {galleryIndex !== null ? `${galleryIndex + 1} / ${withShots.length}` : ''}
+                </span>
+              </p>
+              <p className="text-gray-600 mt-1">{galleryEntry.description}</p>
+              {galleryEntry.adaptation && (
+                <p className="text-xs text-purple-700 mt-2">{galleryEntry.adaptation}</p>
               )}
+              <p className="text-[10px] text-gray-400 mt-3">
+                Use the side arrows or ← → keys for the next or previous screenshot. Esc to close.
+              </p>
             </div>
           </div>
         </div>

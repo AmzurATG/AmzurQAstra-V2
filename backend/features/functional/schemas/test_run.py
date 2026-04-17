@@ -49,6 +49,7 @@ class TestRunSummaryResponse(BaseModel):
 
 class TestRunResponse(BaseModel):
     id: int
+    run_number: int
     project_id: int
     name: Optional[str] = None
     description: Optional[str] = None
@@ -122,6 +123,7 @@ class CompletedCaseResult(BaseModel):
 
 class LiveProgressResponse(BaseModel):
     run_id: int
+    run_number: Optional[int] = None
     status: str
     percentage: int = 0
     current_test_case_index: int = 0

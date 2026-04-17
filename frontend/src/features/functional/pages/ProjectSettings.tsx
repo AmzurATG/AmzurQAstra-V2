@@ -13,7 +13,7 @@ export default function ProjectSettings() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
   const { currentProject, setCurrentProject, clearCurrentProject, fetchProjects } = useProjectStore()
-  
+
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [appUrl, setAppUrl] = useState('')

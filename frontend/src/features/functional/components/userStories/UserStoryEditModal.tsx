@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
-import { Dialog, Transition, Switch } from '@headlessui/react'
-import { XMarkIcon, ShieldCheckIcon } from '@heroicons/react/24/outline'
+import { Dialog, Transition } from '@headlessui/react'
+import { XMarkIcon } from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
 import { userStoriesApi } from '../../api'
 import type { UserStory, UserStoryItemType, UserStoryPriority, UserStoryStatus } from '../../types'
@@ -11,6 +11,7 @@ import {
   itemTypeConfig,
   priorityConfig,
   statusConfig,
+  userStoryDisplayKey,
 } from '../../constants/userStoryUi'
 import toast from 'react-hot-toast'
 
@@ -102,14 +103,19 @@ export function UserStoryEditModal({ projectId, isOpen, onClose, story, onSaved 
 
                 {draft && (
                   <div className="max-h-[60vh] space-y-4 overflow-y-auto px-6 py-4">
-                    {draft.external_key && (
-                      <div>
-                        <label className="mb-1 block text-sm font-medium text-gray-700">External key</label>
-                        <div className="rounded-lg bg-gray-100 px-3 py-2 font-mono text-sm text-gray-600">
-                          {draft.external_key}
-                        </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">
+                        {draft.external_key?.trim() ? 'External key' : 'Story reference'}
+                      </label>
+                      <div className="rounded-lg bg-gray-100 px-3 py-2 font-mono text-sm text-gray-600 break-all">
+                        {userStoryDisplayKey(draft.external_key, draft.id)}
                       </div>
-                    )}
+                      {!draft.external_key?.trim() && (
+                        <p className="mt-1 text-xs text-gray-500">
+                          Internal id for manual stories; matches test case traceability labels.
+                        </p>
+                      )}
+                    </div>
 
                     <div>
                       <label className="mb-1 block text-sm font-medium text-gray-700">Title *</label>
@@ -212,33 +218,6 @@ export function UserStoryEditModal({ projectId, isOpen, onClose, story, onSaved 
                         className="w-full rounded-lg border border-gray-300 p-2 text-sm focus:border-primary-500 focus:ring-primary-500"
                         placeholder="Assignee name"
                       />
-                    </div>
-
-                    <div className="border-t border-gray-200 pt-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <ShieldCheckIcon className="h-5 w-5 text-gray-500" />
-                          <div>
-                            <span className="text-sm font-medium text-gray-700">Integrity check</span>
-                            <p className="text-xs text-gray-500">
-                              Include linked test cases in build integrity checks
-                            </p>
-                          </div>
-                        </div>
-                        <Switch
-                          checked={draft.integrity_check || false}
-                          onChange={(checked) => setDraft({ ...draft, integrity_check: checked })}
-                          className={`${
-                            draft.integrity_check ? 'bg-green-600' : 'bg-gray-200'
-                          } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2`}
-                        >
-                          <span
-                            className={`${
-                              draft.integrity_check ? 'translate-x-6' : 'translate-x-1'
-                            } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
-                          />
-                        </Switch>
-                      </div>
                     </div>
                   </div>
                 )}

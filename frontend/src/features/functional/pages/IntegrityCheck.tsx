@@ -21,7 +21,6 @@ export default function IntegrityCheck() {
   const [appUrl, setAppUrl] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [useGoogleSignin, setUseGoogleSignin] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
   const [_runId, setRunId] = useState<string | null>(null)
   const [progress, setProgress] = useState<RunStatusResponse | null>(null)
@@ -45,10 +44,6 @@ export default function IntegrityCheck() {
 
   // Cleanup polling on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
-
-  useEffect(() => {
-    if (useGoogleSignin) setPassword('')
-  }, [useGoogleSignin])
 
   const loadPreview = async () => {
     try {
@@ -90,13 +85,9 @@ export default function IntegrityCheck() {
       const res = await integrityCheckApi.startRun({
         project_id: parseInt(projectId),
         app_url: appUrl,
-        use_google_signin: useGoogleSignin,
+        use_google_signin: false,
         credentials:
-          useGoogleSignin && username
-            ? { username }
-            : username || password
-              ? { username, password }
-              : undefined,
+          username || password ? { username, password } : undefined,
       })
       setRunId(res.data.run_id)
       startPolling(res.data.run_id)
@@ -127,30 +118,19 @@ export default function IntegrityCheck() {
           <Input label="Application URL" value={appUrl} onChange={e => setAppUrl(e.target.value)}
             placeholder="https://app.example.com" disabled={isRunning} />
           <div
-            className="flex items-start justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5"
-            role="group"
-            aria-label="Google Sign-In option"
+            className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3"
+            role="status"
+            aria-label="Google Sign-In unavailable"
           >
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-gray-900">Use Google Sign-In</p>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Enable if this app logs in with Google. The agent will follow the Google OAuth flow in the opened browser.
-              </p>
-            </div>
-            <label className="inline-flex items-center gap-2 shrink-0 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={useGoogleSignin}
-                onChange={e => setUseGoogleSignin(e.target.checked)}
-                disabled={isRunning}
-                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <span className="text-xs text-gray-600">On</span>
-            </label>
+            <p className="text-sm font-medium text-gray-800">Google Sign-In</p>
+            <p className="text-xs text-gray-600 mt-1">
+              This option is turned off for now. Automated Google login for Build Integrity Check is not supported yet; we plan to add it in a future release. Please use{' '}
+              <span className="font-medium text-gray-800">username and password</span> when the run opens the browser.
+            </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Input
-              label={useGoogleSignin ? 'Google account email (optional hint)' : 'Username (optional)'}
+              label="Username (optional)"
               value={username}
               onChange={e => setUsername(e.target.value)}
               placeholder="you@company.com"
@@ -162,14 +142,9 @@ export default function IntegrityCheck() {
               value={password}
               onChange={e => setPassword(e.target.value)}
               placeholder="••••••••"
-              disabled={isRunning || useGoogleSignin}
+              disabled={isRunning}
             />
           </div>
-          {useGoogleSignin && (
-            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-              Password is disabled for Google Sign-In. Complete MFA or extra prompts in the Chrome window if your org requires it.
-            </p>
-          )}
           <Button onClick={handleRunCheck} isLoading={isRunning} disabled={!appUrl || isRunning}>
             <PlayIcon className="w-4 h-4 mr-2" />
             {isRunning ? 'Check Running…' : 'Run Integrity Check'}

@@ -26,6 +26,10 @@ from features.functional.utils.credentials_redaction import redact_known_credent
 _tc_progress: Dict[str, Dict[str, Any]] = {}
 
 
+class TestRunCancelled(Exception):
+    """Raised when the user cancels the run while the agent is executing."""
+
+
 def get_tc_progress(key: str) -> Optional[Dict[str, Any]]:
     return _tc_progress.get(key)
 
@@ -314,11 +318,12 @@ class TestCaseRunner:
         headless: bool = False,
         browser_context: Optional[Any] = None,
         on_step_callback: Optional[Any] = None,
+        execution_run_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         return await self._run_impl(
             run_id, test_case_id, title, description, preconditions,
             steps, app_url, username, password, use_google_signin, headless,
-            browser_context, on_step_callback,
+            browser_context, on_step_callback, execution_run_id,
         )
 
     async def _run_impl(
@@ -336,8 +341,10 @@ class TestCaseRunner:
         headless: bool,
         browser_context: Optional[Any] = None,
         on_step_callback: Optional[Any] = None,
+        execution_run_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         from browser_use import Agent, Browser, BrowserProfile
+        from features.functional.services.run_progress_manager import RunProgressManager
 
         start = datetime.utcnow()
         app_url = (app_url or "").strip()
@@ -373,6 +380,24 @@ class TestCaseRunner:
                 "error": "no_steps",
             }
 
+        progress_mgr = RunProgressManager()
+        if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
+            dur = int((datetime.utcnow() - start).total_seconds() * 1000)
+            cleanup_tc_progress(f"{run_id}:{test_case_id}")
+            return {
+                "status": "cancelled",
+                "overall": "cancelled",
+                "step_results": [],
+                "screenshots": [],
+                "logs": [],
+                "steps_total": len(steps),
+                "steps_passed": 0,
+                "steps_failed": 0,
+                "summary": "Run cancelled before browser started.",
+                "duration_ms": dur,
+                "error": None,
+            }
+
         key = f"{run_id}:{test_case_id}"
         screenshots: List[str] = []
         agent_logs: List[Dict[str, Any]] = []
@@ -385,6 +410,8 @@ class TestCaseRunner:
         })
 
         async def _on_step(state: Any, output: Any, step_num: int) -> None:
+            if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
+                raise TestRunCancelled()
             step_counter[0] = step_num
             path: Optional[str] = None
             ss_b64 = getattr(state, "screenshot", None)
@@ -477,9 +504,78 @@ class TestCaseRunner:
         
         max_retries = 3
         retry_count = 0
-        
+        result: Any = None
+
+        async def _run_agent_with_cancel(agent: Any) -> Any:
+            """Run browser-use Agent; stop promptly when user cancels (numeric execution_run_id)."""
+            if execution_run_id is None:
+                return await agent.run(max_steps=80)
+
+            async def _wait_for_cancel() -> None:
+                while not progress_mgr.is_cancel_requested(execution_run_id):
+                    await asyncio.sleep(0.25)
+
+            agent_task = asyncio.create_task(agent.run(max_steps=80))
+            poll_task = asyncio.create_task(_wait_for_cancel())
+            done, pending = await asyncio.wait(
+                [agent_task, poll_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+
+            if agent_task in done and not agent_task.cancelled():
+                poll_task.cancel()
+                try:
+                    await poll_task
+                except asyncio.CancelledError:
+                    pass
+                exc = agent_task.exception()
+                if exc:
+                    if isinstance(exc, TestRunCancelled):
+                        raise exc
+                    raise exc
+                return agent_task.result()
+
+            # Cancel was requested before agent finished
+            if not agent_task.done():
+                agent_task.cancel()
+                try:
+                    await agent_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            try:
+                br = getattr(agent, "browser", None)
+                if br is not None:
+                    closer = getattr(br, "close", None)
+                    if closer:
+                        out = closer()
+                        if asyncio.iscoroutine(out):
+                            await out
+            except Exception as be:
+                logger.warning(f"[TestCaseRunner] browser close after cancel: {be}")
+            raise TestRunCancelled()
+
         while retry_count < max_retries:
             try:
+                if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
+                    cleanup_tc_progress(key)
+                    dur = int((datetime.utcnow() - start).total_seconds() * 1000)
+                    return {
+                        "status": "cancelled",
+                        "overall": "cancelled",
+                        "step_results": [],
+                        "screenshots": list(screenshots),
+                        "logs": agent_logs,
+                        "steps_total": len(steps),
+                        "steps_passed": 0,
+                        "steps_failed": 0,
+                        "summary": "Run cancelled before agent start.",
+                        "duration_ms": dur,
+                        "error": None,
+                    }
+
                 agent = Agent(
                     task=task,
                     llm=_llm(),
@@ -489,8 +585,8 @@ class TestCaseRunner:
                         is_local=True,
                         disable_security=True,
                         args=[
-                            "--disable-save-password-bubble", 
-                            "--disable-autofill", 
+                            "--disable-save-password-bubble",
+                            "--disable-autofill",
                             "--disable-notifications",
                             "--disable-infobars",
                             "--no-default-browser-check",
@@ -502,23 +598,65 @@ class TestCaseRunner:
                     register_new_step_callback=_on_step,
                     use_vision=True,  # Explicitly enable vision prowess
                 )
-                
-                # Ensure browser is started (idempotent)
+
+                # Re-check cancellation immediately after agent creation to avoid late browser launch.
+                if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
+                    raise TestRunCancelled()
+
                 if browser:
                     try:
                         await browser.start()
-                    except:
+                    except Exception:
                         pass
-                        
-                result = await agent.run(max_steps=80)
-                break # Success, exit retry loop
+                    # If cancel arrived while browser was starting, stop before agent.run.
+                    if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
+                        raise TestRunCancelled()
+
+                try:
+                    result = await _run_agent_with_cancel(agent)
+                except TestRunCancelled:
+                    cleanup_tc_progress(key)
+                    dur = int((datetime.utcnow() - start).total_seconds() * 1000)
+                    return {
+                        "status": "cancelled",
+                        "overall": "cancelled",
+                        "step_results": [],
+                        "screenshots": list(screenshots),
+                        "logs": agent_logs,
+                        "steps_total": len(steps),
+                        "steps_passed": 0,
+                        "steps_failed": 0,
+                        "summary": "Run cancelled during execution.",
+                        "duration_ms": dur,
+                        "error": None,
+                    }
+                break
+            except TestRunCancelled:
+                cleanup_tc_progress(key)
+                dur = int((datetime.utcnow() - start).total_seconds() * 1000)
+                return {
+                    "status": "cancelled",
+                    "overall": "cancelled",
+                    "step_results": [],
+                    "screenshots": list(screenshots),
+                    "logs": agent_logs,
+                    "steps_total": len(steps),
+                    "steps_passed": 0,
+                    "steps_failed": 0,
+                    "summary": "Run cancelled during execution.",
+                    "duration_ms": dur,
+                    "error": None,
+                }
             except Exception as exc:
                 retry_count += 1
                 if retry_count >= max_retries:
                     raise exc
-                
+
                 wait_time = 2 ** retry_count
-                logger.info(f"⚠ Browser startup failed (attempt {retry_count}/{max_retries}). Retrying in {wait_time}s... Error: {str(exc)[:100]}")
+                logger.info(
+                    f"⚠ Browser startup failed (attempt {retry_count}/{max_retries}). "
+                    f"Retrying in {wait_time}s... Error: {str(exc)[:100]}"
+                )
                 await asyncio.sleep(wait_time)
 
         try:

@@ -16,6 +16,9 @@ from common.db.models.project import Project
 
 router = APIRouter()
 
+_DUPLICATE_PROJECT_NAME = "duplicate_project_name"
+_DUPLICATE_MSG = "A project with this name already exists for your account."
+
 
 def project_to_response(project: Project) -> dict:
     """Convert project model to response dict with credentials info."""
@@ -68,7 +71,15 @@ async def create_project(
 ):
     """Create a new project."""
     project_service = ProjectService(db)
-    project = await project_service.create(project_data, owner_id=current_user.id)
+    try:
+        project = await project_service.create(project_data, owner_id=current_user.id)
+    except ValueError as exc:
+        if str(exc) == _DUPLICATE_PROJECT_NAME:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_DUPLICATE_MSG,
+            ) from None
+        raise
     return project_to_response(project)
 
 
@@ -122,7 +133,15 @@ async def update_project(
             detail="Not authorized to update this project",
         )
     
-    updated_project = await project_service.update(project_id, project_data)
+    try:
+        updated_project = await project_service.update(project_id, project_data)
+    except ValueError as exc:
+        if str(exc) == _DUPLICATE_PROJECT_NAME:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_DUPLICATE_MSG,
+            ) from None
+        raise
     return project_to_response(updated_project)
 
 

@@ -7,9 +7,6 @@ export type PaginationBarProps = {
   hasPrev: boolean
   hasNext: boolean
   onPageChange: (page: number) => void
-  totalItems?: number
-  pageSize?: number
-  itemLabel?: string
   className?: string
   /** When set with pageSize & itemLabel, shows “Showing a–b of c …” for the current page. */
   totalItems?: number

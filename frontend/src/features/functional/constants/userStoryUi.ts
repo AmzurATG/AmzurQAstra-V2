@@ -6,6 +6,19 @@ import {
 } from '@heroicons/react/24/outline'
 import type { UserStoryItemType, UserStoryPriority, UserStoryStatus } from '../types'
 
+/**
+ * Stable label for lists and traceability: PM key when set, otherwise `US-{id}`.
+ * Trims whitespace-only external keys to the fallback (edge case).
+ */
+export function userStoryDisplayKey(
+  externalKey: string | null | undefined,
+  id: number
+): string {
+  const trimmed = typeof externalKey === 'string' ? externalKey.trim() : ''
+  if (trimmed.length > 0) return trimmed
+  return `US-${id}`
+}
+
 /** Kept small so the list stays scannable (max rows per request / page). */
 export const USER_STORIES_PAGE_SIZE = 5
 
@@ -62,4 +75,12 @@ export const itemTypeConfig = {
   subtask: { label: 'Sub-task', color: 'bg-gray-100 text-gray-600' },
   feature: { label: 'Feature', color: 'bg-green-100 text-green-700' },
   requirement: { label: 'Requirement', color: 'bg-indigo-100 text-indigo-700' },
+}
+
+/** Shown when the story already has AI-generated test cases (`generated_test_cases` from API). */
+export function aiGeneratedTestsExistCopy(generatedCount: number): string {
+  const n = Math.max(0, generatedCount)
+  if (n === 1) return 'Test case already generated for this story.'
+  if (n > 1) return `Test cases already generated for this story (${n}).`
+  return 'Test cases already generated for this story.'
 }

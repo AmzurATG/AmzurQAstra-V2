@@ -11,6 +11,7 @@ import { testRunsApi } from '../api'
 import type { LiveProgressResponse } from '../types'
 import toast from 'react-hot-toast'
 import { TestRunCaseAccordion } from '../components/TestRunCaseAccordion'
+import { useProjectStore } from '@common/store/projectStore'
 
 const POLL_MS = 3000
 const TERMINAL_STATES = ['completed', 'passed', 'failed', 'error', 'cancelled', 'not_found']
@@ -18,6 +19,9 @@ const TERMINAL_STATES = ['completed', 'passed', 'failed', 'error', 'cancelled', 
 export default function TestRunDetail() {
   const { projectId, runId } = useParams<{ projectId: string; runId: string }>()
   const navigate = useNavigate()
+  const currentProject = useProjectStore((s) => s.currentProject)
+  const projectDisplayName =
+    projectId && currentProject?.id === Number(projectId) ? currentProject.name : null
   const [progress, setProgress] = useState<LiveProgressResponse | null>(null)
   const [expanded, setExpanded] = useState<Record<number, boolean>>({})
   const [syncing, setSyncing] = useState<Record<string, boolean>>({})
@@ -64,8 +68,12 @@ export default function TestRunDetail() {
     try {
       await testRunsApi.syncStep(resultId, stepNumber)
       toast.success(`Step ${stepNumber} synced to Test Case #${tcId}`)
-    } catch {
-      toast.error('Failed to sync step')
+    } catch (error: unknown) {
+      const message =
+        error && typeof error === 'object' && 'response' in error
+          ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined
+      toast.error(message || 'Failed to sync step')
     } finally {
       setSyncing((prev) => ({ ...prev, [key]: false }))
     }
@@ -96,15 +104,22 @@ export default function TestRunDetail() {
             <ArrowLeftIcon className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Test Run #{runId}</h1>
+            <h1 className="text-2xl font-bold text-gray-900">
+              Test Run #{progress.run_number ?? runId}
+            </h1>
             <p className="text-gray-500 text-sm">
               {isDone
                 ? `Completed — ${passed} passed, ${failed} failed`
                 : progress.current_test_case_title || 'Starting…'}
             </p>
-            <p className="text-gray-400 text-xs font-mono mt-0.5">
-              Run ID {numRunId}
-              {projectId ? ` · Project ${projectId}` : ''}
+            <p className="text-gray-400 text-xs mt-0.5">
+              <span className="font-mono">Internal ref {numRunId}</span>
+              {projectId && (
+                <span className="text-gray-500">
+                  {' '}
+                  · {projectDisplayName ?? `Project #${projectId}`}
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -164,7 +179,7 @@ export default function TestRunDetail() {
               <thead className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                 <tr>
                   <th className="px-3 py-3 w-12 text-center">#</th>
-                  <th className="px-3 py-3 whitespace-nowrap">Run ID</th>
+                  <th className="px-3 py-3 whitespace-nowrap">Run #</th>
                   <th className="px-3 py-3 whitespace-nowrap">Case #</th>
                   <th className="px-3 py-3 whitespace-nowrap">Result #</th>
                   <th className="px-3 py-3 w-14">Status</th>
@@ -179,6 +194,7 @@ export default function TestRunDetail() {
                   <TestRunCaseAccordion
                     key={r.test_result_id}
                     runId={numRunId}
+                    runNumber={progress.run_number}
                     result={r}
                     rowNumber={index + 1}
                     isExpanded={!!expanded[r.test_result_id]}

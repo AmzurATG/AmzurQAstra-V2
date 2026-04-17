@@ -2,27 +2,34 @@ import { useNavigate } from 'react-router-dom'
 import { SparklesIcon, TrashIcon, ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
 import type { UserStory } from '../../types'
-import { itemTypeConfig, priorityConfig, sourceConfig, statusConfig } from '../../constants/userStoryUi'
+import {
+  aiGeneratedTestsExistCopy,
+  itemTypeConfig,
+  priorityConfig,
+  sourceConfig,
+  statusConfig,
+  userStoryDisplayKey,
+} from '../../constants/userStoryUi'
 
 type Props = {
   story: UserStory
   projectId: string
-  serial: number
+  selected: boolean
+  onToggleSelect: (storyId: number) => void
   generatingStoryId: number | null
   deletingStoryId: number | null
-  onGenerateTests: (storyId: number, key: string | null) => void
-  onRegenerateClick: (storyId: number, key: string | null) => void
-  onDelete: (storyId: number, key: string | null) => void
+  onGenerateTests: (storyId: number, displayKey: string) => void
+  onDelete: (storyId: number, displayKey: string) => void
 }
 
 export function UserStoryListRow({
   story,
   projectId,
-  serial,
+  selected,
+  onToggleSelect,
   generatingStoryId,
   deletingStoryId,
   onGenerateTests,
-  onRegenerateClick,
   onDelete,
 }: Props) {
   const navigate = useNavigate()
@@ -35,28 +42,48 @@ export function UserStoryListRow({
   const priorityCfg = priorityConfig[story.priority] || priorityConfig.medium
   const sourceCfg = sourceConfig[story.source] || sourceConfig.manual
   const itemTypeCfg = itemTypeConfig[story.item_type] || itemTypeConfig.story
+  const displayKey = userStoryDisplayKey(story.external_key, story.id)
 
   const openDetail = () => navigate(detailPath)
 
   return (
     <div className="rounded-lg px-2 py-4 -mx-2 transition-colors hover:bg-gray-50">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex shrink-0 pt-1 sm:pt-0.5">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-40"
+            checked={hasGeneratedTests ? false : selected}
+            disabled={hasGeneratedTests}
+            onChange={() => {
+              if (!hasGeneratedTests) onToggleSelect(story.id)
+            }}
+            onClick={(e) => e.stopPropagation()}
+            title={
+              hasGeneratedTests
+                ? 'Cannot select — test cases already generated for this story'
+                : `Select ${displayKey}`
+            }
+            aria-label={
+              hasGeneratedTests
+                ? `${displayKey} (already has generated tests, cannot select)`
+                : `Select ${displayKey}`
+            }
+          />
+        </div>
         <div className="flex min-w-0 flex-1 gap-3">
-          <span
-            className="w-9 shrink-0 pt-0.5 text-right text-sm tabular-nums text-gray-400"
-            aria-hidden
-          >
-            {serial}.
-          </span>
           <button
             type="button"
             onClick={openDetail}
             className="min-w-0 flex-1 rounded-md text-left outline-none ring-primary-500 focus-visible:ring-2"
           >
             <div className="flex flex-wrap items-center gap-2 mb-1">
-              {story.external_key && (
-                <span className="font-mono text-sm text-primary-600">{story.external_key}</span>
-              )}
+              <span
+                className="font-mono text-sm text-primary-600 truncate max-w-[min(100%,18rem)] sm:max-w-none"
+                title={displayKey}
+              >
+                {displayKey}
+              </span>
               <span className="text-xs" title={sourceCfg.label}>
                 {sourceCfg.icon}
               </span>
@@ -91,48 +118,37 @@ export function UserStoryListRow({
             </div>
           </button>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:max-w-[min(100%,28rem)]">
+        <div className="flex shrink-0 flex-col items-end gap-1.5 sm:max-w-[min(100%,28rem)]">
+          <div className="flex flex-wrap items-center justify-end gap-2">
           <Button variant="outline" size="sm" type="button" onClick={(e) => { e.stopPropagation(); openDetail() }}>
             View
           </Button>
-          {!hasGeneratedTests ? (
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onGenerateTests(story.id, story.external_key ?? null)
-              }}
-              disabled={generatingStoryId === story.id}
-              isLoading={generatingStoryId === story.id}
-            >
-              {generatingStoryId !== story.id && <SparklesIcon className="mr-1 h-4 w-4" />}
-              Generate tests
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onRegenerateClick(story.id, story.external_key ?? null)
-              }}
-              disabled={generatingStoryId === story.id}
-              isLoading={generatingStoryId === story.id}
-            >
-              {generatingStoryId !== story.id && <SparklesIcon className="mr-1 h-4 w-4" />}
-              Regenerate tests
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onGenerateTests(story.id, displayKey)
+            }}
+            disabled={hasGeneratedTests || generatingStoryId === story.id}
+            isLoading={generatingStoryId === story.id}
+            title={
+              hasGeneratedTests
+                ? 'Test cases already generated for this story'
+                : 'Create AI test cases from this story'
+            }
+          >
+            {generatingStoryId !== story.id && <SparklesIcon className="mr-1 h-4 w-4" />}
+            Generate tests
+          </Button>
           <Button
             variant="danger"
             size="sm"
             type="button"
             onClick={(e) => {
               e.stopPropagation()
-              onDelete(story.id, story.external_key ?? null)
+              onDelete(story.id, displayKey)
             }}
             disabled={deletingStoryId === story.id}
             isLoading={deletingStoryId === story.id}
@@ -140,6 +156,15 @@ export function UserStoryListRow({
             {deletingStoryId !== story.id && <TrashIcon className="mr-1 h-4 w-4" />}
             Delete
           </Button>
+          </div>
+          {hasGeneratedTests && (
+            <p
+              className="text-xs text-gray-500 text-right max-w-[18rem] leading-snug"
+              role="status"
+            >
+              {aiGeneratedTestsExistCopy(generatedCount)}
+            </p>
+          )}
         </div>
       </div>
     </div>

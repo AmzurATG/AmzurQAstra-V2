@@ -130,7 +130,10 @@ async def get_integrity_check_preview(
         steps = sorted(tc.steps, key=lambda s: s.step_number)
         priority = tc.priority.value if hasattr(tc.priority, "value") else str(tc.priority) if tc.priority else None
         return PreviewTestCaseResponse(
-            id=tc.id, title=tc.title, description=tc.description,
+            id=tc.id,
+            case_number=getattr(tc, "case_number", 0) or 0,
+            title=tc.title,
+            description=tc.description,
             priority=priority, integrity_check=tc.integrity_check or False,
             steps=[_step(s) for s in steps],
         )

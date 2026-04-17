@@ -78,6 +78,8 @@ export interface UserStoryBrief {
 
 export interface TestCase {
   id: number
+  /** Per-project sequence for display (1, 2, 3 …); URLs still use `id`. */
+  case_number: number
   project_id: number
   requirement_id?: number
   user_story_id?: number
@@ -139,6 +141,8 @@ export type BrowserType = 'chromium' | 'firefox' | 'webkit'
 
 export interface TestRun {
   id: number
+  /** Per-project run index for display; URLs still use `id`. */
+  run_number: number
   project_id: number
   name: string
   description?: string
@@ -296,6 +300,7 @@ export interface CompletedCaseResult {
 
 export interface LiveProgressResponse {
   run_id: number
+  run_number?: number | null
   status: string
   percentage: number
   current_test_case_index: number
@@ -476,6 +481,7 @@ export interface UserStoryStats {
   in_progress: number
   done: number
   blocked: number
+  closed: number
 }
 
 export interface SyncRequest {
@@ -541,6 +547,7 @@ export interface GenerateTestsRequest {
 
 export interface GeneratedTestCaseInfo {
   id: number
+  case_number: number
   title: string
   priority: string
   category: string

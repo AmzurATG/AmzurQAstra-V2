@@ -72,7 +72,17 @@ class IntegrationResponse(BaseModel):
 
 
 # Fields that should NEVER be redacted (even if they match sensitive keywords)
-NON_SENSITIVE_FIELDS = {'project_key', 'project_name', 'webhook_key', 'channel_key', 'sync_scope'}
+NON_SENSITIVE_FIELDS = {
+    'project_key',
+    'project_name',
+    'webhook_key',
+    'channel_key',
+    'sync_scope',
+    'issue_types',
+    'sync_comments',
+    'sync_labels',
+    'jql_filter',
+}
 
 # Fields that should ALWAYS be redacted
 SENSITIVE_KEYWORDS = ['token', 'password', 'secret', 'api_key', 'pat', 'access_token', 'api_token', 'personal_access_token']
@@ -356,16 +366,20 @@ async def update_project_integration(
     if data.is_enabled is not None:
         integration.is_enabled = data.is_enabled
     if data.config is not None:
-        # Validate new config
+        # Merge incoming config onto existing decrypted config so operational fields
+        # such as sync_scope are preserved unless explicitly changed.
+        existing_cfg = decrypt_config(integration.config or {}) or {}
+        merged_cfg = {**existing_cfg, **data.config}
+        # Validate merged config
         try:
-            get_integration(integration_type, data.config)
+            get_integration(integration_type, merged_cfg)
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid configuration: {str(e)}"
             )
         # Encrypt sensitive fields before storage
-        integration.config = encrypt_config(data.config)
+        integration.config = encrypt_config(merged_cfg)
     
     await db.commit()
     await db.refresh(integration)
@@ -449,16 +463,19 @@ async def test_integration_connection(
             projects=projects if projects else None
         )
     except IntegrationAuthError as e:
-        return TestConnectionResponse(success=False, message=f"Authentication failed: {str(e)}")
+        return TestConnectionResponse(success=False, message=str(e))
     except IntegrationConnectionError as e:
-        return TestConnectionResponse(success=False, message=f"Connection failed: {str(e)}")
+        return TestConnectionResponse(success=False, message=str(e))
     except IntegrationNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
-    except Exception as e:
-        return TestConnectionResponse(success=False, message=f"Error: {str(e)}")
+    except Exception:
+        return TestConnectionResponse(
+            success=False,
+            message="Could not verify the connection. Check the URL and credentials, then try again.",
+        )
 
 
 @router.get("/{project_id}/{integration_type}/projects", response_model=ProjectListResponse)

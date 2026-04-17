@@ -131,6 +131,7 @@ class PreviewStepResponse(BaseModel):
 
 class PreviewTestCaseResponse(BaseModel):
     id: int
+    case_number: int = 0
     title: str
     description: Optional[str] = None
     priority: Optional[str] = None

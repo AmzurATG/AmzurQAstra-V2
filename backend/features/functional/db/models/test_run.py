@@ -1,7 +1,7 @@
 """
 Test Run Model
 """
-from sqlalchemy import Column, String, Integer, ForeignKey, Enum, DateTime
+from sqlalchemy import Column, String, Integer, ForeignKey, Enum, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
 import enum
@@ -23,8 +23,13 @@ class TestRun(BaseModel):
     """Test run model."""
     
     __tablename__ = "test_runs"
-    
+    __table_args__ = (
+        UniqueConstraint("project_id", "run_number", name="uq_test_runs_project_run_number"),
+    )
+
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    #: Per-project sequence for display (1, 2, 3 …); `id` stays the global primary key.
+    run_number = Column(Integer, nullable=False)
     
     # Run details
     name = Column(String(255), nullable=True)

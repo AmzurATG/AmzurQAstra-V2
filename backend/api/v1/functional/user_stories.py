@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.api.deps import get_current_active_user
@@ -24,6 +25,7 @@ from common.integrations import get_integration
 from common.integrations.exceptions import IntegrationError
 from common.utils.security import decrypt_config
 from features.functional.db.models.test_case import TestCase
+from features.functional.services.test_case_service import TestCaseService
 
 from api.v1.functional.user_story_generate import router as user_story_generate_router
 from api.v1.functional.user_story_response_mapper import user_story_to_response
@@ -84,6 +86,9 @@ async def get_user_story_stats(
             func.count(UserStory.id)
             .filter(UserStory.status == UserStoryStatus.blocked)
             .label("blocked"),
+            func.count(UserStory.id)
+            .filter(UserStory.status == UserStoryStatus.closed)
+            .label("closed"),
         ).where(scope)
     )
     row = result.one()
@@ -93,6 +98,7 @@ async def get_user_story_stats(
         in_progress=row.in_progress,
         done=row.done,
         blocked=row.blocked,
+        closed=row.closed,
     )
 
 
@@ -361,11 +367,18 @@ async def delete_user_story(
     test_cases = test_cases_result.scalars().all()
     test_cases_count = len(test_cases)
 
-    for test_case in test_cases:
-        await db.delete(test_case)
-
-    await db.delete(story)
-    await db.commit()
+    tc_service = TestCaseService(db)
+    try:
+        for test_case in test_cases:
+            await tc_service.delete(test_case.id)
+        await db.delete(story)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Could not delete user story due to linked execution records. Please retry after active runs complete.",
+        )
 
     return DeleteUserStoryResponse(
         message=f"User story and {test_cases_count} related test case(s) deleted successfully",

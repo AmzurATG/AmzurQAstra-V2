@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from config import settings
 from common.utils.logger import logger
+from features.functional.utils.credentials_redaction import redact_known_credentials
 
 # ─── Task prompt ─────────────────────────────────────────────────────────────
 
@@ -46,6 +47,18 @@ def set_progress(run_id: str, data: Dict[str, Any]) -> None:
 
 def cleanup_progress(run_id: str) -> None:
     _progress_store.pop(run_id, None)
+
+
+def _redact_ic_text(
+    text: Optional[str],
+    username: Optional[str],
+    password: Optional[str],
+) -> str:
+    """Strip known credentials from integrity-check text shown in Summary / errors."""
+    if not text:
+        return ""
+    out = redact_known_credentials(text, username=username, password=password)
+    return out if out is not None else ""
 
 
 # ─── Service ──────────────────────────────────────────────────────────────────
@@ -310,6 +323,7 @@ class BrowserAgentService:
             dur = int((datetime.utcnow() - start).total_seconds() * 1000)
             n = step_counter[0]
 
+            summary_safe = _redact_ic_text(final_text[:500], username, password)
             outcome: Dict[str, Any] = {
                 "status": "completed",
                 "overall_status": "passed" if success else "failed",
@@ -320,7 +334,7 @@ class BrowserAgentService:
                 "steps_total": n,
                 "steps_passed": n if success else max(0, n - 1),
                 "steps_failed": 0 if success else 1,
-                "summary": final_text[:500],
+                "summary": summary_safe,
                 "duration_ms": dur,
                 "error": None,
             }
@@ -331,6 +345,7 @@ class BrowserAgentService:
             logger.error(f"[BrowserAgent] run_id={run_id} — agent raised: {exc!r}")
             dur = int((datetime.utcnow() - start).total_seconds() * 1000)
             n = step_counter[0]
+            exc_s = str(exc)
             err: Dict[str, Any] = {
                 "status": "error",
                 "overall_status": "error",
@@ -341,9 +356,9 @@ class BrowserAgentService:
                 "steps_total": n,
                 "steps_passed": 0,
                 "steps_failed": n,
-                "summary": str(exc)[:500],
+                "summary": _redact_ic_text(exc_s[:500], username, password),
                 "duration_ms": dur,
-                "error": str(exc),
+                "error": _redact_ic_text(exc_s, username, password),
             }
             set_progress(run_id, err)
             return err

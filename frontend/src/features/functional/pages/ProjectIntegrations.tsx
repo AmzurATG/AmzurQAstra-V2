@@ -14,6 +14,8 @@ interface IntegrationCard {
   color: string
   features: readonly string[]
   comingSoon?: boolean
+  /** When true, card stays disabled until this integration exists for the project (see Azure DevOps). */
+  disabledUntilConfigured?: boolean
 }
 
 // Integration card data (routes use these ids — must match App.tsx paths)
@@ -33,6 +35,7 @@ const integrations: readonly IntegrationCard[] = [
     logo: '🔷',
     color: 'bg-blue-600',
     features: ['Import work items', 'Sync test plans', 'Pipeline integration'],
+    disabledUntilConfigured: true,
   },
   {
     id: 'redmine',
@@ -144,28 +147,37 @@ export default function ProjectIntegrations() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {integrations.map((integration) => {
           const remote = byCardId.get(integration.id)
-          const isComingSoon = integration.comingSoon
           const isConfigured = Boolean(remote)
           const isActive = Boolean(remote?.is_enabled)
+          const isDisabledByFlag =
+            Boolean(integration.comingSoon) ||
+            (Boolean(integration.disabledUntilConfigured) && !isConfigured)
 
           return (
             <div key={integration.id} className="relative">
-              {isComingSoon && (
+              {integration.comingSoon && (
                 <div className="absolute top-3 right-3 z-10">
                   <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">
                     Coming Soon
                   </span>
                 </div>
               )}
+              {integration.disabledUntilConfigured && !isConfigured && (
+                <div className="absolute top-3 right-3 z-10">
+                  <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">
+                    Not available
+                  </span>
+                </div>
+              )}
 
               <Card
                 className={`h-full transition-all ${
-                  isComingSoon
+                  isDisabledByFlag
                     ? 'opacity-60 cursor-not-allowed'
                     : 'hover:shadow-lg cursor-pointer'
                 }`}
               >
-                {!isComingSoon ? (
+                {!isDisabledByFlag ? (
                   <Link
                     to={`/projects/${projectId}/integrations/${integration.id}`}
                     className="block"
@@ -180,9 +192,9 @@ export default function ProjectIntegrations() {
                 ) : (
                   <IntegrationCardContent
                     integration={integration}
-                    remote={undefined}
-                    isConfigured={false}
-                    isActive={false}
+                    remote={integration.comingSoon ? undefined : remote}
+                    isConfigured={isConfigured}
+                    isActive={isActive}
                   />
                 )}
               </Card>

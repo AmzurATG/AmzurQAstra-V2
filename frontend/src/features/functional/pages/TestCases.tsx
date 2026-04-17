@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Card } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
@@ -17,13 +17,38 @@ import { CredentialsOverride } from '../components/CredentialsOverride'
 import { TestCaseEditModal } from '../components/TestCaseEditModal'
 import type { TestCase, TestStep, TestRunCreateRequest } from '../types'
 
+const testCaseSelectionKey = (projectId: string) => `qastra:test-case-selection:${projectId}`
+
+function loadTestCaseSelection(projectId: string | undefined): Set<number> {
+  if (!projectId || typeof window === 'undefined') return new Set()
+  try {
+    const raw = sessionStorage.getItem(testCaseSelectionKey(projectId))
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(
+      parsed.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+    )
+  } catch {
+    return new Set()
+  }
+}
+
+/** If store has no app URL, one silent GET may recover after Settings save or another tab. */
+async function ensureProjectHasAppUrl(projectId: string | undefined): Promise<boolean> {
+  if (!projectId) return false
+  const store = useProjectStore.getState()
+  if (store.currentProject?.app_url) return true
+  await store.revalidateProject(projectId)
+  return !!(useProjectStore.getState().currentProject?.app_url)
+}
+
 export default function TestCases() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
-  const { currentProject } = useProjectStore()
+  const { revalidateProject } = useProjectStore()
   const pid = Number(projectId)
 
-  // Hooks
   const {
     testCases,
     isLoading,
@@ -43,19 +68,72 @@ export default function TestCases() {
 
   const exec = useTestRunExecution()
 
-  // Local State
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [loadingSteps, setLoadingSteps] = useState<Set<number>>(new Set())
   const [stepsCache, setStepsCache] = useState<Record<number, TestStep[]>>({})
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
-  
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() =>
+    loadTestCaseSelection(projectId)
+  )
+
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingTestCase, setEditingTestCase] = useState<TestCase | null>(null)
   const [isSaving, setIsSaving] = useState(false)
-  
+
   const [showCreds, setShowCreds] = useState(false)
   const [overrideUser, setOverrideUser] = useState('')
   const [overridePass, setOverridePass] = useState('')
+
+  const listViewKey = `${page}|${searchQuery}|${priorityFilter}|${categoryFilter}|${_statusFilter}`
+  const prevListViewKeyRef = useRef<string | null>(null)
+  const prevPageCaseIdsRef = useRef<Set<number>>(new Set())
+
+  useEffect(() => {
+    if (projectId) {
+      void revalidateProject(projectId)
+    }
+  }, [projectId, revalidateProject])
+
+  useEffect(() => {
+    setSelectedIds(loadTestCaseSelection(projectId))
+  }, [projectId])
+
+  useEffect(() => {
+    if (!projectId) return
+    try {
+      sessionStorage.setItem(
+        testCaseSelectionKey(projectId),
+        JSON.stringify([...selectedIds])
+      )
+    } catch {
+      // ignore quota / private mode
+    }
+  }, [projectId, selectedIds])
+
+  // After refresh on the same list view, drop selections for rows that disappeared (e.g. delete).
+  useEffect(() => {
+    if (isLoading) return
+    const idsNow = new Set(testCases.map((t) => t.id))
+    const sameView = prevListViewKeyRef.current === listViewKey
+    prevListViewKeyRef.current = listViewKey
+
+    if (!sameView) {
+      prevPageCaseIdsRef.current = idsNow
+      return
+    }
+
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      let changed = false
+      for (const id of prevPageCaseIdsRef.current) {
+        if (!idsNow.has(id) && next.has(id)) {
+          next.delete(id)
+          changed = true
+        }
+      }
+      prevPageCaseIdsRef.current = idsNow
+      return changed ? next : prev
+    })
+  }, [testCases, isLoading, listViewKey])
 
   // Handlers
   const toggleRowExpansion = useCallback(async (id: number) => {
@@ -86,10 +164,20 @@ export default function TestCases() {
     if (!window.confirm(`Delete "${title}"?`)) return
     try {
       await testCasesApi.delete(id)
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
       toast.success('Deleted')
       loadTestCases()
-    } catch (err) {
-      toast.error('Delete failed')
+    } catch (err: unknown) {
+      const detail =
+        err &&
+        typeof err === 'object' &&
+        'response' in err &&
+        (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+      toast.error(typeof detail === 'string' ? detail : 'Delete failed')
     }
   }
 
@@ -108,18 +196,25 @@ export default function TestCases() {
     }
   }
 
-  // Execution Handlers
-  const buildRequest = (tcIds?: number[]): TestRunCreateRequest => ({
-    project_id: pid,
-    app_url: currentProject?.app_url || undefined,
-    test_case_ids: tcIds,
-    credentials: (overrideUser || overridePass)
-      ? { username: overrideUser || undefined, password: overridePass || undefined }
-      : undefined,
-  })
+  // Execution Handlers (read latest project from store so runs use URL after revalidate)
+  const buildRequest = (tcIds?: number[]): TestRunCreateRequest => {
+    const cp = useProjectStore.getState().currentProject
+    return {
+      project_id: pid,
+      app_url: cp?.app_url || undefined,
+      test_case_ids: tcIds,
+      credentials: (overrideUser || overridePass)
+        ? { username: overrideUser || undefined, password: overridePass || undefined }
+        : undefined,
+    }
+  }
 
   const runSingle = async (tcId: number) => {
-    if (!currentProject?.app_url) { toast.error('Set App URL first'); return }
+    if (exec.isCreating || isRunning) return
+    if (!(await ensureProjectHasAppUrl(projectId))) {
+      toast.error('Set App URL first')
+      return
+    }
     toast.promise(exec.startRun(buildRequest([tcId])), {
       loading: 'Initializing browser...',
       success: 'Execution started',
@@ -128,7 +223,11 @@ export default function TestCases() {
   }
 
   const runSelected = async () => {
-    if (!currentProject?.app_url) { toast.error('Set App URL first'); return }
+    if (exec.isCreating || isRunning) return
+    if (!(await ensureProjectHasAppUrl(projectId))) {
+      toast.error('Set App URL first')
+      return
+    }
     if (selectedIds.size === 0) { toast.error('Select cases first'); return }
     toast.promise(exec.startRun(buildRequest(Array.from(selectedIds))), {
       loading: `Starting ${selectedIds.size} tests...`,
@@ -138,7 +237,11 @@ export default function TestCases() {
   }
 
   const runAll = async () => {
-    if (!currentProject?.app_url) { toast.error('Set App URL first'); return }
+    if (exec.isCreating || isRunning) return
+    if (!(await ensureProjectHasAppUrl(projectId))) {
+      toast.error('Set App URL first')
+      return
+    }
     toast.promise(exec.startRun(buildRequest()), {
       loading: 'Preparing full test run...',
       success: 'Execution started',
@@ -155,8 +258,8 @@ export default function TestCases() {
           password: overridePass
         }
       })
-      toast.success('Credentials saved to project settings')
       useProjectStore.getState().setCurrentProject(updated)
+      toast.success('Credentials saved to project settings')
       setShowCreds(false)
     } catch (err) {
       toast.error('Failed to save credentials')
@@ -165,6 +268,21 @@ export default function TestCases() {
 
   const isRunning = exec.progress && !['completed', 'passed', 'failed', 'error', 'cancelled'].includes(exec.progress.status)
   const isDone = exec.progress && !isRunning
+
+  const handleToggleAll = useCallback(() => {
+    const pageIds = testCases.map((t) => t.id)
+    if (pageIds.length === 0) return
+    setSelectedIds((prev) => {
+      const allOnPage = pageIds.every((id) => prev.has(id))
+      const next = new Set(prev)
+      if (allOnPage) {
+        pageIds.forEach((id) => next.delete(id))
+      } else {
+        pageIds.forEach((id) => next.add(id))
+      }
+      return next
+    })
+  }, [testCases])
 
   return (
     <div className="space-y-6">
@@ -178,11 +296,11 @@ export default function TestCases() {
             <ArrowPathIcon className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} /> Refresh
           </Button>
           {selectedIds.size > 0 && (
-            <Button variant="outline" onClick={runSelected} disabled={!!isRunning}>
+            <Button variant="outline" onClick={runSelected} disabled={!!isRunning || exec.isCreating}>
               <PlayIcon className="w-4 h-4 mr-1" /> Run ({selectedIds.size})
             </Button>
           )}
-          <Button onClick={runAll} disabled={!!isRunning || testCases.length === 0}>
+          <Button onClick={runAll} disabled={!!isRunning || exec.isCreating || testCases.length === 0}>
             <PlayIcon className="w-4 h-4 mr-2" /> Run All
           </Button>
           <Button>
@@ -212,7 +330,9 @@ export default function TestCases() {
       <Card>
         <div className="flex flex-col md:flex-row gap-4 mb-4">
           <input
-            type="text" placeholder="Search..." value={searchQuery}
+            type="text"
+            placeholder="Search title, Jira key, US-#, or story id…"
+            value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
           />
@@ -241,8 +361,9 @@ export default function TestCases() {
               if (next.has(id)) next.delete(id); else next.add(id)
               return next
             })}
-            onToggleAll={() => setSelectedIds(prev => prev.size === testCases.length ? new Set() : new Set(testCases.map(t => t.id)))}
+            onToggleAll={handleToggleAll}
             isRunning={!!isRunning}
+            isCreating={exec.isCreating}
             progress={exec.progress}
           />
         )}
