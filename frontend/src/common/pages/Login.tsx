@@ -35,11 +35,12 @@ export default function Login() {
             <Input
               id="email"
               type="email"
-              label="Email"
+              label="Username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               required
+              autoComplete="username"
             />
 
             <Input
@@ -50,6 +51,7 @@ export default function Login() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
+              autoComplete="current-password"
             />
 
             <Button type="submit" className="w-full" isLoading={isLoading}>
