@@ -6,7 +6,7 @@ Sync and generate-tests live in sibling modules to keep files maintainable.
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,7 +68,10 @@ async def get_user_story_stats(
     sprint_parts = _parse_sprint_ids_csv(sprint_ids)
     base = [UserStory.project_id == project_id]
     if sprint_parts:
-        base.append(UserStory.sprint_id.in_(sprint_parts))
+        base.append(or_(
+            UserStory.sprint_id.in_(sprint_parts),
+            UserStory.source == UserStorySource.manual,
+        ))
     scope = and_(*base)
 
     result = await db.execute(
@@ -185,8 +188,12 @@ async def list_user_stories(
     )
 
     if sprint_parts:
-        query = query.where(UserStory.sprint_id.in_(sprint_parts))
-        count_query = count_query.where(UserStory.sprint_id.in_(sprint_parts))
+        sprint_or_manual = or_(
+            UserStory.sprint_id.in_(sprint_parts),
+            UserStory.source == UserStorySource.manual,
+        )
+        query = query.where(sprint_or_manual)
+        count_query = count_query.where(sprint_or_manual)
 
     if status:
         query = query.where(UserStory.status == status)
