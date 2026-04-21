@@ -49,6 +49,23 @@ export function setPmSyncPreferences(projectId: number, prefs: PmSyncPreferences
   }
 }
 
+/** Remove all persisted PM sync preferences (called on logout / session invalidation). */
+export function clearAllPmSyncPreferences(): void {
+  if (typeof window === 'undefined') return
+  try {
+    const keysToRemove: string[] = []
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i)
+      if (key && key.startsWith(STORAGE_KEY_PREFIX)) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach((k) => window.localStorage.removeItem(k))
+  } catch {
+    // ignore
+  }
+}
+
 /** Build Jira sprint fields for POST /sync from saved prefs (legacy sprint_id supported). */
 export function jiraSprintPayloadFromPrefs(prefs: PmSyncPreferences): { sprint_ids?: number[] } {
   if (prefs.integration_type !== 'jira') return {}

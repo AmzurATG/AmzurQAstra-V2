@@ -1,6 +1,7 @@
 """
 Common API Dependencies
 """
+from datetime import datetime, timezone
 from typing import Generator, Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -9,7 +10,7 @@ from jose import JWTError, jwt
 
 from common.db.database import get_db
 from common.db.models.user import User
-from common.utils.security import verify_token
+from common.utils.security import verify_token, BOOT_NONCE
 from config import settings
 
 
@@ -35,6 +36,9 @@ async def get_current_user(
         user_id: str = payload.get("sub")
         if user_id is None:
             raise credentials_exception
+        # Reject tokens issued by a previous server process
+        if payload.get("nonce") != BOOT_NONCE:
+            raise credentials_exception
     except JWTError:
         raise credentials_exception
     
@@ -44,7 +48,15 @@ async def get_current_user(
     
     if user is None:
         raise credentials_exception
-    
+
+    # Reject tokens issued before the user was (re)created (e.g. after DB reset)
+    iat = payload.get("iat")
+    if iat is not None and user.created_at is not None:
+        issued_at = datetime.fromtimestamp(iat, tz=timezone.utc)
+        created_at = user.created_at.replace(tzinfo=timezone.utc) if user.created_at.tzinfo is None else user.created_at
+        if issued_at < created_at:
+            raise credentials_exception
+
     return user
 
 

@@ -42,12 +42,9 @@ export default function Projects() {
       closeCreateForm()
       fetchProjects()
     } catch (error: unknown) {
-      const detail =
-        error &&
-        typeof error === 'object' &&
-        'response' in error &&
-        (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
-      toast.error(typeof detail === 'string' ? detail : 'Failed to create project')
+      const resp = (error as { response?: { data?: { message?: string; detail?: string } } })?.response?.data
+      const msg = resp?.message || resp?.detail
+      toast.error(typeof msg === 'string' ? msg : 'Failed to create project')
     } finally {
       setCreating(false)
     }

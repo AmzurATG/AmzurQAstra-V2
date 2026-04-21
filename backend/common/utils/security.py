@@ -3,6 +3,7 @@ Security utilities for authentication and encryption
 """
 from datetime import datetime, timedelta
 from typing import Optional, List
+import secrets
 import bcrypt
 from jose import jwt
 from cryptography.fernet import Fernet
@@ -10,6 +11,10 @@ import base64
 import hashlib
 
 from config import settings
+
+# Random nonce generated once per process start.
+# Every server restart produces a new value, invalidating all prior JWTs.
+BOOT_NONCE: str = secrets.token_hex(16)
 
 
 # =============================================================================
@@ -141,7 +146,8 @@ def create_access_token(
     else:
         expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
-    to_encode = {"sub": subject, "exp": expire, "type": "access"}
+    now = datetime.utcnow()
+    to_encode = {"sub": subject, "exp": expire, "iat": now, "type": "access", "nonce": BOOT_NONCE}
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
@@ -155,7 +161,8 @@ def create_refresh_token(
     else:
         expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     
-    to_encode = {"sub": subject, "exp": expire, "type": "refresh"}
+    now = datetime.utcnow()
+    to_encode = {"sub": subject, "exp": expire, "iat": now, "type": "refresh", "nonce": BOOT_NONCE}
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 

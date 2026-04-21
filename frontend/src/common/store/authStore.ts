@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { User } from '@common/types/auth'
 import { authApi } from '@common/api/auth'
+import { clearAllPmSyncPreferences } from '@features/functional/utils/pmSyncPreferences'
 
 interface AuthState {
   user: User | null
@@ -42,6 +43,7 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
+        clearAllPmSyncPreferences()
         set({
           user: null,
           token: null,

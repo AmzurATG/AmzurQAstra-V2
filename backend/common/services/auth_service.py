@@ -81,6 +81,10 @@ class AuthService:
             return None
         if payload.get("type") != "refresh":
             return None
+        # Reject refresh tokens issued by a previous server process
+        from common.utils.security import BOOT_NONCE
+        if payload.get("nonce") != BOOT_NONCE:
+            return None
         try:
             user_id = int(payload.get("sub"))
         except (TypeError, ValueError):
