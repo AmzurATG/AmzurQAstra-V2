@@ -5,7 +5,6 @@ import { Card, CardTitle } from '@common/components/ui/Card'
 import { PageLoader } from '@common/components/ui/Loader'
 import {
   DocumentTextIcon,
-  ClipboardDocumentListIcon,
   PlayIcon,
   ShieldCheckIcon,
 } from '@heroicons/react/24/outline'
@@ -25,8 +24,7 @@ export default function ProjectDetail() {
 
   const quickActions = [
     { name: 'Requirements', description: 'Upload and manage requirements', icon: DocumentTextIcon, href: `/projects/${projectId}/requirements` },
-    { name: 'Test Cases', description: 'View and create test cases', icon: ClipboardDocumentListIcon, href: `/projects/${projectId}/test-cases` },
-    { name: 'Test Runs', description: 'Run tests and view results', icon: PlayIcon, href: `/projects/${projectId}/test-runs` },
+    { name: 'Functional Testing', description: 'Promote cases, execute runs, and review history', icon: PlayIcon, href: `/projects/${projectId}/functional-testing` },
     { name: 'Integrity Check', description: 'Verify app is ready for testing', icon: ShieldCheckIcon, href: `/projects/${projectId}/integrity-check` },
   ]
 

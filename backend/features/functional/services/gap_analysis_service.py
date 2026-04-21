@@ -283,15 +283,55 @@ class GapAnalysisService:
         return res.scalar_one_or_none()
 
     async def get_pdf_bytes(self, run_id: int, project_id: int) -> Tuple[Optional[bytes], Optional[str]]:
+        """
+        Return PDF bytes for a gap analysis run.
+
+        Reads from ``pdf_path`` when the file exists. For legacy rows (no path,
+        or file removed from disk) but ``status=completed`` and ``result_json``
+        present, rebuilds the PDF from stored JSON — same renderer used at
+        analysis time — and best-effort writes it back so future requests hit
+        disk.
+        """
         run = await self.get_run(run_id, project_id)
-        if not run or not run.pdf_path:
+        if not run:
             return None, None
-        data = await _read_pdf_bytes(run.pdf_path)
+
         filename = "gap-analysis-report.pdf"
         if run.requirement and run.requirement.file_name:
             base = run.requirement.file_name.rsplit(".", 1)[0]
             filename = f"{base}-gap-analysis.pdf"
-        return data, filename
+
+        if run.pdf_path:
+            data = await _read_pdf_bytes(run.pdf_path)
+            if data:
+                return data, filename
+
+        if run.status != "completed" or not run.result_json:
+            return None, None
+
+        try:
+            req_title = (run.requirement.title if run.requirement else None) or "Requirement"
+            pdf_bytes = build_gap_analysis_pdf(req_title, run.result_json)
+        except Exception:
+            logger.exception("Gap analysis PDF regeneration failed run_id=%s", run_id)
+            return None, None
+
+        if not pdf_bytes:
+            return None, None
+
+        try:
+            rel = await _write_pdf_to_storage(project_id, run.id, pdf_bytes)
+            run.pdf_path = rel
+            await self.db.commit()
+        except Exception as e:
+            logger.warning(
+                "Could not persist regenerated gap analysis PDF run_id=%s: %s",
+                run_id,
+                e,
+            )
+            await self.db.rollback()
+
+        return pdf_bytes, filename
 
     async def accept_suggestions(
         self,

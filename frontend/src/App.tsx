@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Outlet, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { useAuthStore } from '@common/store/authStore'
 import MainLayout from '@common/components/layout/MainLayout'
 import ProjectLayout from '@common/components/layout/ProjectLayout'
@@ -12,10 +12,13 @@ import Settings from '@common/pages/Settings'
 // Functional Testing Feature (Project-scoped)
 import ProjectOverview from '@features/functional/pages/ProjectOverview'
 import Requirements from '@features/functional/pages/Requirements'
-import TestCases from '@features/functional/pages/TestCases'
 import TestCaseDetail from '@features/functional/pages/TestCaseDetail'
-import TestRuns from '@features/functional/pages/TestRuns'
 import TestRunDetail from '@features/functional/pages/TestRunDetail'
+import FunctionalTesting from '@features/functional/pages/FunctionalTesting'
+import CasesTab from '@features/functional/pages/functional-testing/CasesTab'
+import LiveTab from '@features/functional/pages/functional-testing/LiveTab'
+import HistoryTab from '@features/functional/pages/functional-testing/HistoryTab'
+import { ActiveTestRunProvider } from '@features/functional/context/ActiveTestRunProvider'
 import IntegrityCheck from '@features/functional/pages/IntegrityCheck'
 import ProjectSettings from '@features/functional/pages/ProjectSettings'
 import ProjectIntegrations from '@features/functional/pages/ProjectIntegrations'
@@ -43,6 +46,53 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />
 }
 
+/**
+ * Project-scoped wrapper that binds the single ActiveTestRunProvider lifetime
+ * to the project URL segment. Every child route (Functional Testing shell,
+ * test case detail, run detail, etc.) can then read live-run state from the
+ * same source of truth. Unmounting on project switch tears down the polling
+ * subscription — no cross-tenant leakage.
+ */
+function ProjectScopedRoutes() {
+  return (
+    <ActiveTestRunProvider>
+      <Outlet />
+    </ActiveTestRunProvider>
+  )
+}
+
+/**
+ * Legacy redirect shims. Keep forever (not deprecated): saved bookmarks,
+ * emailed links, and inbound URLs from integrations still work. Forwarding
+ * happens server-path-preserving for detail pages.
+ */
+function LegacyTestCasesRedirect() {
+  const { projectId } = useParams<{ projectId: string }>()
+  return <Navigate to={`/projects/${projectId}/functional-testing/cases`} replace />
+}
+function LegacyTestCaseDetailRedirect() {
+  const { projectId, testCaseId } = useParams<{ projectId: string; testCaseId: string }>()
+  return (
+    <Navigate
+      to={`/projects/${projectId}/functional-testing/cases/${testCaseId}`}
+      replace
+    />
+  )
+}
+function LegacyTestRunsRedirect() {
+  const { projectId } = useParams<{ projectId: string }>()
+  return <Navigate to={`/projects/${projectId}/functional-testing/history`} replace />
+}
+function LegacyTestRunDetailRedirect() {
+  const { projectId, runId } = useParams<{ projectId: string; runId: string }>()
+  return (
+    <Navigate
+      to={`/projects/${projectId}/functional-testing/history/${runId}`}
+      replace
+    />
+  )
+}
+
 function App() {
   return (
     <ErrorBoundary>
@@ -64,19 +114,45 @@ function App() {
           
           {/* Project-Scoped Routes */}
           <Route path="projects/:projectId" element={<ProjectLayout />}>
-            <Route index element={<ProjectOverview />} />
-            <Route path="user-stories/:storyId" element={<UserStoryDetail />} />
-            <Route path="user-stories" element={<UserStories />} />
-            <Route path="requirements" element={<Requirements />} />
-            <Route path="test-cases" element={<TestCases />} />
-            <Route path="test-cases/:testCaseId" element={<TestCaseDetail />} />
-            <Route path="test-runs" element={<TestRuns />} />
-            <Route path="test-runs/:runId" element={<TestRunDetail />} />
-            <Route path="integrity-check" element={<IntegrityCheck />} />
-            <Route path="integrations" element={<ProjectIntegrations />} />
-            <Route path="integrations/jira" element={<JiraIntegration />} />
-            <Route path="integrations/azure-devops" element={<AzureDevOpsIntegration />} />
-            <Route path="settings" element={<ProjectSettings />} />
+            <Route element={<ProjectScopedRoutes />}>
+              <Route index element={<ProjectOverview />} />
+              <Route path="user-stories/:storyId" element={<UserStoryDetail />} />
+              <Route path="user-stories" element={<UserStories />} />
+              <Route path="requirements" element={<Requirements />} />
+
+              {/* Functional Testing workspace */}
+              <Route path="functional-testing">
+                <Route element={<FunctionalTesting />}>
+                  <Route index element={<Navigate to="cases" replace />} />
+                  <Route path="cases" element={<CasesTab />} />
+                  <Route path="live" element={<LiveTab />} />
+                  <Route path="history" element={<HistoryTab />} />
+                </Route>
+                <Route path="cases/:testCaseId" element={<TestCaseDetail />} />
+                <Route path="history/:runId" element={<TestRunDetail />} />
+              </Route>
+
+              {/* Legacy URL redirects — kept permanently, not deprecated */}
+              <Route path="test-cases" element={<LegacyTestCasesRedirect />} />
+              <Route
+                path="test-cases/:testCaseId"
+                element={<LegacyTestCaseDetailRedirect />}
+              />
+              <Route path="test-runs" element={<LegacyTestRunsRedirect />} />
+              <Route
+                path="test-runs/:runId"
+                element={<LegacyTestRunDetailRedirect />}
+              />
+
+              <Route path="integrity-check" element={<IntegrityCheck />} />
+              <Route path="integrations" element={<ProjectIntegrations />} />
+              <Route path="integrations/jira" element={<JiraIntegration />} />
+              <Route
+                path="integrations/azure-devops"
+                element={<AzureDevOpsIntegration />}
+              />
+              <Route path="settings" element={<ProjectSettings />} />
+            </Route>
           </Route>
 
           {/* Catch-all Route for authenticated area */}

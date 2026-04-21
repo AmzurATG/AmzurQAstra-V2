@@ -5,7 +5,6 @@ import { useProjectStore } from '@common/store/projectStore'
 import { useProjectOverviewStats } from '../hooks/useProjectOverviewStats'
 import {
   DocumentTextIcon,
-  ClipboardDocumentListIcon,
   PlayIcon,
   ShieldCheckIcon,
   SparklesIcon,
@@ -36,18 +35,11 @@ export default function ProjectOverview() {
         statKey: 'requirements' as const,
       },
       {
-        name: 'Test Cases',
-        description: 'AI-generated and manual test cases',
-        icon: ClipboardDocumentListIcon,
-        href: `/projects/${projectId}/test-cases`,
-        statKey: 'testCases' as const,
-      },
-      {
-        name: 'Test Runs',
-        description: 'Execute tests via Playwright MCP',
+        name: 'Functional Testing',
+        description: 'Promote cases, execute runs, and review history',
         icon: PlayIcon,
-        href: `/projects/${projectId}/test-runs`,
-        statKey: 'testRuns' as const,
+        href: `/projects/${projectId}/functional-testing`,
+        statKey: 'testCases' as const,
       },
       {
         name: 'Integrity Check',

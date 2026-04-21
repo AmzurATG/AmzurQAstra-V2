@@ -1,22 +1,30 @@
-import React, { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { Card } from '@common/components/ui/Card'
-import { Button } from '@common/components/ui/Button'
-import { PaginationBar } from '@common/components/ui/PaginationBar'
+import { useState, type ComponentType } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
-  ClockIcon,
   ArrowPathIcon,
+  ChartBarIcon,
   CheckCircleIcon,
+  ChevronRightIcon,
+  ClockIcon,
   XCircleIcon,
   XMarkIcon,
-  ChevronRightIcon,
-  ChartBarIcon,
 } from '@heroicons/react/24/outline'
-import { formatDateTimeIST } from '@common/utils/dateTime'
-import { useTestRunsList } from '../hooks/useTestRunsList'
-import type { TestRun } from '../types'
 
-const STATUS_CFG: Record<string, { icon: React.ComponentType<{ className?: string }>; color: string; bg: string }> = {
+import { Button } from '@common/components/ui/Button'
+import { Card } from '@common/components/ui/Card'
+import { PaginationBar } from '@common/components/ui/PaginationBar'
+import { formatDateTimeIST } from '@common/utils/dateTime'
+
+import { useTestRunsList } from '../../hooks/useTestRunsList'
+import type { TestRun } from '../../types'
+
+type StatusCfg = {
+  icon: ComponentType<{ className?: string }>
+  color: string
+  bg: string
+}
+
+const STATUS_CFG: Record<string, StatusCfg> = {
   passed: { icon: CheckCircleIcon, color: 'text-green-500', bg: 'bg-green-50' },
   failed: { icon: XCircleIcon, color: 'text-red-500', bg: 'bg-red-50' },
   running: { icon: ArrowPathIcon, color: 'text-blue-500', bg: 'bg-blue-50' },
@@ -25,15 +33,22 @@ const STATUS_CFG: Record<string, { icon: React.ComponentType<{ className?: strin
   error: { icon: XCircleIcon, color: 'text-red-500', bg: 'bg-red-50' },
 }
 
-export default function TestRuns() {
+/**
+ * Functional Testing → History tab.
+ *
+ * Pure read model over past runs. Execution dispatch lives on the Cases tab;
+ * live watching is on the Live tab. We just list, filter, and navigate to the
+ * run detail page for a given row.
+ */
+export default function HistoryTab() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
   const [filter, setFilter] = useState('all')
 
-  const { runs, summary, loading, page, setPage, meta, pageSize, reload } = useTestRunsList(
-    projectId,
-    filter
-  )
+  const { runs, summary, loading, page, setPage, meta, pageSize, reload } =
+    useTestRunsList(projectId, filter)
+
+  const base = `/projects/${projectId}/functional-testing`
 
   const stats = summary
     ? {
@@ -48,16 +63,16 @@ export default function TestRuns() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Test Run History</h1>
-          <p className="text-gray-600">View and analyze past execution reports</p>
+          <h2 className="text-lg font-semibold text-gray-900">Run History</h2>
+          <p className="text-sm text-gray-500">
+            Past executions and their reports. Click a row to open full details.
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => reload()}>
             <ArrowPathIcon className="w-4 h-4 mr-1" /> Refresh
           </Button>
-          <Button onClick={() => navigate(`/projects/${projectId}/test-cases`)}>
-            Run New Tests
-          </Button>
+          <Button onClick={() => navigate(`${base}/cases`)}>Run New Tests</Button>
         </div>
       </div>
 
@@ -97,7 +112,9 @@ export default function TestRuns() {
           </div>
           <div>
             <p className="text-xs text-gray-500 uppercase">Avg Pass Rate</p>
-            <p className="text-xl font-bold text-primary-600">{stats.avgPassRate}%</p>
+            <p className="text-xl font-bold text-primary-600">
+              {stats.avgPassRate}%
+            </p>
           </div>
         </Card>
       </div>
@@ -152,7 +169,7 @@ export default function TestRuns() {
                       <tr
                         key={run.id}
                         className="hover:bg-gray-50 cursor-pointer group"
-                        onClick={() => navigate(`/projects/${projectId}/test-runs/${run.id}`)}
+                        onClick={() => navigate(`${base}/history/${run.id}`)}
                       >
                         <td className="px-4 py-4 text-center text-sm font-medium text-gray-500 tabular-nums">
                           {rowNum}
@@ -167,16 +184,24 @@ export default function TestRuns() {
                             className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full ${cfg.bg}`}
                           >
                             <Icon
-                              className={`w-3 h-3 ${cfg.color} ${run.status === 'running' ? 'animate-spin' : ''}`}
+                              className={`w-3 h-3 ${cfg.color} ${
+                                run.status === 'running' ? 'animate-spin' : ''
+                              }`}
                             />
-                            <span className={`text-[10px] font-bold uppercase ${cfg.color}`}>
+                            <span
+                              className={`text-[10px] font-bold uppercase ${cfg.color}`}
+                            >
                               {run.status}
                             </span>
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <p className="text-sm font-medium text-gray-900">{run.name}</p>
-                          <p className="text-xs text-gray-500 capitalize">{run.browser}</p>
+                          <p className="text-sm font-medium text-gray-900">
+                            {run.name}
+                          </p>
+                          <p className="text-xs text-gray-500 capitalize">
+                            {run.browser}
+                          </p>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center justify-center gap-3">
@@ -186,7 +211,9 @@ export default function TestRuns() {
                             <span className="text-xs text-red-600 font-semibold">
                               {run.failed_tests}✗
                             </span>
-                            <span className="text-xs text-gray-400">{run.total_tests} total</span>
+                            <span className="text-xs text-gray-400">
+                              {run.total_tests} total
+                            </span>
                           </div>
                         </td>
                         <td className="px-6 py-4 text-xs text-gray-500">

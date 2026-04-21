@@ -9,7 +9,6 @@ import {
   LinkIcon,
   BeakerIcon,
   DocumentTextIcon,
-  ClipboardDocumentListIcon,
   PlayIcon,
   ShieldCheckIcon,
   ChevronLeftIcon,
@@ -33,8 +32,7 @@ const getProjectNav = (projectId: string) => [
   { name: 'Overview', href: `/projects/${projectId}`, icon: BeakerIcon },
   { name: 'User Stories', href: `/projects/${projectId}/user-stories`, icon: BookOpenIcon },
   { name: 'Requirements', href: `/projects/${projectId}/requirements`, icon: DocumentTextIcon },
-  { name: 'Test Cases', href: `/projects/${projectId}/test-cases`, icon: ClipboardDocumentListIcon },
-  { name: 'Test Runs', href: `/projects/${projectId}/test-runs`, icon: PlayIcon },
+  { name: 'Functional Testing', href: `/projects/${projectId}/functional-testing`, icon: PlayIcon },
   { name: 'Integrity Check', href: `/projects/${projectId}/integrity-check`, icon: ShieldCheckIcon },
   { name: 'Integrations', href: `/projects/${projectId}/integrations`, icon: LinkIcon },
 ]
@@ -58,9 +56,6 @@ export default function Sidebar() {
   useEffect(() => {
     if (location.pathname.includes('/functional/settings')) {
       navigate(location.pathname.replace('/functional/settings', '/settings'), { replace: true })
-    }
-    if (location.pathname.includes('/functional/test-runs')) {
-      navigate(location.pathname.replace('/functional/test-runs', '/test-runs'), { replace: true })
     }
   }, [location.pathname, navigate])
 
