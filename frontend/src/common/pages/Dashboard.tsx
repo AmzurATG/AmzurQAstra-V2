@@ -143,7 +143,7 @@ export default function Dashboard() {
               data.recent_runs.map((run) => (
                 <Link
                   key={run.id}
-                  to={`/projects/${run.project_id}/test-runs/${run.id}`}
+                  to={`/projects/${run.project_id}/functional-testing/history/${run.id}`}
                   className="flex items-center justify-between gap-3 rounded-md py-2.5 pl-1 pr-2 transition-colors hover:bg-gray-50"
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-3">

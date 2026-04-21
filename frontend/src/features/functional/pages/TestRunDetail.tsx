@@ -1,83 +1,73 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { Card, CardTitle } from '@common/components/ui/Card'
-import { Button } from '@common/components/ui/Button'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
+  ArrowLeftIcon,
   ArrowPathIcon,
   StopIcon,
-  ArrowLeftIcon,
 } from '@heroicons/react/24/outline'
-import { testRunsApi } from '../api'
-import type { LiveProgressResponse } from '../types'
-import toast from 'react-hot-toast'
-import { TestRunCaseAccordion } from '../components/TestRunCaseAccordion'
+
+import { Button } from '@common/components/ui/Button'
 import { useProjectStore } from '@common/store/projectStore'
 
-const POLL_MS = 3000
-const TERMINAL_STATES = ['completed', 'passed', 'failed', 'error', 'cancelled', 'not_found']
+import { testRunsApi } from '../api'
+import { TestRunDetailView } from '../components/TestRunDetailView'
+import { useActiveTestRun } from '../context/ActiveTestRunProvider'
+import { isTerminalStatus, pollingProgressSource } from '../live/progressSource'
+import type { LiveProgressResponse } from '../types'
 
+/**
+ * Full-page run detail. Two modes:
+ *
+ * 1. The Functional Testing shell is a parent → we read the live snapshot
+ *    from the active-run context when the URL's runId matches. No duplicate
+ *    poller.
+ * 2. Direct deep-link (e.g. someone shared `/history/:runId`) → we subscribe
+ *    our own ProgressSource so the page renders even without the shell.
+ */
 export default function TestRunDetail() {
   const { projectId, runId } = useParams<{ projectId: string; runId: string }>()
   const navigate = useNavigate()
   const currentProject = useProjectStore((s) => s.currentProject)
-  const projectDisplayName =
-    projectId && currentProject?.id === Number(projectId) ? currentProject.name : null
-  const [progress, setProgress] = useState<LiveProgressResponse | null>(null)
-  const [expanded, setExpanded] = useState<Record<number, boolean>>({})
-  const [syncing, setSyncing] = useState<Record<string, boolean>>({})
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const activeRun = useActiveTestRun()
 
   const numRunId = Number(runId)
-  const isDone = progress ? TERMINAL_STATES.includes(progress.status) : false
+  const projectDisplayName =
+    projectId && currentProject?.id === Number(projectId) ? currentProject.name : null
 
-  const poll = useCallback(async () => {
-    try {
-      const res = await testRunsApi.getLiveProgress(numRunId, { lite: true })
-      setProgress(res.data)
-      if (TERMINAL_STATES.includes(res.data.status) && pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
-    } catch {
-      /* retry next tick */
-    }
-  }, [numRunId])
+  const useContextSnapshot =
+    activeRun && activeRun.activeRunId === numRunId && activeRun.progress
+
+  const [localProgress, setLocalProgress] = useState<LiveProgressResponse | null>(null)
+  const unsubscribeRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
-    poll()
-    if (!isDone) {
-      pollRef.current = setInterval(poll, POLL_MS)
+    if (!Number.isFinite(numRunId) || useContextSnapshot) {
+      return
     }
+    unsubscribeRef.current?.()
+    unsubscribeRef.current = pollingProgressSource.subscribe(numRunId, (snapshot) => {
+      setLocalProgress(snapshot)
+    })
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
+      unsubscribeRef.current?.()
+      unsubscribeRef.current = null
     }
-  }, [poll, isDone])
+  }, [numRunId, useContextSnapshot])
 
-  const handleCancel = async () => {
+  const progress = useContextSnapshot ? activeRun.progress : localProgress
+  const isDone = progress ? isTerminalStatus(progress.status) : false
+
+  const handleCancel = useCallback(async () => {
+    if (activeRun && activeRun.activeRunId === numRunId) {
+      await activeRun.cancelRun()
+      return
+    }
     try {
       await testRunsApi.cancel(numRunId)
-      poll()
     } catch {
       /* ignore */
     }
-  }
-
-  const handleSyncStep = async (resultId: number, stepNumber: number, tcId: number) => {
-    const key = `${resultId}-${stepNumber}`
-    setSyncing((prev) => ({ ...prev, [key]: true }))
-    try {
-      await testRunsApi.syncStep(resultId, stepNumber)
-      toast.success(`Step ${stepNumber} synced to Test Case #${tcId}`)
-    } catch (error: unknown) {
-      const message =
-        error && typeof error === 'object' && 'response' in error
-          ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : undefined
-      toast.error(message || 'Failed to sync step')
-    } finally {
-      setSyncing((prev) => ({ ...prev, [key]: false }))
-    }
-  }
+  }, [activeRun, numRunId])
 
   if (!progress) {
     return (
@@ -87,10 +77,8 @@ export default function TestRunDetail() {
     )
   }
 
-  const pct = progress.percentage
   const passed = progress.completed_results.filter((r) => r.status === 'passed').length
   const failed = progress.completed_results.filter((r) => r.status !== 'passed').length
-  const total = progress.total_test_cases
 
   return (
     <div className="space-y-6">
@@ -98,7 +86,9 @@ export default function TestRunDetail() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => navigate(`/projects/${projectId}/test-runs`)}
+            onClick={() =>
+              navigate(`/projects/${projectId}/functional-testing/history`)
+            }
             className="text-gray-400 hover:text-gray-600"
           >
             <ArrowLeftIcon className="w-5 h-5" />
@@ -124,95 +114,17 @@ export default function TestRunDetail() {
           </div>
         </div>
         {!isDone && (
-          <Button variant="outline" className="text-red-600 border-red-200" onClick={handleCancel}>
+          <Button
+            variant="outline"
+            className="text-red-600 border-red-200"
+            onClick={handleCancel}
+          >
             <StopIcon className="w-4 h-4 mr-1" /> Cancel
           </Button>
         )}
       </div>
 
-      <Card>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-gray-700">
-            {isDone
-              ? 'Execution Summary'
-              : `Running test case ${progress.current_test_case_index + 1} of ${total}`}
-          </span>
-          <span className="text-sm font-semibold text-primary-600">{pct}%</span>
-        </div>
-        <div className="w-full bg-gray-200 rounded-full h-3">
-          <div
-            className={`h-3 rounded-full transition-all duration-500 ${isDone && failed > 0 ? 'bg-red-500' : isDone ? 'bg-green-500' : 'bg-primary-500'}`}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      </Card>
-
-      <div className="grid grid-cols-4 gap-4">
-        <Card className="text-center p-4">
-          <p className="text-xs text-gray-500 uppercase">Total</p>
-          <p className="text-xl font-bold">{total}</p>
-        </Card>
-        <Card className="text-center p-4">
-          <p className="text-xs text-gray-500 uppercase">Passed</p>
-          <p className="text-xl font-bold text-green-600">{passed}</p>
-        </Card>
-        <Card className="text-center p-4">
-          <p className="text-xs text-gray-500 uppercase">Failed</p>
-          <p className="text-xl font-bold text-red-600">{failed}</p>
-        </Card>
-        <Card className="text-center p-4">
-          <p className="text-xs text-gray-500 uppercase">Success Rate</p>
-          <p className="text-xl font-bold text-primary-600">
-            {total ? Math.round((passed / total) * 100) : 0}%
-          </p>
-        </Card>
-      </div>
-
-      <div className="space-y-3">
-        <CardTitle>Test Case Results</CardTitle>
-        {progress.completed_results.length === 0 && !isDone && (
-          <p className="text-sm text-gray-400 py-4">Waiting for first test case to complete…</p>
-        )}
-        {progress.completed_results.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-            <table className="w-full text-left min-w-[56rem]">
-              <thead className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                <tr>
-                  <th className="px-3 py-3 w-12 text-center">#</th>
-                  <th className="px-3 py-3 whitespace-nowrap">Run #</th>
-                  <th className="px-3 py-3 whitespace-nowrap">Case #</th>
-                  <th className="px-3 py-3 whitespace-nowrap">Result #</th>
-                  <th className="px-3 py-3 w-14">Status</th>
-                  <th className="px-3 py-3">Title</th>
-                  <th className="px-3 py-3 whitespace-nowrap">Steps</th>
-                  <th className="px-3 py-3 whitespace-nowrap">Duration</th>
-                  <th className="px-3 py-3 w-10" aria-label="Expand" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {progress.completed_results.map((r, index) => (
-                  <TestRunCaseAccordion
-                    key={r.test_result_id}
-                    runId={numRunId}
-                    runNumber={progress.run_number}
-                    result={r}
-                    rowNumber={index + 1}
-                    isExpanded={!!expanded[r.test_result_id]}
-                    onToggle={() =>
-                      setExpanded((prev) => ({
-                        ...prev,
-                        [r.test_result_id]: !prev[r.test_result_id],
-                      }))
-                    }
-                    onSync={handleSyncStep}
-                    syncing={syncing}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <TestRunDetailView progress={progress} runId={numRunId} />
     </div>
   )
 }

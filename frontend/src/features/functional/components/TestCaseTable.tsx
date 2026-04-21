@@ -170,7 +170,7 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
                 </td>
                 <td className="px-4 py-4">
                   <Link 
-                    to={`/projects/${projectId}/test-cases/${tc.id}`} 
+                    to={`/projects/${projectId}/functional-testing/cases/${tc.id}`} 
                     className={`font-medium hover:underline ${isCurrentlyRunning ? 'text-primary-700' : 'text-primary-600'}`}
                   >
                     {tc.title}

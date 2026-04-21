@@ -192,7 +192,7 @@ export default function TestCaseDetail() {
     return (
       <div className="text-center py-12">
         <p className="text-red-600 mb-4">{error || 'Test case not found'}</p>
-        <Link to={`/projects/${projectId}/test-cases`}>
+        <Link to={`/projects/${projectId}/functional-testing/cases`}>
           <Button variant="outline">
             <ArrowLeftIcon className="w-4 h-4 mr-2" />
             Back to Test Cases
@@ -206,7 +206,7 @@ export default function TestCaseDetail() {
     <div className="space-y-6">
       {/* Breadcrumb */}
       <Link 
-        to={`/projects/${projectId}/test-cases`}
+        to={`/projects/${projectId}/functional-testing/cases`}
         className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
       >
         <ArrowLeftIcon className="w-4 h-4 mr-1" />

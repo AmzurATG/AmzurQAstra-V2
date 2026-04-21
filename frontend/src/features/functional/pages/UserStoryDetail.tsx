@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeftIcon,
@@ -14,6 +14,10 @@ import { userStoriesApi } from '../api'
 import type { UserStory } from '../types'
 import { UserStoryEditModal } from '../components/userStories/UserStoryEditModal'
 import { TestGenerationInfoDialog } from '../components/userStories/TestGenerationInfoDialog'
+import {
+  StoryTestCaseList,
+  type StoryTestCaseListHandle,
+} from '../components/userStories/StoryTestCaseList'
 import { useUserStoryTestGeneration } from '../hooks/useUserStoryTestGeneration'
 import {
   aiGeneratedTestsExistCopy,
@@ -35,6 +39,12 @@ export default function UserStoryDetail() {
   const [loading, setLoading] = useState(true)
   const [editOpen, setEditOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [caseCounts, setCaseCounts] = useState<{ draft: number; ready: number; total: number }>({
+    draft: 0,
+    ready: 0,
+    total: 0,
+  })
+  const testCaseListRef = useRef<StoryTestCaseListHandle>(null)
   const loadStory = useCallback(async () => {
     if (!projectId || !storyId || Number.isNaN(sid)) return
     setLoading(true)
@@ -60,7 +70,10 @@ export default function UserStoryDetail() {
     infoMessage,
     closeInfoDialog,
   } = useUserStoryTestGeneration(projectId ? Number(projectId) : undefined, {
-    onSuccess: loadStory,
+    onSuccess: () => {
+      void loadStory()
+      testCaseListRef.current?.reload()
+    },
   })
 
   const generatedCount = story?.generated_test_cases ?? 0
@@ -198,7 +211,19 @@ export default function UserStoryDetail() {
           {story.story_points != null && <span>{story.story_points} points</span>}
           {story.parent_key && <span className="text-purple-600">Parent: {story.parent_key}</span>}
           <span>{story.linked_requirements} requirements</span>
-          <span>{story.linked_test_cases} test cases</span>
+          <span>
+            {caseCounts.total || story.linked_test_cases} test cases
+          </span>
+          {caseCounts.total > 0 && (
+            <>
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                {caseCounts.draft} draft
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                {caseCounts.ready} ready
+              </span>
+            </>
+          )}
         </div>
       </Card>
 
@@ -215,6 +240,13 @@ export default function UserStoryDetail() {
           {story.acceptance_criteria?.trim() ? story.acceptance_criteria : '—'}
         </p>
       </Card>
+
+      <StoryTestCaseList
+        ref={testCaseListRef}
+        projectId={pid}
+        storyId={sid}
+        onCountsChange={setCaseCounts}
+      />
 
       <UserStoryEditModal
         projectId={pid}

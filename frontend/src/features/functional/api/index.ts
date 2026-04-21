@@ -143,6 +143,35 @@ export const testCasesApi = {
   delete: (id: number) =>
     apiClient.delete(`/functional/test-cases/${id}`),
 
+  /**
+   * Fan-out bulk status update. Isolation seam: when a native bulk endpoint
+   * ships, swap this implementation without touching call sites.
+   * Returns per-id outcomes so callers can surface partial failures.
+   */
+  bulkUpdateStatus: async (
+    ids: number[],
+    status: import('../types').TestCaseStatus
+  ): Promise<{ succeeded: number[]; failed: Array<{ id: number; error: string }> }> => {
+    const results = await Promise.allSettled(
+      ids.map((id) => apiClient.put<TestCase>(`/functional/test-cases/${id}`, { status }))
+    )
+    const succeeded: number[] = []
+    const failed: Array<{ id: number; error: string }> = []
+    results.forEach((r, i) => {
+      const id = ids[i]
+      if (r.status === 'fulfilled') {
+        succeeded.push(id)
+      } else {
+        const reason = r.reason as { response?: { data?: { detail?: string } }; message?: string }
+        failed.push({
+          id,
+          error: reason?.response?.data?.detail || reason?.message || 'Update failed',
+        })
+      }
+    })
+    return { succeeded, failed }
+  },
+
   generate: (requirementId: number) =>
     apiClient.post<TestCase[]>(`/functional/test-cases/generate`, {
       requirement_id: requirementId,
