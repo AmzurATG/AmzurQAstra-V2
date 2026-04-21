@@ -7,6 +7,8 @@ import {
   TrashIcon,
   ShieldCheckIcon,
 } from '@heroicons/react/24/outline'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Card, CardTitle } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
 import { PageLoader } from '@common/components/ui/Loader'
@@ -229,16 +231,24 @@ export default function UserStoryDetail() {
 
       <Card className="min-w-0">
         <CardTitle>Description</CardTitle>
-        <p className="mt-2 whitespace-pre-wrap text-gray-700">
-          {story.description?.trim() ? story.description : '—'}
-        </p>
+        <div className="mt-2 prose prose-sm max-w-none text-gray-700">
+          {story.description?.trim() ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{story.description}</ReactMarkdown>
+          ) : (
+            <p>—</p>
+          )}
+        </div>
       </Card>
 
       <Card className="min-w-0">
         <CardTitle>Acceptance criteria</CardTitle>
-        <p className="mt-2 whitespace-pre-wrap text-gray-700">
-          {story.acceptance_criteria?.trim() ? story.acceptance_criteria : '—'}
-        </p>
+        <div className="mt-2 prose prose-sm max-w-none text-gray-700">
+          {story.acceptance_criteria?.trim() ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{story.acceptance_criteria}</ReactMarkdown>
+          ) : (
+            <p>—</p>
+          )}
+        </div>
       </Card>
 
       <StoryTestCaseList

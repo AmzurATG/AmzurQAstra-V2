@@ -474,32 +474,147 @@ class JiraIntegration(ProjectManagementIntegration):
         )
     
     def _extract_description(self, desc) -> Optional[str]:
-        """Extract plain text from Jira's ADF (Atlassian Document Format) or string"""
+        """Extract Markdown from Jira's ADF (Atlassian Document Format) or string"""
         if desc is None:
             return None
         if isinstance(desc, str):
             return desc
         if isinstance(desc, dict):
-            # ADF format - extract text content
-            return self._adf_to_text(desc)
+            # ADF format - convert to Markdown preserving structure
+            return self._adf_to_markdown(desc)
         return str(desc)
-    
-    def _adf_to_text(self, adf: dict) -> str:
-        """Convert Atlassian Document Format to plain text"""
-        text_parts = []
-        
-        def extract_text(node):
-            if isinstance(node, dict):
-                if node.get("type") == "text":
-                    text_parts.append(node.get("text", ""))
-                for child in node.get("content", []):
-                    extract_text(child)
-            elif isinstance(node, list):
-                for item in node:
-                    extract_text(item)
-        
-        extract_text(adf)
-        return " ".join(text_parts)
+
+    # ------------------------------------------------------------------
+    # ADF → Markdown helpers
+    # ------------------------------------------------------------------
+
+    def _adf_to_markdown(self, adf: dict) -> str:
+        """Convert an Atlassian Document Format tree to Markdown."""
+        parts: list[str] = []
+        for node in adf.get("content", []):
+            md = self._adf_node_to_md(node)
+            if md is not None:
+                parts.append(md)
+        return "\n\n".join(parts).strip()
+
+    def _adf_node_to_md(self, node: dict) -> Optional[str]:
+        """Dispatch a single top-level ADF node to Markdown."""
+        ntype = node.get("type", "")
+
+        if ntype == "paragraph":
+            return self._adf_inline_content(node.get("content", []))
+
+        if ntype == "heading":
+            level = node.get("attrs", {}).get("level", 1)
+            text = self._adf_inline_content(node.get("content", []))
+            return f"{'#' * level} {text}"
+
+        if ntype == "bulletList":
+            items = []
+            for li in node.get("content", []):
+                li_text = self._adf_list_item_text(li)
+                items.append(f"- {li_text}")
+            return "\n".join(items)
+
+        if ntype == "orderedList":
+            items = []
+            for idx, li in enumerate(node.get("content", []), 1):
+                li_text = self._adf_list_item_text(li)
+                items.append(f"{idx}. {li_text}")
+            return "\n".join(items)
+
+        if ntype == "blockquote":
+            inner = self._adf_to_markdown(node)
+            return "\n".join(f"> {line}" for line in inner.splitlines())
+
+        if ntype == "codeBlock":
+            lang = node.get("attrs", {}).get("language", "")
+            code = self._adf_inline_content(node.get("content", []))
+            return f"```{lang}\n{code}\n```"
+
+        if ntype == "table":
+            return self._adf_table_to_md(node)
+
+        if ntype == "rule":
+            return "---"
+
+        # Fallback: recurse into children
+        if "content" in node:
+            return self._adf_to_markdown(node)
+        return None
+
+    def _adf_inline_content(self, content: list) -> str:
+        """Render a list of inline ADF nodes (text, marks, etc.) to Markdown."""
+        parts: list[str] = []
+        for item in content:
+            if item.get("type") == "text":
+                text = item.get("text", "")
+                marks = item.get("marks", [])
+                for mark in marks:
+                    mtype = mark.get("type")
+                    if mtype == "strong":
+                        text = f"**{text}**"
+                    elif mtype == "em":
+                        text = f"*{text}*"
+                    elif mtype == "code":
+                        text = f"`{text}`"
+                    elif mtype == "link":
+                        href = mark.get("attrs", {}).get("href", "")
+                        text = f"[{text}]({href})"
+                parts.append(text)
+            elif item.get("type") == "hardBreak":
+                parts.append("\n")
+            elif item.get("type") == "inlineCard":
+                url = item.get("attrs", {}).get("url", "")
+                parts.append(url)
+            elif "content" in item:
+                parts.append(self._adf_inline_content(item["content"]))
+        return "".join(parts)
+
+    def _adf_list_item_text(self, li_node: dict) -> str:
+        """Extract text from a listItem node."""
+        lines: list[str] = []
+        for child in li_node.get("content", []):
+            t = self._adf_inline_content(child.get("content", []))
+            if t:
+                lines.append(t)
+        return " ".join(lines)
+
+    def _adf_table_to_md(self, table_node: dict) -> str:
+        """Convert an ADF table node to a Markdown table."""
+        rows: list[list[str]] = []
+        for row_node in table_node.get("content", []):
+            if row_node.get("type") not in ("tableRow",):
+                continue
+            cells: list[str] = []
+            for cell_node in row_node.get("content", []):
+                if cell_node.get("type") not in ("tableCell", "tableHeader"):
+                    continue
+                cell_parts: list[str] = []
+                for child in cell_node.get("content", []):
+                    text = self._adf_inline_content(child.get("content", []))
+                    if text:
+                        cell_parts.append(text)
+                cells.append(" ".join(cell_parts))
+            rows.append(cells)
+
+        if not rows:
+            return ""
+
+        # Normalise column count
+        col_count = max(len(r) for r in rows)
+        for r in rows:
+            while len(r) < col_count:
+                r.append("")
+
+        lines: list[str] = []
+        # Header row
+        lines.append("| " + " | ".join(rows[0]) + " |")
+        lines.append("| " + " | ".join("---" for _ in range(col_count)) + " |")
+        # Data rows
+        for row in rows[1:]:
+            lines.append("| " + " | ".join(row) + " |")
+        return "\n".join(lines)
     
     async def get_issue(self, issue_key: str) -> Optional[UserStoryData]:
         """Fetch a single Jira issue by key"""

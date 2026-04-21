@@ -38,3 +38,12 @@ body {
 .animate-progress {
   animation: progress 2s infinite linear;
 }
+
+/* Markdown table borders inside prose */
+.prose table {
+  @apply border border-gray-300;
+}
+.prose th,
+.prose td {
+  @apply border border-gray-300 px-3 py-2;
+}
