@@ -135,6 +135,7 @@ export default function ProjectSettings() {
               value={appUsername}
               onChange={(e) => setAppUsername(e.target.value)}
               placeholder="test@example.com"
+              autoComplete="off"
             />
             <div>
               <Input
@@ -143,6 +144,7 @@ export default function ProjectSettings() {
                 value={appPassword}
                 onChange={(e) => setAppPassword(e.target.value)}
                 placeholder={currentProject?.has_credentials ? '••••••••' : 'Enter password'}
+                autoComplete="new-password"
               />
               {currentProject?.has_credentials && !appPassword && (
                 <p className="mt-1 text-xs text-gray-500">Leave blank to keep existing password</p>
