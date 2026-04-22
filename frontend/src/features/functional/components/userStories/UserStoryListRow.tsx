@@ -17,6 +17,7 @@ type Props = {
   selected: boolean
   onToggleSelect: (storyId: number) => void
   generatingStoryId: number | null
+  isBulkGenerating?: boolean
   deletingStoryId: number | null
   onGenerateTests: (storyId: number, displayKey: string) => void
   onDelete: (storyId: number, displayKey: string) => void
@@ -28,6 +29,7 @@ export function UserStoryListRow({
   selected,
   onToggleSelect,
   generatingStoryId,
+  isBulkGenerating = false,
   deletingStoryId,
   onGenerateTests,
   onDelete,
@@ -54,9 +56,9 @@ export function UserStoryListRow({
             type="checkbox"
             className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-40"
             checked={hasGeneratedTests ? false : selected}
-            disabled={hasGeneratedTests}
+            disabled={hasGeneratedTests || (isBulkGenerating && selected)}
             onChange={() => {
-              if (!hasGeneratedTests) onToggleSelect(story.id)
+              if (!hasGeneratedTests && !isBulkGenerating) onToggleSelect(story.id)
             }}
             onClick={(e) => e.stopPropagation()}
             title={
@@ -131,7 +133,7 @@ export function UserStoryListRow({
               e.stopPropagation()
               onGenerateTests(story.id, displayKey)
             }}
-            disabled={hasGeneratedTests || generatingStoryId === story.id}
+            disabled={hasGeneratedTests || generatingStoryId === story.id || (isBulkGenerating && selected)}
             isLoading={generatingStoryId === story.id}
             title={
               hasGeneratedTests

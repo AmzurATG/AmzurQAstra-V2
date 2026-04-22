@@ -367,11 +367,18 @@ export default function UserStories() {
       selectedIds.size > 0 && !isGlobalEligibleSelection
   }, [selectedIds, isGlobalEligibleSelection])
 
+  const [isBulkGenerating, setIsBulkGenerating] = useState(false)
+
   const handleBulkGenerateTests = useCallback(async () => {
     if (selectedIds.size === 0) return
     const ids = Array.from(selectedIds)
-    for (const id of ids) {
-      await runGenerate(id, false)
+    setIsBulkGenerating(true)
+    try {
+      for (const id of ids) {
+        await runGenerate(id, false)
+      }
+    } finally {
+      setIsBulkGenerating(false)
     }
   }, [selectedIds, runGenerate])
 
@@ -740,6 +747,7 @@ export default function UserStories() {
                 selected={selectedIds.has(story.id)}
                 onToggleSelect={handleToggleSelect}
                 generatingStoryId={generatingStoryId}
+                isBulkGenerating={isBulkGenerating}
                 deletingStoryId={deletingStoryId}
                 onGenerateTests={handleGenerateTests}
                 onDelete={handleDeleteStory}
