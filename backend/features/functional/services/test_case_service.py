@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from common.api.pagination import PaginationParams
 from common.db.models.user_story import UserStory
-from features.functional.db.models.test_case import TestCase, TestCaseStatus
+from features.functional.db.models.test_case import TestCase, TestCaseCategory, TestCasePriority, TestCaseStatus
 from features.functional.db.models.test_result import TestResult
 from features.functional.db.models.test_step import TestStep
 from features.functional.schemas.test_case import (
@@ -90,16 +90,28 @@ class TestCaseService:
             count_query = count_query.where(TestCase.user_story_id == user_story_id)
         
         if status:
-            query = query.where(TestCase.status == status)
-            count_query = count_query.where(TestCase.status == status)
+            try:
+                status_enum = TestCaseStatus(status)
+            except ValueError:
+                status_enum = status
+            query = query.where(TestCase.status == status_enum)
+            count_query = count_query.where(TestCase.status == status_enum)
         
         if priority:
-            query = query.where(TestCase.priority == priority)
-            count_query = count_query.where(TestCase.priority == priority)
+            try:
+                pri_enum = TestCasePriority(priority)
+            except ValueError:
+                pri_enum = priority
+            query = query.where(TestCase.priority == pri_enum)
+            count_query = count_query.where(TestCase.priority == pri_enum)
         
         if category:
-            query = query.where(TestCase.category == category)
-            count_query = count_query.where(TestCase.category == category)
+            try:
+                cat_enum = TestCaseCategory(category)
+            except ValueError:
+                cat_enum = category
+            query = query.where(TestCase.category == cat_enum)
+            count_query = count_query.where(TestCase.category == cat_enum)
         
         if search:
             raw = (search or "").strip()
