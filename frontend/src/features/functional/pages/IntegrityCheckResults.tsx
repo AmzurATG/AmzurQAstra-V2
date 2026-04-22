@@ -1,8 +1,7 @@
 import { XCircleIcon, ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { Card } from '@common/components/ui/Card'
 import type { RunStatusResponse } from '../types'
-import { IntegrityCheckScreenshot } from '../components/IntegrityCheckScreenshot'
-import { resolveBackendAssetUrl } from '@common/utils/resolveBackendAssetUrl'
+import { IntegrityCheckScreenshotGallery } from '../components/IntegrityCheckScreenshotGallery'
 
 interface Props {
   result: RunStatusResponse
@@ -52,30 +51,12 @@ export default function IntegrityCheckResults({ result }: Props) {
           )}
 
           {result.screenshots.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-3">
-                Screens from this run ({result.screenshots.length})
-              </p>
-              <p className="text-sm text-gray-500 mb-3">Click an image to open it full size in a new tab.</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                {result.screenshots.map((src, i) => (
-                  <a
-                    key={i}
-                    href={resolveBackendAssetUrl(src)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group block rounded-lg overflow-hidden border border-gray-200 bg-gray-100 hover:shadow-md transition-shadow"
-                  >
-                    <IntegrityCheckScreenshot
-                      src={src}
-                      alt={`Screen capture ${i + 1}`}
-                      variant="gallery"
-                      className="w-full h-36 sm:h-40 object-cover object-top group-hover:scale-[1.02] transition-transform duration-300"
-                    />
-                  </a>
-                ))}
-              </div>
-            </div>
+            <IntegrityCheckScreenshotGallery
+              screenshots={result.screenshots}
+              heading={`Screens from this run (${result.screenshots.length})`}
+              hint="Click a thumbnail for the gallery. Use ← → or the side arrows; Esc to close. You can still open the current shot in a new tab from the viewer."
+              variant="comfortable"
+            />
           )}
 
           {result.screenshots.length === 0 && !result.error && (

@@ -1,7 +1,6 @@
 import { ExclamationCircleIcon } from '@heroicons/react/24/outline'
 import type { RunStatus } from '../types'
-import { IntegrityCheckScreenshot } from '../components/IntegrityCheckScreenshot'
-import { resolveBackendAssetUrl } from '@common/utils/resolveBackendAssetUrl'
+import { IntegrityCheckScreenshotGallery } from '../components/IntegrityCheckScreenshotGallery'
 
 interface Props {
   percentage: number
@@ -81,28 +80,12 @@ export default function IntegrityCheckProgress({
       </div>
 
       {screenshots.length > 0 && (
-        <div>
-          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-            Screens so far ({screenshots.length})
-          </h4>
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-            {screenshots.map((src, i) => (
-              <a
-                key={i}
-                href={resolveBackendAssetUrl(src)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block rounded-lg overflow-hidden border border-gray-200 hover:shadow-md transition-shadow"
-              >
-                <IntegrityCheckScreenshot
-                  src={src}
-                  alt={`Screen ${i + 1}`}
-                  className="w-full h-20 object-cover object-top"
-                />
-              </a>
-            ))}
-          </div>
-        </div>
+        <IntegrityCheckScreenshotGallery
+          screenshots={screenshots}
+          heading={`Screens so far (${screenshots.length})`}
+          hint="Click a thumbnail to view full size. Use arrow keys or on-screen arrows to browse."
+          variant="compact"
+        />
       )}
 
       {!isFinished && screenshots.length === 0 && (
