@@ -12,6 +12,7 @@
 #    4. Install Python dependencies:
 #         pip install -r backend/requirements.txt
 #         pip install pyinstaller
+#         (or: uv pip install -r backend/requirements.txt && uv pip install pyinstaller)
 #    5. Install frontend dependencies:
 #         cd frontend
 #         npm install
@@ -35,12 +36,13 @@ if (-not $env:VIRTUAL_ENV) {
 }
 Write-Host "[OK] Virtual environment: $env:VIRTUAL_ENV"
 
-# Verify pyinstaller is installed
-if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
-    Write-Error "PyInstaller not found. Run: pip install pyinstaller"
+# Verify PyInstaller for the active Python (avoids picking a global pyinstaller on PATH)
+$pyiVersion = & python -m PyInstaller --version 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "PyInstaller not found for this Python. Run: uv pip install pyinstaller  (or: pip install pyinstaller)  in your active venv"
     exit 1
 }
-Write-Host "[OK] PyInstaller: $(pyinstaller --version)"
+Write-Host "[OK] PyInstaller: $pyiVersion"
 
 # Verify node_modules exist
 $NodeModules = Join-Path $ProjectRoot "frontend\node_modules"
@@ -71,8 +73,8 @@ if ($LASTEXITCODE -ne 0) { Write-Error "FAILED: npm run build"; exit 1 }
 # [2/4] PyInstaller
 Write-Host "[2/4] Building exe with PyInstaller..."
 Set-Location $ScriptDir
-pyinstaller qastra.spec --clean --distpath $DistPath --workpath $BuildPath
-if ($LASTEXITCODE -ne 0) { Write-Error "FAILED: pyinstaller"; exit 1 }
+python -m PyInstaller qastra.spec --clean --distpath $DistPath --workpath $BuildPath
+if ($LASTEXITCODE -ne 0) { Write-Error "FAILED: PyInstaller"; exit 1 }
 
 # [3/4] Copy .env template
 Write-Host "[3/4] Copying .env template..."

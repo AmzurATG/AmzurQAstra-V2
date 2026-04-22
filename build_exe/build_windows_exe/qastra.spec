@@ -7,9 +7,13 @@ into a single QAstra.exe.
 block_cipher = None
 
 import os
+import sys
+
 # SPECPATH is a PyInstaller built-in — the directory containing this .spec file
 SPEC_DIR = SPECPATH
 PROJECT_ROOT = os.path.normpath(os.path.join(SPEC_DIR, '..', '..'))
+# Use the interpreter that runs PyInstaller (e.g. project .venv, backend\venv, or uv env)
+_SITE_PACKAGES = os.path.join(sys.prefix, "Lib", "site-packages")
 
 a = Analysis(
     [os.path.join(SPEC_DIR, 'launcher.py')],
@@ -19,9 +23,9 @@ a = Analysis(
         # Backend code + static React build + alembic migrations
         (os.path.join(PROJECT_ROOT, 'backend'), 'backend'),
         # litellm needs its JSON data files (model cost maps, tokenizers, etc.)
-        (os.path.join(PROJECT_ROOT, 'backend', 'venv', 'Lib', 'site-packages', 'litellm'), 'litellm'),
+        (os.path.join(_SITE_PACKAGES, 'litellm'), 'litellm'),
         # browser_use needs .md prompt templates in agent/system_prompts/
-        (os.path.join(PROJECT_ROOT, 'backend', 'venv', 'Lib', 'site-packages', 'browser_use'), 'browser_use'),
+        (os.path.join(_SITE_PACKAGES, 'browser_use'), 'browser_use'),
     ],
     hiddenimports=[
         # =====================================================================

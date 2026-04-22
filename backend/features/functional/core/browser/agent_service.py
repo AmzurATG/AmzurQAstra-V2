@@ -251,21 +251,15 @@ class BrowserAgentService:
             "error": None,
         })
 
-        async def _on_step(state: Any, output: Any, step_num: int) -> None:
+        async def _on_step(_state: Any, output: Any, step_num: int) -> None:
             step_counter[0] = step_num
-            path: Optional[str] = None
-
-            screenshot_b64 = getattr(state, "screenshot", None)
-            if screenshot_b64:
-                path = self._save_screenshot(screenshot_b64, run_id, step_num)
-                if path:
-                    screenshots.append(path)
+            # Post-action screenshot is saved in _on_step_end.
 
             desc = self._action_description(output)
             steps_data.append({
                 "step_number": step_num,
                 "description": desc,
-                "screenshot_path": path,
+                "screenshot_path": None,
             })
 
             pct = min(90, 5 + step_num * 11)
@@ -273,6 +267,40 @@ class BrowserAgentService:
                 "status": "running",
                 "percentage": pct,
                 "current_step": desc,
+                "screenshots": list(screenshots),
+                "steps": list(steps_data),
+                "error": None,
+            })
+
+        async def _on_step_end(agent: Any) -> None:
+            if not steps_data:
+                return
+            session = getattr(agent, "browser_session", None)
+            if session is None:
+                return
+            last = steps_data[-1]
+            step_num = last.get("step_number")
+            if step_num is None:
+                return
+            try:
+                summary = await session.get_browser_state_summary(include_screenshot=True)
+            except Exception as exc:
+                logger.warning(f"[BrowserAgent] Post-action screenshot failed step={step_num}: {exc}")
+                return
+            b64 = getattr(summary, "screenshot", None)
+            if not b64:
+                return
+            path = self._save_screenshot(b64, run_id, step_num)
+            if not path:
+                return
+            last["screenshot_path"] = path
+            if path not in screenshots:
+                screenshots.append(path)
+            pct = min(90, 5 + step_num * 11)
+            set_progress(run_id, {
+                "status": "running",
+                "percentage": pct,
+                "current_step": last.get("description") or "",
                 "screenshots": list(screenshots),
                 "steps": list(steps_data),
                 "error": None,
@@ -296,7 +324,7 @@ class BrowserAgentService:
                 use_vision=True,
             )
 
-            result = await agent.run(max_steps=15)
+            result = await agent.run(max_steps=15, on_step_end=_on_step_end)
 
             # Extract final summary text
             final_text = ""

@@ -13,11 +13,22 @@ function screenshotBasename(path: string): string {
   return i >= 0 ? path.slice(i + 1) : path
 }
 
+/** Stable blob-cache key: unique per saved file; falls back to step+index when path missing. */
+function blobCacheKey(entry: AgentLogEntry, listIndex: number): string {
+  const raw = entry.screenshot_path
+  if (raw) {
+    const base = screenshotBasename(raw)
+    if (base) return base
+  }
+  return `pending-${entry.agent_step}-${listIndex}`
+}
+
 function LazyAgentThumb({
   runId,
   testResultId,
   entry,
   index,
+  cacheKey,
   onLoaded,
   onOpen,
   blobUrl,
@@ -27,7 +38,8 @@ function LazyAgentThumb({
   testResultId: number
   entry: AgentLogEntry
   index: number
-  onLoaded: (step: number, url: string) => void
+  cacheKey: string
+  onLoaded: (cacheKey: string, url: string) => void
   onOpen: (entry: AgentLogEntry, index: number) => void
   blobUrl: string | undefined
   registerThumb: (index: number, el: HTMLButtonElement | null) => void
@@ -55,7 +67,7 @@ function LazyAgentThumb({
               URL.revokeObjectURL(u)
               return
             }
-            onLoaded(entry.agent_step, u)
+            onLoaded(cacheKey, u)
           } catch {
             /* ignore */
           }
@@ -68,7 +80,7 @@ function LazyAgentThumb({
       cancelled = true
       ob.disconnect()
     }
-  }, [runId, testResultId, entry.agent_step, entry.screenshot_path, blobUrl, onLoaded])
+  }, [runId, testResultId, cacheKey, entry.screenshot_path, blobUrl, onLoaded])
 
   const setButtonRef = useCallback(
     (el: HTMLButtonElement | null) => {
@@ -124,19 +136,19 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
     () => logs.filter((l) => l.screenshot_path),
     [logs]
   )
-  const [blobByStep, setBlobByStep] = useState<Record<number, string>>({})
+  const [blobByKey, setBlobByKey] = useState<Record<string, string>>({})
   const [primaryBlobUrl, setPrimaryBlobUrl] = useState<string | null>(null)
   /** Index into `withShots` when viewing agent step gallery; null = closed */
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null)
   const [primaryLightbox, setPrimaryLightbox] = useState(false)
   const [lightboxLoading, setLightboxLoading] = useState(false)
-  const blobsRef = useRef<Record<number, string>>({})
+  const blobsRef = useRef<Record<string, string>>({})
   const stripScrollRef = useRef<HTMLDivElement>(null)
   const thumbRefs = useRef<Map<number, HTMLButtonElement>>(new Map())
 
   useEffect(() => {
-    blobsRef.current = blobByStep
-  }, [blobByStep])
+    blobsRef.current = blobByKey
+  }, [blobByKey])
 
   const registerThumb = useCallback((index: number, el: HTMLButtonElement | null) => {
     if (el) thumbRefs.current.set(index, el)
@@ -145,25 +157,25 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
 
   const primaryName = primaryScreenshotPath ? screenshotBasename(primaryScreenshotPath) : ''
 
-  const onThumbLoaded = useCallback((step: number, url: string) => {
-    setBlobByStep((prev) => (prev[step] ? prev : { ...prev, [step]: url }))
+  const onThumbLoaded = useCallback((cacheKey: string, url: string) => {
+    setBlobByKey((prev) => (prev[cacheKey] ? prev : { ...prev, [cacheKey]: url }))
   }, [])
 
   const loadBlobForEntry = useCallback(
-    async (entry: AgentLogEntry): Promise<void> => {
-      const step = entry.agent_step
-      if (blobsRef.current[step]) return
+    async (entry: AgentLogEntry, listIndex: number): Promise<void> => {
+      const k = blobCacheKey(entry, listIndex)
+      if (blobsRef.current[k]) return
       const fn = entry.screenshot_path ? screenshotBasename(entry.screenshot_path) : ''
       if (!fn) return
       setLightboxLoading(true)
       try {
         const u = await fetchScreenshotBlobUrl(runId, testResultId, fn)
-        setBlobByStep((prev) => {
-          if (prev[entry.agent_step]) {
+        setBlobByKey((prev) => {
+          if (prev[k]) {
             URL.revokeObjectURL(u)
             return prev
           }
-          return { ...prev, [entry.agent_step]: u }
+          return { ...prev, [k]: u }
         })
       } catch {
         /* ignore */
@@ -195,7 +207,7 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
     if (!entry) return
     let cancelled = false
     ;(async () => {
-      await loadBlobForEntry(entry)
+      await loadBlobForEntry(entry, galleryIndex)
       if (cancelled) return
       requestAnimationFrame(() => {
         thumbRefs.current.get(galleryIndex)?.scrollIntoView({
@@ -274,6 +286,8 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
   }
 
   const galleryEntry = galleryIndex !== null ? withShots[galleryIndex] : null
+  const galleryBlobKey =
+    galleryEntry && galleryIndex !== null ? blobCacheKey(galleryEntry, galleryIndex) : ''
   const galleryHasPrev = galleryIndex !== null && galleryIndex > 0
   const galleryHasNext = galleryIndex !== null && galleryIndex < withShots.length - 1
 
@@ -325,19 +339,23 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
               className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain pb-1 [scrollbar-width:thin]"
             >
               <div className="flex w-max min-w-0 gap-2 pr-1">
-                {withShots.map((entry, index) => (
-                  <LazyAgentThumb
-                    key={`${entry.agent_step}-${entry.timestamp}`}
-                    runId={runId}
-                    testResultId={testResultId}
-                    entry={entry}
-                    index={index}
-                    blobUrl={blobByStep[entry.agent_step]}
-                    onLoaded={onThumbLoaded}
-                    onOpen={onThumbOpen}
-                    registerThumb={registerThumb}
-                  />
-                ))}
+                {withShots.map((entry, index) => {
+                  const ck = blobCacheKey(entry, index)
+                  return (
+                    <LazyAgentThumb
+                      key={ck}
+                      runId={runId}
+                      testResultId={testResultId}
+                      entry={entry}
+                      index={index}
+                      cacheKey={ck}
+                      blobUrl={blobByKey[ck]}
+                      onLoaded={onThumbLoaded}
+                      onOpen={onThumbOpen}
+                      registerThumb={registerThumb}
+                    />
+                  )
+                })}
               </div>
             </div>
             <button
@@ -420,11 +438,11 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
             </button>
           )}
           <div className="max-w-4xl max-h-[90vh] w-full flex flex-col gap-2 bg-white rounded-lg overflow-hidden shadow-xl relative">
-            {lightboxLoading && galleryEntry && !blobByStep[galleryEntry.agent_step] ? (
+            {lightboxLoading && galleryEntry && !blobByKey[galleryBlobKey] ? (
               <div className="p-16 text-gray-500 text-sm">Loading image…</div>
-            ) : galleryEntry && blobByStep[galleryEntry.agent_step] ? (
+            ) : galleryEntry && blobByKey[galleryBlobKey] ? (
               <img
-                src={blobByStep[galleryEntry.agent_step]}
+                src={blobByKey[galleryBlobKey]}
                 alt=""
                 className="max-h-[70vh] w-full object-contain bg-gray-900"
               />

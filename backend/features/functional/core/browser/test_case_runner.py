@@ -409,16 +409,11 @@ class TestCaseRunner:
             "screenshots": [], "logs": [],
         })
 
-        async def _on_step(state: Any, output: Any, step_num: int) -> None:
+        async def _on_step(_state: Any, output: Any, step_num: int) -> None:
             if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
                 raise TestRunCancelled()
             step_counter[0] = step_num
-            path: Optional[str] = None
-            ss_b64 = getattr(state, "screenshot", None)
-            if ss_b64:
-                path = save_screenshot_b64(ss_b64, run_id, test_case_id, step_num)
-                if path:
-                    screenshots.append(path)
+            # Screenshot is captured after actions in _on_step_end (post-action evidence).
 
             desc = action_description_from_output(output)
             safe_desc = desc
@@ -444,7 +439,7 @@ class TestCaseRunner:
                 "agent_step": step_num,
                 "description": safe_desc,
                 "adaptation": adaptation,
-                "screenshot_path": path,
+                "screenshot_path": None,
             })
             pct = min(90, 5 + step_num * (85 // max(len(steps) * 2, 1)))
             set_tc_progress(key, {
@@ -461,6 +456,42 @@ class TestCaseRunner:
                         on_step_callback(step_num, desc, agent_logs[-1] if agent_logs else None)
                 except Exception as cb_err:
                     logger.warning(f"[TestCaseRunner] Progress callback failed: {cb_err}")
+
+        async def _on_step_end(agent: Any) -> None:
+            """Persist viewport screenshot after the step's actions have run."""
+            if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
+                return
+            if not agent_logs:
+                return
+            session = getattr(agent, "browser_session", None)
+            if session is None:
+                return
+            last = agent_logs[-1]
+            step_num = last.get("agent_step")
+            if step_num is None:
+                return
+            try:
+                summary = await session.get_browser_state_summary(include_screenshot=True)
+            except Exception as exc:
+                logger.warning(f"[TestCaseRunner] Post-action screenshot failed step={step_num}: {exc}")
+                return
+            b64 = getattr(summary, "screenshot", None)
+            if not b64:
+                return
+            path = save_screenshot_b64(b64, run_id, test_case_id, step_num)
+            if not path:
+                return
+            last["screenshot_path"] = path
+            if path not in screenshots:
+                screenshots.append(path)
+            pct = min(90, 5 + step_num * (85 // max(len(steps) * 2, 1)))
+            set_tc_progress(key, {
+                "status": "running",
+                "percentage": pct,
+                "current_step": last.get("description") or "",
+                "screenshots": list(screenshots),
+                "logs": list(agent_logs),
+            })
 
         inject_creds = should_inject_project_credentials(
             title, description or "", preconditions or "", steps
@@ -509,13 +540,13 @@ class TestCaseRunner:
         async def _run_agent_with_cancel(agent: Any) -> Any:
             """Run browser-use Agent; stop promptly when user cancels (numeric execution_run_id)."""
             if execution_run_id is None:
-                return await agent.run(max_steps=80)
+                return await agent.run(max_steps=80, on_step_end=_on_step_end)
 
             async def _wait_for_cancel() -> None:
                 while not progress_mgr.is_cancel_requested(execution_run_id):
                     await asyncio.sleep(0.25)
 
-            agent_task = asyncio.create_task(agent.run(max_steps=80))
+            agent_task = asyncio.create_task(agent.run(max_steps=80, on_step_end=_on_step_end))
             poll_task = asyncio.create_task(_wait_for_cancel())
             done, pending = await asyncio.wait(
                 [agent_task, poll_task],
