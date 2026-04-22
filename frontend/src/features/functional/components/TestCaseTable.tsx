@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { 
   ChevronDownIcon, 
   ChevronRightIcon, 
@@ -9,9 +9,12 @@ import {
   XCircleIcon,
   ClockIcon,
   ArrowPathIcon,
+  CheckIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
 import { Link } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import type { TestCase, TestStep, LiveProgressResponse } from '../types'
 import { userStoryDisplayKey } from '../constants/userStoryUi'
 
@@ -31,6 +34,7 @@ interface TestCaseTableProps {
   isRunning?: boolean
   isCreating?: boolean
   progress?: LiveProgressResponse | null
+  onStepUpdate?: (stepId: number, data: Partial<TestStep>) => Promise<void>
 }
 
 const statusIcons = {
@@ -87,8 +91,43 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
   onToggleAll,
   isRunning,
   isCreating,
-  progress
+  progress,
+  onStepUpdate,
 }) => {
+  const [editingStepId, setEditingStepId] = useState<number | null>(null)
+  const [editDraft, setEditDraft] = useState<Partial<TestStep>>({})
+  const [isSavingStep, setIsSavingStep] = useState(false)
+
+  const startEditingStep = (step: TestStep) => {
+    setEditingStepId(step.id)
+    setEditDraft({
+      description: step.description || '',
+      target: step.target || '',
+      value: step.value || '',
+      expected_result: step.expected_result || '',
+    })
+  }
+
+  const cancelEditingStep = () => {
+    setEditingStepId(null)
+    setEditDraft({})
+  }
+
+  const saveEditingStep = async () => {
+    if (!editingStepId || !onStepUpdate) return
+    setIsSavingStep(true)
+    try {
+      await onStepUpdate(editingStepId, editDraft)
+      toast.success('Step updated')
+      setEditingStepId(null)
+      setEditDraft({})
+    } catch {
+      toast.error('Failed to update step')
+    } finally {
+      setIsSavingStep(false)
+    }
+  }
+
   const allCurrentPageSelected =
     testCases.length > 0 && testCases.every((tc) => selectedIds.has(tc.id))
 
@@ -249,12 +288,16 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
                     <div className="ml-8 mr-4">
                       <h4 className="text-sm font-medium text-gray-700 mb-3">Test Steps</h4>
                       <div className="space-y-2">
-                        {stepsCache[tc.id].map((step) => (
+                        {stepsCache[tc.id].map((step) => {
+                        const isEditing = editingStepId === step.id
+                        return (
                           <div
                             key={step.id}
-                            className="flex items-start gap-3 p-3 bg-white rounded-lg border border-gray-200"
+                            className={`flex items-start gap-3 p-3 bg-white rounded-lg border ${
+                              isEditing ? 'border-primary-300 ring-1 ring-primary-200' : 'border-gray-200'
+                            }`}
                           >
-                            <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-primary-100 text-primary-700 text-xs font-medium rounded-full">
+                            <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-primary-100 text-primary-700 text-xs font-medium rounded-full mt-1">
                               {step.step_number}
                             </span>
                             <div className="flex-1 min-w-0">
@@ -265,23 +308,112 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
                                 <span className="text-xs font-medium text-gray-500 uppercase">
                                   {step.action.replace('_', ' ')}
                                 </span>
-                                {step.target && (
-                                  <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 truncate max-w-xs">
-                                    {step.target}
-                                  </span>
-                                )}
                               </div>
-                              {step.description && (
-                                <p className="text-sm text-gray-600">{step.description}</p>
-                              )}
-                              {step.expected_result && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                  <span className="font-medium">Expected:</span> {step.expected_result}
-                                </p>
+                              {isEditing ? (
+                                <div className="space-y-2 mt-2">
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-500 mb-0.5">Description</label>
+                                    <input
+                                      type="text"
+                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                                      value={editDraft.description ?? ''}
+                                      onChange={(e) => setEditDraft((d) => ({ ...d, description: e.target.value }))}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-500 mb-0.5">Target</label>
+                                    <input
+                                      type="text"
+                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                                      value={editDraft.target ?? ''}
+                                      onChange={(e) => setEditDraft((d) => ({ ...d, target: e.target.value }))}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-500 mb-0.5">Value</label>
+                                    <input
+                                      type="text"
+                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                                      value={editDraft.value ?? ''}
+                                      onChange={(e) => setEditDraft((d) => ({ ...d, value: e.target.value }))}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-500 mb-0.5">Expected Result</label>
+                                    <input
+                                      type="text"
+                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                                      value={editDraft.expected_result ?? ''}
+                                      onChange={(e) => setEditDraft((d) => ({ ...d, expected_result: e.target.value }))}
+                                    />
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  {step.target && (
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                      <span className="font-medium">Target:</span>{' '}
+                                      <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700">{step.target}</span>
+                                    </p>
+                                  )}
+                                  {step.description && (
+                                    <p className="text-sm text-gray-600 mt-1">{step.description}</p>
+                                  )}
+                                  {step.value && (
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                      <span className="font-medium">Value:</span> {step.value}
+                                    </p>
+                                  )}
+                                  {step.expected_result && (
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                      <span className="font-medium">Expected:</span> {step.expected_result}
+                                    </p>
+                                  )}
+                                </>
                               )}
                             </div>
+                            {onStepUpdate && (
+                              <div className="flex-shrink-0 flex items-center gap-1 mt-1">
+                                {isEditing ? (
+                                  <>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={saveEditingStep}
+                                      disabled={isSavingStep}
+                                      title="Save changes"
+                                    >
+                                      {isSavingStep ? (
+                                        <ArrowPathIcon className="w-4 h-4 animate-spin text-primary-500" />
+                                      ) : (
+                                        <CheckIcon className="w-4 h-4 text-green-600" />
+                                      )}
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={cancelEditingStep}
+                                      disabled={isSavingStep}
+                                      title="Cancel"
+                                    >
+                                      <XMarkIcon className="w-4 h-4 text-gray-500" />
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => startEditingStep(step)}
+                                    title="Edit step"
+                                  >
+                                    <PencilIcon className="w-4 h-4 text-gray-400 hover:text-primary-600" />
+                                  </Button>
+                                )}
+                              </div>
+                            )}
                           </div>
-                        ))}
+                        )
+                      })}
                       </div>
                     </div>
                   ) : (

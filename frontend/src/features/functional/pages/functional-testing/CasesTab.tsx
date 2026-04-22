@@ -9,7 +9,7 @@ import { PaginationBar } from '@common/components/ui/PaginationBar'
 import { projectsApi } from '@common/api/projects'
 import { useProjectStore } from '@common/store/projectStore'
 
-import { testCasesApi } from '../../api'
+import { testCasesApi, testStepsApi } from '../../api'
 import { CredentialsOverride } from '../../components/CredentialsOverride'
 import { TestCaseEditModal } from '../../components/TestCaseEditModal'
 import { TestCaseTable } from '../../components/TestCaseTable'
@@ -320,6 +320,22 @@ export default function CasesTab() {
     })
   }, [testCases])
 
+  const handleStepUpdate = useCallback(
+    async (stepId: number, data: Partial<TestStep>) => {
+      await testStepsApi.update(stepId, data)
+      // Refresh the cached steps for the test case that owns this step
+      for (const [tcId, steps] of Object.entries(stepsCache)) {
+        const idx = steps.findIndex((s) => s.id === stepId)
+        if (idx !== -1) {
+          const res = await testCasesApi.getWithSteps(Number(tcId))
+          setStepsCache((prev) => ({ ...prev, [Number(tcId)]: res.data.steps || [] }))
+          break
+        }
+      }
+    },
+    [stepsCache]
+  )
+
   const runAllLabel =
     statusFilter === 'ready' ? 'Run All Ready' : 'Run All (filtered)'
   const runDisabled =
@@ -453,6 +469,7 @@ export default function CasesTab() {
             isRunning={activeRun.isRunning}
             isCreating={activeRun.isCreating}
             progress={activeRun.progress}
+            onStepUpdate={handleStepUpdate}
           />
         )}
         <PaginationBar
