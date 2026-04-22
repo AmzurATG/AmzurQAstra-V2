@@ -411,6 +411,8 @@ export default function CasesTab() {
             <option value="smoke">Smoke</option>
             <option value="regression">Regression</option>
             <option value="e2e">E2E</option>
+            <option value="integration">Integration</option>
+            <option value="sanity">Sanity</option>
           </select>
         </div>
 
