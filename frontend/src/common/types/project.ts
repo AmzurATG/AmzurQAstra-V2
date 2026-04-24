@@ -10,6 +10,7 @@ export interface Project {
   azure_devops_project?: string
   has_credentials?: boolean
   app_username?: string
+  app_password?: string
   created_at: string
   updated_at: string
 }

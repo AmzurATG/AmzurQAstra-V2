@@ -35,6 +35,7 @@ def project_to_response(project: Project) -> dict:
         "azure_devops_project": project.azure_devops_project,
         "has_credentials": bool(creds.get("username") or creds.get("password")),
         "app_username": creds.get("username"),
+        "app_password": creds.get("password"),
         "created_at": project.created_at,
         "updated_at": project.updated_at,
     }

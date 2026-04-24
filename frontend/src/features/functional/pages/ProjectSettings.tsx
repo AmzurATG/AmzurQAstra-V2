@@ -28,8 +28,7 @@ export default function ProjectSettings() {
       setDescription(currentProject.description || '')
       setAppUrl(currentProject.app_url || '')
       setAppUsername(currentProject.app_username || '')
-      // Don't populate password - it's not returned from backend for security
-      setAppPassword('')
+      setAppPassword(currentProject.app_password || '')
     }
   }, [currentProject])
 

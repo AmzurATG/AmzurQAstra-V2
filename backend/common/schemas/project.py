@@ -39,6 +39,7 @@ class ProjectResponse(ProjectBase):
     azure_devops_project: Optional[str] = None
     has_credentials: bool = False
     app_username: Optional[str] = None
+    app_password: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     

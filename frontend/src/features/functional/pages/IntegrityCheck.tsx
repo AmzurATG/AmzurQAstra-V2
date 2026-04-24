@@ -39,6 +39,7 @@ export default function IntegrityCheck() {
     if (currentProject) {
       if (currentProject.app_url) setAppUrl(currentProject.app_url)
       if (currentProject.app_username) setUsername(currentProject.app_username)
+      if (currentProject.app_password) setPassword(currentProject.app_password)
     }
   }, [currentProject])
 

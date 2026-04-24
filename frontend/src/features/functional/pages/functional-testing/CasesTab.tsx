@@ -70,15 +70,6 @@ export default function CasesTab() {
     loadTestCases,
   } = useTestCaseFilters(projectId)
 
-  // Default the status lens to "ready" so this tab shows the promoted pool.
-  const didInitStatusRef = useRef(false)
-  useEffect(() => {
-    if (!didInitStatusRef.current) {
-      didInitStatusRef.current = true
-      if (statusFilter === 'all') setStatusFilter('ready')
-    }
-  }, [statusFilter, setStatusFilter])
-
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [loadingSteps, setLoadingSteps] = useState<Set<number>>(new Set())
   const [stepsCache, setStepsCache] = useState<Record<number, TestStep[]>>({})
@@ -402,10 +393,10 @@ export default function CasesTab() {
             className="px-3 py-2 border rounded-lg text-sm"
             title="Status lens"
           >
+            <option value="all">All statuses</option>
             <option value="ready">Ready (for execution)</option>
             <option value="draft">Draft (needs promotion)</option>
             <option value="deprecated">Deprecated</option>
-            <option value="all">All statuses</option>
           </select>
           <select
             value={priorityFilter}
