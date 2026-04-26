@@ -1,9 +1,10 @@
 """Sync user stories from external PM tools."""
+import logging
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete as sa_delete, func
 from sqlalchemy.orm.attributes import flag_modified
 
 from common.db.database import get_db
@@ -19,9 +20,15 @@ from common.db.models.integration import ProjectIntegration, IntegrationType, Sy
 from common.api.deps import get_current_active_user
 from common.integrations import get_integration
 from common.integrations.base import ProjectManagementIntegration
+from features.functional.db.models.test_case import TestCase
+from features.functional.db.models.test_step import TestStep
+from features.functional.db.models.test_result import TestResult
+from features.functional.db.models.test_run import TestRun
 from common.integrations.exceptions import IntegrationError
 from common.utils.security import decrypt_config, encrypt_config
 from api.v1.functional.user_story_schemas import SyncRequest, SyncResponse
+
+logger = logging.getLogger("qastra.integration.sync")
 
 router = APIRouter()
 
@@ -116,6 +123,47 @@ async def sync_user_stories(
 
         external_stories = await integration.fetch_user_stories(**fetch_kwargs)
 
+        logger.info(
+            "Jira returned %d stories before post-filter (sprint_ids=%s)",
+            len(external_stories),
+            sprint_ids,
+        )
+        for s in external_stories:
+            logger.info(
+                "  [pre-filter] %s  sprint_id=%s  sprint_name=%s",
+                s.external_key, s.sprint_id, s.sprint_name,
+            )
+
+        # Jira's JQL `sprint in (...)` matches by sprint *history*, so issues
+        # that were once in a sprint but later removed can slip through.
+        # Additionally, when "All sprints" is selected no JQL sprint clause is
+        # added, which returns every issue in the project — including ones with
+        # no current sprint.  Always drop stories without a current sprint, and
+        # when specific sprints were requested keep only those.
+        if int_type == IntegrationType.jira:
+            if sprint_ids:
+                requested = {str(sid) for sid in sprint_ids}
+                external_stories = [
+                    s for s in external_stories
+                    if s.sprint_id and str(s.sprint_id) in requested
+                ]
+            else:
+                # "All sprints" mode — still exclude stories with no sprint
+                external_stories = [
+                    s for s in external_stories
+                    if s.sprint_id
+                ]
+
+        logger.info(
+            "After post-filter: %d stories remain",
+            len(external_stories),
+        )
+        for s in external_stories:
+            logger.info(
+                "  [post-filter] %s  sprint_id=%s  sprint_name=%s",
+                s.external_key, s.sprint_id, s.sprint_name,
+            )
+
         source_map = {
             "jira": UserStorySource.jira,
             "redmine": UserStorySource.redmine,
@@ -182,6 +230,79 @@ async def sync_user_stories(
                     )
 
                 if existing:
+                    # Only delete QA artefacts when the story actually
+                    # changed in the external system (different updated_at).
+                    # Stories from previously-selected sprints that haven't
+                    # changed keep their test cases, steps, results & runs.
+                    story_changed = (
+                        existing.external_updated_at is None
+                        or ext_story.updated_at is None
+                        or existing.external_updated_at != ext_story.updated_at
+                    )
+
+                    if story_changed:
+                        linked_tc_ids_result = await db.execute(
+                            select(TestCase.id).where(
+                                TestCase.user_story_id == existing.id
+                            )
+                        )
+                        linked_tc_ids = [
+                            row[0] for row in linked_tc_ids_result.fetchall()
+                        ]
+                        if linked_tc_ids:
+                            # Collect test-run IDs that contain results for these cases
+                            affected_run_ids_result = await db.execute(
+                                select(TestResult.test_run_id.distinct()).where(
+                                    TestResult.test_case_id.in_(linked_tc_ids)
+                                )
+                            )
+                            affected_run_ids = [
+                                row[0] for row in affected_run_ids_result.fetchall()
+                            ]
+
+                            # Remove test results that reference these test cases
+                            await db.execute(
+                                sa_delete(TestResult).where(
+                                    TestResult.test_case_id.in_(linked_tc_ids)
+                                )
+                            )
+
+                            # Delete test runs that are now empty
+                            if affected_run_ids:
+                                non_empty_run_ids_result = await db.execute(
+                                    select(TestResult.test_run_id.distinct()).where(
+                                        TestResult.test_run_id.in_(affected_run_ids)
+                                    )
+                                )
+                                non_empty_run_ids = {
+                                    row[0] for row in non_empty_run_ids_result.fetchall()
+                                }
+                                empty_run_ids = [
+                                    rid for rid in affected_run_ids
+                                    if rid not in non_empty_run_ids
+                                ]
+                                if empty_run_ids:
+                                    await db.execute(
+                                        sa_delete(TestRun).where(
+                                            TestRun.id.in_(empty_run_ids)
+                                        )
+                                    )
+
+                            # Remove test steps (bulk SQL won't trigger ORM cascade)
+                            await db.execute(
+                                sa_delete(TestStep).where(
+                                    TestStep.test_case_id.in_(linked_tc_ids)
+                                )
+                            )
+
+                            # Remove test cases
+                            await db.execute(
+                                sa_delete(TestCase).where(
+                                    TestCase.id.in_(linked_tc_ids)
+                                )
+                            )
+
+                    # Always refresh metadata fields
                     existing.title = ext_story.title
                     existing.description = ext_story.description
                     existing.external_key = ext_story.external_key
@@ -229,6 +350,90 @@ async def sync_user_stories(
             except Exception as e:
                 errors.append(f"Failed to sync {ext_story.external_key}: {str(e)}")
 
+        # ── Remove stale stories no longer in the sync results ──
+        # Collect the external_ids that came back in this sync batch.
+        synced_external_ids = [s.external_id for s in external_stories if s.external_id]
+
+        # Find stories from this integration that are NOT in the current results.
+        stale_query = select(UserStory).where(
+            UserStory.project_id == project_id,
+            UserStory.integration_id == db_integration.id,
+            UserStory.source == source,
+        )
+        if synced_external_ids:
+            stale_query = stale_query.where(
+                UserStory.external_id.notin_(synced_external_ids)
+            )
+        stale_result = await db.execute(stale_query)
+        stale_stories = stale_result.scalars().all()
+
+        removed_count = 0
+        for stale_story in stale_stories:
+            # Delete QA artefacts for each stale story
+            stale_tc_ids_result = await db.execute(
+                select(TestCase.id).where(
+                    TestCase.user_story_id == stale_story.id
+                )
+            )
+            stale_tc_ids = [row[0] for row in stale_tc_ids_result.fetchall()]
+
+            if stale_tc_ids:
+                # Collect affected test-run IDs
+                affected_run_ids_result = await db.execute(
+                    select(TestResult.test_run_id.distinct()).where(
+                        TestResult.test_case_id.in_(stale_tc_ids)
+                    )
+                )
+                affected_run_ids = [
+                    row[0] for row in affected_run_ids_result.fetchall()
+                ]
+
+                # Remove test results
+                await db.execute(
+                    sa_delete(TestResult).where(
+                        TestResult.test_case_id.in_(stale_tc_ids)
+                    )
+                )
+
+                # Delete test runs that are now empty
+                if affected_run_ids:
+                    non_empty_result = await db.execute(
+                        select(TestResult.test_run_id.distinct()).where(
+                            TestResult.test_run_id.in_(affected_run_ids)
+                        )
+                    )
+                    non_empty_ids = {
+                        row[0] for row in non_empty_result.fetchall()
+                    }
+                    empty_run_ids = [
+                        rid for rid in affected_run_ids
+                        if rid not in non_empty_ids
+                    ]
+                    if empty_run_ids:
+                        await db.execute(
+                            sa_delete(TestRun).where(
+                                TestRun.id.in_(empty_run_ids)
+                            )
+                        )
+
+                # Remove test steps
+                await db.execute(
+                    sa_delete(TestStep).where(
+                        TestStep.test_case_id.in_(stale_tc_ids)
+                    )
+                )
+
+                # Remove test cases
+                await db.execute(
+                    sa_delete(TestCase).where(
+                        TestCase.id.in_(stale_tc_ids)
+                    )
+                )
+
+            # Delete the stale user story itself
+            await db.delete(stale_story)
+            removed_count += 1
+
         db_integration.sync_status = SyncStatus.success
         db_integration.last_sync_at = datetime.utcnow()
         db_integration.last_sync_error = None
@@ -262,7 +467,10 @@ async def sync_user_stories(
 
         return SyncResponse(
             status="success",
-            message=f"Synced {synced_count} user stories from {data.integration_type}",
+            message=(
+                f"Synced {synced_count} user stories from {data.integration_type}"
+                + (f", removed {removed_count} stale stories" if removed_count else "")
+            ),
             items_synced=synced_count,
             errors=errors,
         )

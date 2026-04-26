@@ -1,5 +1,6 @@
 import React from 'react'
 import { Card } from '@common/components/ui/Card'
+import { Input } from '@common/components/ui/Input'
 import { useProjectStore } from '@common/store/projectStore'
 import { Cog6ToothIcon } from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
@@ -88,16 +89,17 @@ export const CredentialsOverride: React.FC<CredentialsOverrideProps> = ({
               onChange={e => setOverrideUser(e.target.value)} 
               className="w-full p-2 border rounded-lg text-sm focus:ring-1 focus:ring-primary-500 outline-none" 
               placeholder={currentProject?.app_username || 'user@example.com'} 
+              autoComplete="off"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Password (override)</label>
-            <input 
+            <Input 
               type="password" 
+              label="Password (override)"
               value={overridePass} 
               onChange={e => setOverridePass(e.target.value)} 
-              className="w-full p-2 border rounded-lg text-sm focus:ring-1 focus:ring-primary-500 outline-none" 
               placeholder={currentProject?.has_credentials ? '••••••••  (saved in settings)' : 'Enter password'} 
+              autoComplete="new-password"
             />
           </div>
           <p className="col-span-2 text-[10px] text-gray-500">

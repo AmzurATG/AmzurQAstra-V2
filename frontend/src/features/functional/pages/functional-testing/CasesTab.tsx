@@ -48,7 +48,7 @@ function loadTestCaseSelection(projectId: string | undefined): Set<number> {
 export default function CasesTab() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
-  const { revalidateProject } = useProjectStore()
+  const { currentProject, revalidateProject } = useProjectStore()
   const pid = Number(projectId)
 
   const activeRun = useRequiredActiveTestRun()
@@ -84,6 +84,14 @@ export default function CasesTab() {
   const [showCreds, setShowCreds] = useState(false)
   const [overrideUser, setOverrideUser] = useState('')
   const [overridePass, setOverridePass] = useState('')
+
+  // Pre-populate credentials from project settings
+  useEffect(() => {
+    if (currentProject?.has_credentials) {
+      setOverrideUser((prev) => prev || currentProject.app_username || '')
+      setOverridePass((prev) => prev || currentProject.app_password || '')
+    }
+  }, [currentProject])
 
   const listViewKey = `${page}|${searchQuery}|${priorityFilter}|${categoryFilter}|${statusFilter}`
   const prevListViewKeyRef = useRef<string | null>(null)

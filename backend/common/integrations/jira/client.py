@@ -11,6 +11,7 @@ from functools import partial
 from urllib.parse import urlparse
 import httpx
 from base64 import b64encode
+import logging
 
 from jira import JIRA
 from jira.exceptions import JIRAError
@@ -305,6 +306,9 @@ class JiraIntegration(ProjectManagementIntegration):
                 jql += f' AND updated >= "{updated_since.strftime("%Y-%m-%d %H:%M")}"'
             
             jql += " ORDER BY updated DESC"
+
+            logger = logging.getLogger("qastra.integration.jira")
+            logger.info("Jira sync JQL: %s", jql)
             
             # Use the new /search/jql endpoint (required since Jira deprecated /search)
             # Include sprint field (customfield_10020 is common, also try customfield_10007)
@@ -367,6 +371,7 @@ class JiraIntegration(ProjectManagementIntegration):
                         break
             
             return [self._map_issue_dict_to_user_story(issue) for issue in all_issues]
+
             
         except (IntegrationAuthError, IntegrationSyncError):
             raise
