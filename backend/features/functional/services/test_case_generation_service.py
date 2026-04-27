@@ -215,26 +215,40 @@ class TestCaseGenerationService:
 
         if existing_n > 0 and force_regenerate:
             await self._delete_generated_test_cases_for_user_story(user_story_id)
-        
+
+        # Snapshot scalar attributes to plain Python values so we never
+        # trigger lazy-load / implicit refresh on the ORM object after a
+        # flush, commit, or rollback (which would raise MissingGreenlet in
+        # the async session).
+        us_project_id = user_story.project_id
+        us_id = user_story.id
+        us_title = user_story.title
+        us_external_key = user_story.external_key
+        us_description = user_story.description
+        us_acceptance_criteria = user_story.acceptance_criteria
+        us_item_type = user_story.item_type.value
+        us_priority = user_story.priority.value if user_story.priority else "medium"
+        us_labels = list(user_story.labels) if user_story.labels else []
+
         # Build content for LLM
         content_parts = [
-            f"User Story: {user_story.title}",
+            f"User Story: {us_title}",
         ]
         
-        if user_story.external_key:
-            content_parts.append(f"ID: {user_story.external_key}")
+        if us_external_key:
+            content_parts.append(f"ID: {us_external_key}")
         
-        if user_story.description:
-            content_parts.append(f"\nDescription:\n{user_story.description}")
+        if us_description:
+            content_parts.append(f"\nDescription:\n{us_description}")
         
-        if user_story.acceptance_criteria:
-            content_parts.append(f"\nAcceptance Criteria:\n{user_story.acceptance_criteria}")
+        if us_acceptance_criteria:
+            content_parts.append(f"\nAcceptance Criteria:\n{us_acceptance_criteria}")
         
-        content_parts.append(f"\nItem Type: {user_story.item_type.value}")
-        content_parts.append(f"Priority: {user_story.priority.value if user_story.priority else 'medium'}")
+        content_parts.append(f"\nItem Type: {us_item_type}")
+        content_parts.append(f"Priority: {us_priority}")
         
-        if user_story.labels:
-            content_parts.append(f"Labels: {', '.join(user_story.labels)}")
+        if us_labels:
+            content_parts.append(f"Labels: {', '.join(us_labels)}")
         
         content = "\n".join(content_parts)
         
@@ -252,7 +266,7 @@ class TestCaseGenerationService:
             
             tc_svc = TestCaseService(self.db)
             case_numbers = await tc_svc.allocate_case_numbers(
-                user_story.project_id, len(test_cases_data)
+                us_project_id, len(test_cases_data)
             )
             
             # Create test cases
@@ -270,10 +284,10 @@ class TestCaseGenerationService:
                     category_str = "regression"
                 
                 test_case = TestCase(
-                    project_id=user_story.project_id,
+                    project_id=us_project_id,
                     case_number=case_number,
-                    user_story_id=user_story.id,
-                    title=tc_data.get("title", f"Test for {user_story.title}"),
+                    user_story_id=us_id,
+                    title=tc_data.get("title", f"Test for {us_title}"),
                     description=tc_data.get("description", ""),
                     preconditions=tc_data.get("preconditions", ""),
                     priority=TestCasePriority(priority_str),
@@ -317,7 +331,7 @@ class TestCaseGenerationService:
                 "success": True,
                 "code": "partial_success" if step_warnings else None,
                 "user_story_id": user_story_id,
-                "user_story_key": user_story.external_key or f"US-{user_story.id}",
+                "user_story_key": us_external_key or f"US-{us_id}",
                 "test_cases_created": len(created_case_payloads),
                 "warnings": step_warnings,
                 "test_cases": created_case_payloads,

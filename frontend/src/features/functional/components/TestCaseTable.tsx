@@ -252,8 +252,8 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
                     variant="ghost"
                     size="sm"
                     onClick={() => onRunSingle(tc.id)}
-                    disabled={isRunning || isCreating}
-                    title="Run this test case"
+                    disabled={isRunning || isCreating || tc.status !== 'ready'}
+                    title={tc.status !== 'ready' ? 'Promote to ready before running' : 'Run this test case'}
                   >
                     <PlayIcon className="w-4 h-4 text-green-600" />
                   </Button>

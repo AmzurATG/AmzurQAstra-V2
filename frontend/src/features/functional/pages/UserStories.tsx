@@ -522,18 +522,6 @@ export default function UserStories() {
             <PlusIcon className="mr-2 h-4 w-4" />
             Add Manual Story
           </Button>
-          {selectedIds.size > 0 && (
-            <Button
-              variant="outline"
-              type="button"
-              onClick={() => void handleBulkGenerateTests()}
-              disabled={generatingStoryId !== null || isQuickSyncing}
-              title="Generate AI test cases for all selected stories (across pages)."
-            >
-              <SparklesIcon className="mr-2 h-4 w-4" />
-              Generate tests ({selectedIds.size})
-            </Button>
-          )}
         </div>
       </div>
 

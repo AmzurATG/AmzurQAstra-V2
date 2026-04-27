@@ -96,14 +96,20 @@ Category: {test_case.category.value}
                 if action_str not in valid_actions:
                     action_str = "custom"
                 
+                # Coerce optional string fields — LLM may return booleans/numbers
+                raw_target = step_data.get("target")
+                raw_value = step_data.get("value")
+                raw_desc = step_data.get("description")
+                raw_expected = step_data.get("expected_result")
+
                 step = TestStep(
                     test_case_id=test_case_id,
                     step_number=index,
                     action=TestStepAction(action_str),
-                    target=step_data.get("target"),
-                    value=step_data.get("value"),
-                    description=step_data.get("description"),
-                    expected_result=step_data.get("expected_result"),
+                    target=str(raw_target) if raw_target is not None else None,
+                    value=str(raw_value) if raw_value is not None else None,
+                    description=str(raw_desc) if raw_desc is not None else None,
+                    expected_result=str(raw_expected) if raw_expected is not None else None,
                 )
                 self.db.add(step)
                 created_steps.append(step)
@@ -116,7 +122,9 @@ Category: {test_case.category.value}
             }
         
         except Exception as e:
-            await self.db.rollback()
+            # Do NOT rollback here — this session is shared with the caller
+            # (e.g. test case generation loop). Rolling back would expire all
+            # ORM objects and cause MissingGreenlet errors in the outer scope.
             return {"success": False, "error": str(e)}
     
     async def regenerate_test_steps(self, test_case_id: int) -> Dict[str, Any]:

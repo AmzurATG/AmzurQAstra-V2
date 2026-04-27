@@ -184,9 +184,21 @@ export default function UserStoryDetail() {
 
       <Card className="min-w-0">
         <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 pb-4">
-          <span className="font-mono text-lg text-primary-600 break-all" title={storyDisplayKey}>
-            {storyDisplayKey}
-          </span>
+          {story.external_url ? (
+            <a
+              href={story.external_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-lg text-primary-600 break-all hover:underline"
+              title={`Open ${storyDisplayKey} in ${story.source ?? 'external tool'}`}
+            >
+              {storyDisplayKey}
+            </a>
+          ) : (
+            <span className="font-mono text-lg text-primary-600 break-all" title={storyDisplayKey}>
+              {storyDisplayKey}
+            </span>
+          )}
           <span title={sourceCfg.label}>{sourceCfg.icon}</span>
           <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${itemTypeCfg.color}`}>
             {itemTypeCfg.label}
@@ -240,16 +252,14 @@ export default function UserStoryDetail() {
         </div>
       </Card>
 
-      <Card className="min-w-0">
-        <CardTitle>Acceptance criteria</CardTitle>
-        <div className="mt-2 prose prose-sm max-w-none text-gray-700">
-          {story.acceptance_criteria?.trim() ? (
+      {story.acceptance_criteria?.trim() && (
+        <Card className="min-w-0">
+          <CardTitle>Acceptance criteria</CardTitle>
+          <div className="mt-2 prose prose-sm max-w-none text-gray-700">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{story.acceptance_criteria}</ReactMarkdown>
-          ) : (
-            <p>—</p>
-          )}
-        </div>
-      </Card>
+          </div>
+        </Card>
+      )}
 
       <StoryTestCaseList
         ref={testCaseListRef}

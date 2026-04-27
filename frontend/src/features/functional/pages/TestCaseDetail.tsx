@@ -13,6 +13,7 @@ import {
   PencilIcon,
   XMarkIcon,
   ShieldCheckIcon,
+  CheckCircleIcon,
 } from '@heroicons/react/24/outline'
 import { testCasesApi, testStepsApi } from '../api'
 import type { TestCase, TestStep, TestStepAction } from '../types'
@@ -41,6 +42,9 @@ export default function TestCaseDetail() {
 
   // Regenerate steps state
   const [isRegenerating, setIsRegenerating] = useState(false)
+
+  // Promote state
+  const [isPromoting, setIsPromoting] = useState(false)
 
   useEffect(() => {
     if (testCaseId) {
@@ -214,22 +218,19 @@ export default function TestCaseDetail() {
       </Link>
 
       <div className="flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <span className="inline-flex items-center justify-center min-w-[2.25rem] px-2 py-1 rounded-md bg-gray-100 text-sm font-bold text-gray-900 tabular-nums shrink-0">
-              #{testCase.case_number ?? testCase.id}
+        <div className="flex items-center gap-3">
+          <span className="inline-flex items-center justify-center min-w-[2.25rem] px-2 py-1 rounded-md bg-gray-100 text-sm font-bold text-gray-900 tabular-nums shrink-0">
+            #{testCase.case_number ?? testCase.id}
+          </span>
+          <h1 className="text-2xl font-bold text-gray-900">{testCase.title}</h1>
+          {testCase.is_generated && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded">
+              <SparklesIcon className="w-3 h-3" />
+              AI Generated
             </span>
-            <h1 className="text-2xl font-bold text-gray-900">{testCase.title}</h1>
-            {testCase.is_generated && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded">
-                <SparklesIcon className="w-3 h-3" />
-                AI Generated
-              </span>
-            )}
-          </div>
-          <p className="text-gray-600">{testCase.description || 'No description'}</p>
+          )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0">
           <Button 
             variant="outline" 
             onClick={handleRegenerateSteps}
@@ -242,20 +243,50 @@ export default function TestCaseDetail() {
             )}
             {isRegenerating ? 'Regenerating...' : 'Regenerate Steps'}
           </Button>
-          <Button>
+          {testCase.status === 'draft' && (
+            <Button
+              variant="outline"
+              onClick={async () => {
+                setIsPromoting(true)
+                try {
+                  await testCasesApi.update(testCase.id, { status: 'ready' as any })
+                  toast.success('Test case promoted to ready')
+                  await loadTestCase()
+                } catch {
+                  toast.error('Failed to promote test case')
+                } finally {
+                  setIsPromoting(false)
+                }
+              }}
+              disabled={isPromoting}
+              isLoading={isPromoting}
+              title="Promote this test case to ready"
+            >
+              <CheckCircleIcon className="w-4 h-4 mr-2" />
+              Mark as Ready
+            </Button>
+          )}
+          <Button
+            disabled={testCase.status !== 'ready'}
+            title={testCase.status !== 'ready' ? 'Promote to ready before running' : 'Run this test case'}
+          >
             <PlayIcon className="w-4 h-4 mr-2" />
             Run Test
           </Button>
         </div>
       </div>
 
+      {testCase.description && (
+        <p className="text-gray-600">{testCase.description}</p>
+      )}
+
       {/* Test Case Details */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
           <CardTitle>Details</CardTitle>
-          <dl className="mt-4 space-y-3">
+          <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
             <div>
-              <dt className="text-sm text-gray-500">Priority</dt>
+              <dt className="text-xs text-gray-500">Priority</dt>
               <dd>
                 <span className={`px-2 py-0.5 text-xs rounded font-medium ${priorityColors[testCase.priority] || 'bg-gray-100'}`}>
                   {testCase.priority}
@@ -263,11 +294,11 @@ export default function TestCaseDetail() {
               </dd>
             </div>
             <div>
-              <dt className="text-sm text-gray-500">Category</dt>
-              <dd className="font-medium capitalize">{testCase.category}</dd>
+              <dt className="text-xs text-gray-500">Category</dt>
+              <dd className="text-sm font-medium capitalize">{testCase.category}</dd>
             </div>
             <div>
-              <dt className="text-sm text-gray-500">Status</dt>
+              <dt className="text-xs text-gray-500">Status</dt>
               <dd>
                 <span className={`px-2 py-0.5 text-xs rounded font-medium ${statusColors[testCase.status] || 'bg-gray-100'}`}>
                   {testCase.status}
@@ -276,7 +307,7 @@ export default function TestCaseDetail() {
             </div>
             {testCase.user_story && (
               <div>
-                <dt className="text-sm text-gray-500">User Story</dt>
+                <dt className="text-xs text-gray-500">User Story</dt>
                 <dd>
                   <Link
                     to={`/projects/${projectId}/user-stories/${testCase.user_story.id}`}
@@ -292,11 +323,12 @@ export default function TestCaseDetail() {
             )}
             {testCase.jira_key && (
               <div>
-                <dt className="text-sm text-gray-500">Jira Key</dt>
+                <dt className="text-xs text-gray-500">Jira Key</dt>
                 <dd className="font-mono text-sm">{testCase.jira_key}</dd>
               </div>
             )}
-            <div className="pt-3 border-t border-gray-200">
+          </div>
+          <div className="mt-4 pt-3 border-t border-gray-200">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <ShieldCheckIcon className="w-4 h-4 text-gray-500" />
@@ -311,8 +343,7 @@ export default function TestCaseDetail() {
                 </Switch>
               </div>
               <p className="mt-1 text-xs text-gray-500">Include in build integrity check</p>
-            </div>
-          </dl>
+          </div>
         </Card>
 
         <Card className="md:col-span-2">
