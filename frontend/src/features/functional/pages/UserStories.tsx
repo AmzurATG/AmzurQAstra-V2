@@ -41,6 +41,7 @@ import {
 import toast from 'react-hot-toast'
 
 const userStorySelectionKey = (projectId: string) => `qastra:user-story-selection:${projectId}`
+const userStorySelectAllSnapshotKey = (projectId: string) => `qastra:user-story-select-all-snapshot:${projectId}`
 
 function loadUserStorySelection(projectId: string | undefined): Set<number> {
   if (!projectId || typeof window === 'undefined') return new Set()
@@ -54,6 +55,20 @@ function loadUserStorySelection(projectId: string | undefined): Set<number> {
     )
   } catch {
     return new Set()
+  }
+}
+
+function loadSelectAllSnapshot(projectId: string | undefined): number[] | null {
+  if (!projectId || typeof window === 'undefined') return null
+  try {
+    const raw = sessionStorage.getItem(userStorySelectAllSnapshotKey(projectId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return null
+    const ids = parsed.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+    return ids.length > 0 ? ids : null
+  } catch {
+    return null
   }
 }
 
@@ -91,7 +106,9 @@ export default function UserStories() {
     loadUserStorySelection(projectId)
   )
   /** When set, user used “select all eligible” across all pages — used for checkbox checked/indeterminate. */
-  const [selectAllEligibleSnapshot, setSelectAllEligibleSnapshot] = useState<number[] | null>(null)
+  const [selectAllEligibleSnapshot, setSelectAllEligibleSnapshot] = useState<number[] | null>(() =>
+    loadSelectAllSnapshot(projectId)
+  )
   const [isSelectingAllEligible, setIsSelectingAllEligible] = useState(false)
   const selectAllCheckboxRef = useRef<HTMLInputElement>(null)
 
@@ -110,6 +127,8 @@ export default function UserStories() {
   )
 
   const listViewKey = `${page}|${debouncedSearch}|${statusFilter}|${prefsVersion}`
+  /** Key that excludes page — used to decide when "select all eligible" (cross-page) should reset. */
+  const filterViewKey = `${debouncedSearch}|${statusFilter}|${prefsVersion}`
   const prevListViewKeyRef = useRef<string | null>(null)
   const prevPageStoryIdsRef = useRef<Set<number>>(new Set())
 
@@ -384,7 +403,8 @@ export default function UserStories() {
 
   useEffect(() => {
     setSelectedIds(loadUserStorySelection(projectId))
-    setSelectAllEligibleSnapshot(null)
+    setSelectAllEligibleSnapshot(loadSelectAllSnapshot(projectId))
+    prevFilterViewKeyRef.current = filterViewKey
   }, [projectId])
 
   useEffect(() => {
@@ -398,6 +418,22 @@ export default function UserStories() {
       // ignore quota / private mode
     }
   }, [projectId, selectedIds])
+
+  useEffect(() => {
+    if (!projectId) return
+    try {
+      if (selectAllEligibleSnapshot) {
+        sessionStorage.setItem(
+          userStorySelectAllSnapshotKey(projectId),
+          JSON.stringify(selectAllEligibleSnapshot)
+        )
+      } else {
+        sessionStorage.removeItem(userStorySelectAllSnapshotKey(projectId))
+      }
+    } catch {
+      // ignore quota / private mode
+    }
+  }, [projectId, selectAllEligibleSnapshot])
 
   useEffect(() => {
     if (isLoading) return
@@ -423,9 +459,12 @@ export default function UserStories() {
     })
   }, [stories, isLoading, listViewKey])
 
+  const prevFilterViewKeyRef = useRef<string>(filterViewKey)
   useEffect(() => {
+    if (prevFilterViewKeyRef.current === filterViewKey) return
+    prevFilterViewKeyRef.current = filterViewKey
     setSelectAllEligibleSnapshot(null)
-  }, [listViewKey])
+  }, [filterViewKey])
 
   useEffect(() => {
     setSelectedIds((prev) => {
