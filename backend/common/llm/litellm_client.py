@@ -196,6 +196,7 @@ class LiteLLMClient(BaseLLMClient):
         model: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> LLMResponse:
         """
         Send chat completion request via LiteLLM (synchronous).
@@ -210,6 +211,8 @@ class LiteLLMClient(BaseLLMClient):
         }
         if max_tokens:
             kwargs["max_tokens"] = max_tokens
+        if response_format:
+            kwargs["response_format"] = response_format
         if self.api_key:
             kwargs["api_key"] = self.api_key
         if self.api_base:

@@ -17,6 +17,7 @@ import type {
   DashboardOverview,
   GapAnalysisRun,
   AcceptGapSuggestionsResponse,
+  TestRecommendationRun,
 } from '../types'
 
 export interface PaginatedResponse<T> {
@@ -109,6 +110,58 @@ export const gapAnalysisApi = {
     apiClient.post<AcceptGapSuggestionsResponse>(
       `/functional/gap-analysis/runs/${runId}/accept-suggestions`,
       { indices },
+      { params: { project_id: projectId } }
+    ),
+
+  deleteRun: (runId: number, projectId: string) =>
+    apiClient.delete(`/functional/gap-analysis/runs/${runId}`, {
+      params: { project_id: projectId },
+    }),
+
+  emailReport: (runId: number, projectId: string, to: string) =>
+    apiClient.post<{ detail: string }>(`/functional/gap-analysis/runs/${runId}/email`, { to }, {
+      params: { project_id: projectId },
+    }),
+}
+
+export const testRecommendationsApi = {
+  createRun: (projectId: number, requirementId: number) =>
+    apiClient.post<TestRecommendationRun>(`/functional/test-recommendations/runs`, {
+      project_id: projectId,
+      requirement_id: requirementId,
+    }),
+
+  listRuns: (
+    projectId: string,
+    params?: { page?: number; page_size?: number }
+  ) =>
+    apiClient.get<PaginatedResponse<TestRecommendationRun>>(`/functional/test-recommendations/runs`, {
+      params: { project_id: projectId, ...params },
+    }),
+
+  getRun: (runId: number, projectId: string) =>
+    apiClient.get<TestRecommendationRun>(`/functional/test-recommendations/runs/${runId}`, {
+      params: { project_id: projectId },
+    }),
+
+  getPdf: (runId: number, projectId: string, download?: boolean) =>
+    apiClient.get<Blob>(`/functional/test-recommendations/runs/${runId}/pdf`, {
+      params: {
+        project_id: projectId,
+        ...(download ? { download: true } : {}),
+      },
+      responseType: 'blob',
+    }),
+
+  deleteRun: (runId: number, projectId: string) =>
+    apiClient.delete(`/functional/test-recommendations/runs/${runId}`, {
+      params: { project_id: projectId },
+    }),
+
+  emailReport: (runId: number, projectId: string, to: string) =>
+    apiClient.post<{ detail: string }>(
+      `/functional/test-recommendations/runs/${runId}/email`,
+      { to },
       { params: { project_id: projectId } }
     ),
 }

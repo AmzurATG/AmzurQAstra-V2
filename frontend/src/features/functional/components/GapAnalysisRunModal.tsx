@@ -5,6 +5,7 @@ import {
   ArrowDownTrayIcon,
   DocumentMagnifyingGlassIcon,
   ExclamationCircleIcon,
+  EnvelopeIcon,
 } from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
 import { Loader } from '@common/components/ui/Loader'
@@ -14,6 +15,7 @@ import {
   getAcceptedIndicesForRun,
   recordAcceptedSuggestion,
 } from '../utils/gapAnalysisAcceptedStorage'
+import EmailReportDialog from './EmailReportDialog'
 import toast from 'react-hot-toast'
 
 type Tab = 'summary' | 'pdf'
@@ -54,6 +56,7 @@ export default function GapAnalysisRunModal({
   const [acceptingIndex, setAcceptingIndex] = useState<number | null>(null)
   const [dismissed, setDismissed] = useState<Set<number>>(() => new Set())
   const [acceptedIndices, setAcceptedIndices] = useState<Set<number>>(() => new Set())
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false)
 
   useEffect(() => {
     if (isOpen) setTab(initialTab)
@@ -238,14 +241,27 @@ export default function GapAnalysisRunModal({
                       </p>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleClose}
-                    className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                    aria-label="Close"
-                  >
-                    <XMarkIcon className="h-5 w-5" />
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {run?.status === 'completed' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        type="button"
+                        onClick={() => setEmailDialogOpen(true)}
+                      >
+                        <EnvelopeIcon className="h-4 w-4 mr-1" />
+                        Email report
+                      </Button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleClose}
+                      className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                      aria-label="Close"
+                    >
+                      <XMarkIcon className="h-5 w-5" />
+                    </button>
+                  </div>
                 </div>
 
                 {run && (
@@ -420,7 +436,16 @@ export default function GapAnalysisRunModal({
 
                   {!loading && run && tab === 'pdf' && (
                     <div className="space-y-3">
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-2 flex-wrap">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          type="button"
+                          onClick={() => setEmailDialogOpen(true)}
+                        >
+                          <EnvelopeIcon className="w-4 h-4 mr-1.5" />
+                          Email report
+                        </Button>
                         <Button variant="outline" size="sm" onClick={handleDownloadPdf}>
                           <ArrowDownTrayIcon className="w-4 h-4 mr-1.5" />
                           Download
@@ -453,6 +478,14 @@ export default function GapAnalysisRunModal({
             </Transition.Child>
           </div>
         </div>
+        <EmailReportDialog
+          isOpen={emailDialogOpen}
+          onClose={() => setEmailDialogOpen(false)}
+          projectId={projectId}
+          runId={runId}
+          kind="gap"
+          reportLabel="gap analysis report"
+        />
       </Dialog>
     </Transition>
   )

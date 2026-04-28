@@ -81,6 +81,27 @@ async def _read_pdf_bytes(relative_path: str) -> Optional[bytes]:
         return None
 
 
+async def _unlink_stored_file(relative_path: Optional[str]) -> None:
+    if not relative_path:
+        return
+    base = Path(settings.STORAGE_LOCAL_PATH).resolve()
+    norm = relative_path.replace("\\", "/").lstrip("/")
+    full = (base / norm).resolve()
+    try:
+        if not str(full).startswith(str(base)):
+            return
+    except ValueError:
+        return
+
+    def _unlink() -> None:
+        try:
+            full.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    await asyncio.to_thread(_unlink)
+
+
 class GapAnalysisService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -332,6 +353,16 @@ class GapAnalysisService:
             await self.db.rollback()
 
         return pdf_bytes, filename
+
+    async def delete_run(self, run_id: int, project_id: int) -> bool:
+        run = await self.get_run(run_id, project_id)
+        if not run:
+            return False
+        path = run.pdf_path
+        await self.db.delete(run)
+        await self.db.commit()
+        await _unlink_stored_file(path)
+        return True
 
     async def accept_suggestions(
         self,
