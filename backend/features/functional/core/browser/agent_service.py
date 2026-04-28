@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from config import settings
 from common.utils.logger import logger
+from features.functional.core.browser.chrome_automation_args import default_browser_chrome_args
 from features.functional.utils.credentials_redaction import redact_known_credentials
 
 # ─── Task prompt ─────────────────────────────────────────────────────────────
@@ -316,7 +317,9 @@ class BrowserAgentService:
                 llm=self._llm(),
                 browser_profile=BrowserProfile(
                     headless=False,
+                    is_local=True,
                     disable_security=True,
+                    args=default_browser_chrome_args(),
                     enable_default_extensions=settings.BROWSER_USE_DEFAULT_EXTENSIONS,
                 ),
                 sensitive_data=sensitive_data,

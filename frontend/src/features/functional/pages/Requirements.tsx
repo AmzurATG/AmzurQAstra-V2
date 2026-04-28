@@ -11,10 +11,16 @@ import {
   ExclamationTriangleIcon,
   EyeIcon,
   ArrowDownTrayIcon,
+  LightBulbIcon,
 } from '@heroicons/react/24/outline'
-import { requirementsApi, gapAnalysisApi, userStoriesApi } from '../api'
-import { UploadDocumentModal, RequirementPreviewModal, GapAnalysisRunModal } from '../components'
-import type { Requirement, GapAnalysisRun } from '../types'
+import { requirementsApi, gapAnalysisApi, userStoriesApi, testRecommendationsApi } from '../api'
+import {
+  UploadDocumentModal,
+  RequirementPreviewModal,
+  GapAnalysisRunModal,
+  TestRecommendationRunModal,
+} from '../components'
+import type { Requirement, GapAnalysisRun, TestRecommendationRun } from '../types'
 import toast from 'react-hot-toast'
 
 function formatApiError(err: unknown): string {
@@ -40,10 +46,19 @@ export default function Requirements() {
   const [userStoryTotal, setUserStoryTotal] = useState<number | null>(null)
   const [gapRuns, setGapRuns] = useState<GapAnalysisRun[]>([])
   const [gapRunsLoading, setGapRunsLoading] = useState(false)
+  const [testRecRuns, setTestRecRuns] = useState<TestRecommendationRun[]>([])
+  const [testRecRunsLoading, setTestRecRunsLoading] = useState(false)
+  const [testRecRunningId, setTestRecRunningId] = useState<string | null>(null)
   const [gapModal, setGapModal] = useState<{
     runId: number
     tab: 'summary' | 'pdf'
   } | null>(null)
+  const [testRecModal, setTestRecModal] = useState<{
+    runId: number
+    tab: 'summary' | 'pdf'
+  } | null>(null)
+  const [deletingGapRunId, setDeletingGapRunId] = useState<number | null>(null)
+  const [deletingTestRecRunId, setDeletingTestRecRunId] = useState<number | null>(null)
 
   const fetchRequirements = async () => {
     if (!projectId) return
@@ -94,9 +109,26 @@ export default function Requirements() {
     }
   }, [projectId])
 
+  const fetchTestRecRuns = useCallback(async () => {
+    if (!projectId) return
+    setTestRecRunsLoading(true)
+    try {
+      const res = await testRecommendationsApi.listRuns(projectId, { page: 1, page_size: 50 })
+      setTestRecRuns(res.data.items || [])
+    } catch (err) {
+      console.error('Failed to fetch test recommendation runs:', err)
+    } finally {
+      setTestRecRunsLoading(false)
+    }
+  }, [projectId])
+
   useEffect(() => {
     fetchGapRuns()
   }, [fetchGapRuns])
+
+  useEffect(() => {
+    fetchTestRecRuns()
+  }, [fetchTestRecRuns])
 
   const handleGapAnalysis = async (requirement: Requirement) => {
     if (!projectId) return
@@ -118,6 +150,26 @@ export default function Requirements() {
     }
   }
 
+  const handleTestRecommendations = async (requirement: Requirement) => {
+    if (!projectId) return
+    setTestRecRunningId(requirement.id)
+    try {
+      const res = await testRecommendationsApi.createRun(Number(projectId), Number(requirement.id))
+      if (res.data.status === 'failed') {
+        toast.error(res.data.error_message || 'Test recommendations failed')
+      } else {
+        toast.success('Test recommendations completed')
+      }
+      await fetchTestRecRuns()
+      setTestRecModal({ runId: res.data.id, tab: 'summary' })
+    } catch (err: unknown) {
+      console.error('Test recommendations failed:', err)
+      toast.error(formatApiError(err) || 'Test recommendations failed')
+    } finally {
+      setTestRecRunningId(null)
+    }
+  }
+
   const handleDownloadGapPdf = async (run: GapAnalysisRun) => {
     if (!projectId) return
     try {
@@ -135,6 +187,72 @@ export default function Requirements() {
     } catch (e) {
       console.error(e)
       toast.error(formatApiError(e) || 'Download failed')
+    }
+  }
+
+  const handleDownloadTestRecPdf = async (run: TestRecommendationRun) => {
+    if (!projectId) return
+    try {
+      const response = await testRecommendationsApi.getPdf(run.id, projectId, true)
+      const url = URL.createObjectURL(response.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `test-recommendations-${run.id}.pdf`
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast.success('Download started')
+    } catch (e) {
+      console.error(e)
+      toast.error(formatApiError(e) || 'Download failed')
+    }
+  }
+
+  const handleDeleteGapRun = async (run: GapAnalysisRun) => {
+    if (!projectId) return
+    if (
+      !confirm(
+        `Delete gap analysis run #${run.id}? The stored PDF will be removed. This cannot be undone.`
+      )
+    ) {
+      return
+    }
+    setDeletingGapRunId(run.id)
+    try {
+      await gapAnalysisApi.deleteRun(run.id, projectId)
+      toast.success('Run deleted')
+      if (gapModal?.runId === run.id) setGapModal(null)
+      await fetchGapRuns()
+    } catch (err) {
+      console.error(err)
+      toast.error(formatApiError(err) || 'Delete failed')
+    } finally {
+      setDeletingGapRunId(null)
+    }
+  }
+
+  const handleDeleteTestRecRun = async (run: TestRecommendationRun) => {
+    if (!projectId) return
+    if (
+      !confirm(
+        `Delete test recommendation run #${run.id}? The stored PDF will be removed. This cannot be undone.`
+      )
+    ) {
+      return
+    }
+    setDeletingTestRecRunId(run.id)
+    try {
+      await testRecommendationsApi.deleteRun(run.id, projectId)
+      toast.success('Run deleted')
+      if (testRecModal?.runId === run.id) setTestRecModal(null)
+      await fetchTestRecRuns()
+    } catch (err) {
+      console.error(err)
+      toast.error(formatApiError(err) || 'Delete failed')
+    } finally {
+      setDeletingTestRecRunId(null)
     }
   }
 
@@ -184,7 +302,7 @@ export default function Requirements() {
     }
   }
 
-  const rowActionBusy = gapAnalyzingId !== null || deletingId !== null
+  const rowActionBusy = gapAnalyzingId !== null || deletingId !== null || testRecRunningId !== null
 
   const requirementHasParsedContent = (req: Requirement) =>
     !!(req.content && req.content.trim().length > 0)
@@ -324,6 +442,23 @@ export default function Requirements() {
                       <Button
                         variant="ghost"
                         size="sm"
+                        onClick={() => handleTestRecommendations(req)}
+                        isLoading={testRecRunningId === req.id}
+                        disabled={rowActionBusy || gapAnalysisDisabledFor(req)}
+                        title={
+                          !requirementHasParsedContent(req)
+                            ? 'Upload and process a document first'
+                            : userStoryTotal === 0
+                              ? 'Import or create user stories first'
+                              : 'Run test recommendations (domain playbook)'
+                        }
+                      >
+                        <LightBulbIcon className="w-4 h-4 mr-1" />
+                        Recommendations
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => handleDelete(req)}
                         isLoading={deletingId === req.id}
                         disabled={rowActionBusy}
@@ -438,6 +573,136 @@ export default function Requirements() {
                           >
                             <ArrowDownTrayIcon className="w-4 h-4" />
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={deletingGapRunId === run.id}
+                            onClick={() => handleDeleteGapRun(run)}
+                            title="Delete run"
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <TrashIcon className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Test recommendation runs */}
+      {!isLoading && !error && projectId && (
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Test recommendation runs</h2>
+              <p className="text-sm text-gray-500">
+                Domain-based standard and recommended test focus areas from the BRD and user stories.
+              </p>
+            </div>
+          </div>
+          {testRecRunsLoading ? (
+            <div className="flex justify-center py-8">
+              <Loader />
+            </div>
+          ) : testRecRuns.length === 0 ? (
+            <p className="text-sm text-gray-500 text-center py-6">
+              No runs yet. Use <strong>Recommendations</strong> on a requirement row above.
+            </p>
+          ) : (
+            <div className="overflow-x-auto -mx-6 px-6">
+              <table className="w-full min-w-[640px]">
+                <thead className="bg-gray-50 border-y border-gray-200">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-12">
+                      S.No.
+                    </th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                      BRD / document
+                    </th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                      Run date
+                    </th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                      Status
+                    </th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {testRecRuns.map((run, idx) => (
+                    <tr key={run.id} className="hover:bg-gray-50/80">
+                      <td className="px-4 py-3 text-sm text-gray-600">{idx + 1}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className="font-medium text-gray-900">
+                          {run.requirement_title ||
+                            run.requirement_file_name ||
+                            `Requirement #${run.requirement_id}`}
+                        </span>
+                        {run.requirement_file_name && run.requirement_title && (
+                          <p className="text-xs text-gray-500 truncate max-w-xs mt-0.5">
+                            {run.requirement_file_name}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">
+                        {formatDateTime(run.created_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`px-2 py-0.5 text-xs rounded ${
+                            run.status === 'completed'
+                              ? 'bg-green-100 text-green-800'
+                              : run.status === 'failed'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-yellow-100 text-yellow-800'
+                          }`}
+                        >
+                          {run.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1 flex-wrap">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setTestRecModal({ runId: run.id, tab: 'summary' })}
+                          >
+                            Details
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={!run.pdf_path}
+                            onClick={() => setTestRecModal({ runId: run.id, tab: 'pdf' })}
+                            title={run.pdf_path ? 'Preview PDF' : 'PDF not available'}
+                          >
+                            Preview PDF
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={!run.pdf_path}
+                            onClick={() => handleDownloadTestRecPdf(run)}
+                          >
+                            <ArrowDownTrayIcon className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={deletingTestRecRunId === run.id}
+                            onClick={() => handleDeleteTestRecRun(run)}
+                            title="Delete run"
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <TrashIcon className="w-4 h-4" />
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -457,6 +722,7 @@ export default function Requirements() {
         onUploadComplete={() => {
           fetchRequirements()
           fetchGapRuns()
+          fetchTestRecRuns()
         }}
       />
 
@@ -482,6 +748,14 @@ export default function Requirements() {
             /* ignore */
           }
         }}
+      />
+
+      <TestRecommendationRunModal
+        isOpen={testRecModal !== null}
+        onClose={() => setTestRecModal(null)}
+        projectId={projectId || ''}
+        runId={testRecModal?.runId ?? null}
+        initialTab={testRecModal?.tab ?? 'summary'}
       />
     </div>
   )

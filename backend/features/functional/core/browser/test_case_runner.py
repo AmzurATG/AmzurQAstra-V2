@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from config import settings
 from common.utils.logger import logger
+from features.functional.core.browser.chrome_automation_args import default_browser_chrome_args
 from features.functional.core.browser.screenshot_file_store import save_screenshot_b64
 from features.functional.core.browser.runner_action_text import action_description_from_output
 from features.functional.core.llm_prompts.test_execution import (
@@ -615,14 +616,7 @@ class TestCaseRunner:
                         headless=headless,
                         is_local=True,
                         disable_security=True,
-                        args=[
-                            "--disable-save-password-bubble",
-                            "--disable-autofill",
-                            "--disable-notifications",
-                            "--disable-infobars",
-                            "--no-default-browser-check",
-                            "--no-first-run",
-                        ],
+                        args=default_browser_chrome_args(),
                         enable_default_extensions=settings.BROWSER_USE_DEFAULT_EXTENSIONS,
                     ) if not browser else None,
                     sensitive_data=sensitive_data,

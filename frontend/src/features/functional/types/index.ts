@@ -64,6 +64,65 @@ export interface AcceptGapSuggestionsResponse {
   errors: string[]
 }
 
+// Test recommendations (domain playbooks)
+export type TestRecommendationRunStatus = 'pending' | 'completed' | 'failed'
+
+export interface TestRecommendationStrategyItem {
+  category?: string
+  name?: string
+  priority?: string
+  reason?: string
+}
+
+export interface TestRecommendationResultJson {
+  domain_id?: string
+  domain_label?: string
+  confidence?: number
+  source?: string
+  report_summary?: string
+  input_snapshot?: {
+    run_kind?: string
+    requirement_id?: number
+    project_id?: number
+    user_stories_included?: Array<{ id?: number; external_key?: string | null; title?: string }>
+    user_stories_total_in_project?: number
+    max_stories_cap?: number
+    ordering?: string
+  }
+  local_classification?: {
+    domain_id?: string
+    confidence?: number
+    label?: string
+    per_domain_scores?: Record<string, number>
+    evidence?: Record<string, string[]>
+    score_breakdown?: Record<string, Record<string, number>>
+  }
+  llm_fallback?: {
+    domain_id?: string
+    confidence?: number
+    rationale?: string
+    error?: string
+  } | null
+  standard_tests?: TestRecommendationStrategyItem[]
+  recommended_tests?: TestRecommendationStrategyItem[]
+  warnings?: string[]
+}
+
+export interface TestRecommendationRun {
+  id: number
+  project_id: number
+  requirement_id: number
+  created_by?: number | null
+  status: TestRecommendationRunStatus
+  result_json?: TestRecommendationResultJson | null
+  error_message?: string | null
+  pdf_path?: string | null
+  requirement_title?: string | null
+  requirement_file_name?: string | null
+  created_at: string
+  updated_at: string
+}
+
 // Test Case Types
 export type TestCasePriority = 'critical' | 'high' | 'medium' | 'low'
 export type TestCaseCategory = 'smoke' | 'regression' | 'e2e' | 'integration' | 'sanity'

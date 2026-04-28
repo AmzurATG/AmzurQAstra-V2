@@ -5,3 +5,4 @@ from features.functional.db.models.test_step import TestStep
 from features.functional.db.models.test_run import TestRun
 from features.functional.db.models.test_result import TestResult
 from features.functional.db.models.gap_analysis_run import GapAnalysisRun
+from features.functional.db.models.test_recommendation_run import TestRecommendationRun

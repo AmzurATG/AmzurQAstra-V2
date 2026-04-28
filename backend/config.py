@@ -123,6 +123,8 @@ class Settings(BaseSettings):
     BROWSER_USE_LLM_TEMPERATURE: float = 0.15
     GEMINI_API_KEY: Optional[str] = None  # only when BROWSER_USE_LLM_BACKEND=google
     BROWSER_USE_DEFAULT_EXTENSIONS: bool = True
+    # Comma-separated extra Chrome flags appended after defaults (see chrome_automation_args).
+    BROWSER_CHROME_EXTRA_ARGS: Optional[str] = None
     # Outside backend/ to prevent uvicorn --reload restarts when screenshots are written.
     SCREENSHOTS_DIR: str = str(_APP_ROOT / "screenshots")
 
@@ -131,6 +133,17 @@ class Settings(BaseSettings):
 
     # Integrations
     SLACK_WEBHOOK_URL: Optional[str] = None
+
+    # Outbound email (SMTP) — optional; required to email gap / test-recommendation PDFs
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_USE_TLS: bool = True
+    SMTP_USE_SSL: bool = False
+    SMTP_TIMEOUT_SECONDS: int = 30
+    EMAIL_FROM_ADDRESS: Optional[str] = None
+    EMAIL_FROM_NAME: Optional[str] = None
 
     # Storage
     STORAGE_TYPE: str = "local"
@@ -150,6 +163,11 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE_MB: int = 50
     # Requirement document uploads (5 MiB); enforced in RequirementService
     REQUIREMENT_UPLOAD_MAX_BYTES: int = 5 * 1024 * 1024
+
+    # Test recommendations: domain playbook (keywords + optional LLM domain fallback)
+    TEST_RECOMMENDATION_LLM_FALLBACK_ENABLED: bool = True
+    TEST_RECOMMENDATION_DOMAIN_CONFIDENCE_THRESHOLD: float = 0.6
+    TEST_RECOMMENDATION_LLM_MAX_CORPUS_CHARS: int = 48_000
 
     # Default Admin Account
     ADMIN_EMAIL: str = "admin@qastra.dev"

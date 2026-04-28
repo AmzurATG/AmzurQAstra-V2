@@ -1,16 +1,16 @@
 """
-Gap analysis API: BRD vs user stories.
+Test recommendations API: domain-based playbooks from BRD + user stories.
 """
 import asyncio
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import Response
+from starlette.responses import Response
 
 from common.api.deps import get_current_active_user
 from common.api.pagination import PaginatedResponse, PaginationParams
-from common.db.models.user import User
 from common.db.database import get_db
+from common.db.models.user import User
 from common.schemas.report_email import SendReportEmailRequest
 from common.services.smtp_mailer import (
     SmtpSendError,
@@ -20,21 +20,19 @@ from common.services.smtp_mailer import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from features.functional.schemas.gap_analysis import (
-    AcceptGapSuggestionsRequest,
-    GapAnalysisRunCreate,
-    GapAnalysisRunResponse,
+from features.functional.db.models.test_recommendation_run import TestRecommendationRun
+from features.functional.schemas.test_recommendation import (
+    TestRecommendationRunCreate,
+    TestRecommendationRunResponse,
 )
-from features.functional.db.models.gap_analysis_run import GapAnalysisRun
-from features.functional.services.gap_analysis_service import GapAnalysisService
-
+from features.functional.services.test_recommendation_service import TestRecommendationService
 
 router = APIRouter()
 
 
-def _run_to_response(run: GapAnalysisRun) -> GapAnalysisRunResponse:
+def _run_to_response(run: TestRecommendationRun) -> TestRecommendationRunResponse:
     req = run.requirement
-    return GapAnalysisRunResponse(
+    return TestRecommendationRunResponse(
         id=run.id,
         project_id=run.project_id,
         requirement_id=run.requirement_id,
@@ -50,30 +48,30 @@ def _run_to_response(run: GapAnalysisRun) -> GapAnalysisRunResponse:
     )
 
 
-@router.post("/runs", response_model=GapAnalysisRunResponse, status_code=status.HTTP_201_CREATED)
-async def create_gap_analysis_run(
-    data: GapAnalysisRunCreate,
+@router.post("/runs", response_model=TestRecommendationRunResponse, status_code=status.HTTP_201_CREATED)
+async def create_test_recommendation_run(
+    data: TestRecommendationRunCreate,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    svc = GapAnalysisService(db)
-    run = await svc.run_analysis(data.project_id, data.requirement_id, current_user.id)
+    svc = TestRecommendationService(db)
+    run = await svc.run_recommendation(data.project_id, data.requirement_id, current_user.id)
     return _run_to_response(run)
 
 
-@router.get("/runs", response_model=PaginatedResponse[GapAnalysisRunResponse])
-async def list_gap_analysis_runs(
+@router.get("/runs", response_model=PaginatedResponse[TestRecommendationRunResponse])
+async def list_test_recommendation_runs(
     project_id: int = Query(..., description="Project id"),
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    svc = GapAnalysisService(db)
+    svc = TestRecommendationService(db)
     items, total = await svc.list_runs(
         project_id, pagination.offset, pagination.page_size
     )
     responses = [
-        GapAnalysisRunResponse(
+        TestRecommendationRunResponse(
             id=i["id"],
             project_id=i["project_id"],
             requirement_id=i["requirement_id"],
@@ -97,14 +95,14 @@ async def list_gap_analysis_runs(
     )
 
 
-@router.get("/runs/{run_id}", response_model=GapAnalysisRunResponse)
-async def get_gap_analysis_run(
+@router.get("/runs/{run_id}", response_model=TestRecommendationRunResponse)
+async def get_test_recommendation_run(
     run_id: int,
     project_id: int = Query(..., description="Project id (scope)"),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    svc = GapAnalysisService(db)
+    svc = TestRecommendationService(db)
     run = await svc.get_run(run_id, project_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
@@ -112,14 +110,14 @@ async def get_gap_analysis_run(
 
 
 @router.get("/runs/{run_id}/pdf")
-async def download_gap_analysis_pdf(
+async def download_test_recommendation_pdf(
     run_id: int,
     project_id: int = Query(..., description="Project id"),
     download: bool = Query(False, description="If true, use attachment disposition"),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    svc = GapAnalysisService(db)
+    svc = TestRecommendationService(db)
     data, filename = await svc.get_pdf_bytes(run_id, project_id)
     if not data:
         raise HTTPException(
@@ -132,7 +130,7 @@ async def download_gap_analysis_pdf(
 
 
 @router.post("/runs/{run_id}/email", status_code=status.HTTP_200_OK)
-async def email_gap_analysis_pdf(
+async def email_test_recommendation_pdf(
     run_id: int,
     body: SendReportEmailRequest,
     project_id: int = Query(..., description="Project id"),
@@ -147,7 +145,7 @@ async def email_gap_analysis_pdf(
                 "Set SMTP_HOST and EMAIL_FROM_ADDRESS (see .env.example)."
             ),
         )
-    svc = GapAnalysisService(db)
+    svc = TestRecommendationService(db)
     run = await svc.get_run(run_id, project_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
@@ -159,7 +157,7 @@ async def email_gap_analysis_pdf(
         )
     req = run.requirement
     subject, text_body, html_body = build_report_email_envelope(
-        report_title_phrase="Requirements gap analysis",
+        report_title_phrase="Testing recommendations",
         requirement_title=req.title if req else None,
         requirement_file_name=req.file_name if req else None,
         requirement_id=run.requirement_id,
@@ -174,7 +172,7 @@ async def email_gap_analysis_pdf(
             text_body=text_body,
             html_body=html_body,
             pdf_bytes=data,
-            attachment_filename=filename or "gap-analysis-report.pdf",
+            attachment_filename=filename or "test-recommendations-report.pdf",
         )
     except SmtpSendError as e:
         raise HTTPException(
@@ -185,27 +183,14 @@ async def email_gap_analysis_pdf(
 
 
 @router.delete("/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_gap_analysis_run(
+async def delete_test_recommendation_run(
     run_id: int,
     project_id: int = Query(..., description="Project id"),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    svc = GapAnalysisService(db)
+    svc = TestRecommendationService(db)
     ok = await svc.delete_run(run_id, project_id)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.post("/runs/{run_id}/accept-suggestions")
-async def accept_gap_suggestions(
-    run_id: int,
-    body: AcceptGapSuggestionsRequest,
-    project_id: int = Query(..., description="Project id"),
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
-):
-    svc = GapAnalysisService(db)
-    created, errors = await svc.accept_suggestions(run_id, project_id, body.indices)
-    return {"created": created, "errors": errors}

@@ -27,6 +27,8 @@ import features.functional.db.models.test_case  # noqa: E402,F401
 import features.functional.db.models.test_step  # noqa: E402,F401
 import features.functional.db.models.test_run  # noqa: E402,F401
 import features.functional.db.models.test_result  # noqa: E402,F401
+import features.functional.db.models.gap_analysis_run  # noqa: E402,F401
+import features.functional.db.models.test_recommendation_run  # noqa: E402,F401
 
 # Alembic Config object (provides access to alembic.ini values)
 config = context.config

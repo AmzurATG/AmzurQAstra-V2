@@ -1,0 +1,148 @@
+# Domain playbooks for test recommendations (Phase 1). Edit without code changes.
+# Every domain_id here except "general" should appear in the LLM classifier allow-list via this file.
+
+domains:
+  - id: general
+    label: General software
+    keywords: []
+    standard_tests:
+      - category: Functional
+        name: Core user workflows
+        priority: high
+        reason: Baseline validation for primary features described in requirements.
+      - category: Regression
+        name: Smoke and regression suite
+        priority: high
+        reason: Catch regressions before release.
+      - category: Integration
+        name: API and service integration
+        priority: medium
+        reason: Ensure components work together as specified.
+    recommended_tests:
+      - category: Usability
+        name: Exploratory UX review
+        priority: medium
+        reason: Surface inconsistencies not covered by scripted cases.
+      - category: Compatibility
+        name: Cross-browser / client matrix
+        priority: low
+        reason: Validate key clients if a web or multi-client app.
+
+  - id: healthcare
+    label: Healthcare
+    keywords:
+      - hipaa
+      - phi
+      - patient
+      - clinical
+      - ehr
+      - emr
+      - hospital
+      - healthcare
+      - hl7
+      - fhir
+      - medical record
+      - treatment plan
+    keyword_weights:
+      hipaa: 3
+      phi: 3
+      fhir: 2
+    standard_tests:
+      - category: Compliance
+        name: PHI handling and access control
+        priority: high
+        reason: Patient data must be protected per healthcare regulations.
+      - category: Security
+        name: Audit logging and tamper evidence
+        priority: high
+        reason: Clinical systems require traceable access to sensitive data.
+      - category: Functional
+        name: Clinical workflow accuracy
+        priority: high
+        reason: Errors in orders, meds, or results can harm patients.
+    recommended_tests:
+      - category: Interoperability
+        name: HL7 / FHIR message validation
+        priority: medium
+        reason: Validate exchange with external clinical systems.
+      - category: Performance
+        name: Load under peak clinical hours
+        priority: medium
+        reason: Systems must stay responsive during high census.
+
+  - id: retail
+    label: Retail / e-commerce
+    keywords:
+      - retail
+      - ecommerce
+      - e-commerce
+      - sku
+      - inventory
+      - pos
+      - checkout
+      - cart
+      - fulfillment
+      - warehouse
+      - omnichannel
+    standard_tests:
+      - category: Functional
+        name: Checkout and payment flows
+        priority: high
+        reason: Revenue-critical paths must be correct.
+      - category: Functional
+        name: Pricing, tax, and promotions
+        priority: high
+        reason: Incorrect totals erode trust and compliance.
+      - category: Performance
+        name: Peak traffic and flash sale load
+        priority: medium
+        reason: Retail traffic spikes are common.
+    recommended_tests:
+      - category: Integration
+        name: Payment gateway and PSP webhooks
+        priority: high
+        reason: Reconcile orders, refunds, and failures with providers.
+      - category: Data
+        name: Inventory consistency
+        priority: medium
+        reason: Oversell and stock drift are high-impact defects.
+
+  - id: finance
+    label: Finance / banking
+    keywords:
+      - bank
+      - banking
+      - payment
+      - ledger
+      - transaction
+      - kyc
+      - aml
+      - pci
+      - settlement
+      - fraud
+      - account balance
+    keyword_weights:
+      pci: 3
+      aml: 3
+    standard_tests:
+      - category: Security
+        name: AuthN, AuthZ, and session hardening
+        priority: high
+        reason: Financial accounts are high-value targets.
+      - category: Compliance
+        name: Regulatory reporting and retention
+        priority: high
+        reason: Finance products face strict audit requirements.
+      - category: Functional
+        name: Money movement accuracy
+        priority: high
+        reason: Ledger and balance errors are unacceptable.
+    recommended_tests:
+      - category: Performance
+        name: Settlement batch processing
+        priority: medium
+        reason: Large batches must complete within SLA windows.
+      - category: Resilience
+        name: Idempotency and duplicate payment handling
+        priority: high
+        reason: Network retries must not double-charge customers.
