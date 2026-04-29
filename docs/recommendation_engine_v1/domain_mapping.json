@@ -1,0 +1,245 @@
+{
+  "Healthcare": {
+    "standard_testing": [
+      "Functional Testing",
+      "API Testing",
+      "Security & Compliance Testing (HIPAA)",
+      "Accessibility (WCAG)",
+      "Database Validation"
+    ],
+    "recommended_testing": [
+      "Data Integrity & Audit Trail Testing",
+      "Interoperability Testing (FHIR, HL7 APIs)",
+      "Performance Under Load (EHR systems)",
+      "Privacy Impact Assessment",
+      "Clinical Workflow Simulation Testing"
+    ],
+    "avoid_testing": [
+      "UI A/B Testing",
+      "Localization Testing",
+      "Social Media Integration Testing"
+    ],
+    "keywords": [
+      "patient", "doctor", "nurse", "hospital", "clinic", "medical", "healthcare",
+      "ehr", "emr", "electronic health record", "electronic medical record",
+      "hipaa", "phi", "protected health information", "patient data",
+      "clinical", "diagnosis", "prescription", "medication", "treatment",
+      "appointment", "scheduling", "lab results", "radiology",
+      "fhir", "hl7", "dicom", "icd-10", "cpt codes",
+      "medical device", "vital signs", "patient portal",
+      "discharge summary", "medical history", "allergies",
+      "immunization", "care plan", "referral"
+    ],
+    "business_context": [
+      "managing patient records and medical history",
+      "scheduling appointments with healthcare providers",
+      "handling prescriptions and medication orders",
+      "ensuring HIPAA compliance and data privacy",
+      "integrating with lab and imaging systems",
+      "providing secure patient portal access",
+      "tracking treatment plans and care coordination"
+    ]
+  },
+  "Retail / eCommerce": {
+    "standard_testing": [
+      "Functional Testing",
+      "UI/UX Testing",
+      "Browser Compatibility",
+      "Payment Gateway Testing",
+      "Performance & Load Testing"
+    ],
+    "recommended_testing": [
+      "Personalization Algorithm Testing",
+      "Inventory & Order Flow Validation",
+      "Cart Abandonment Workflow Testing",
+      "Cross-Device Responsiveness Testing",
+      "Search & Filter Relevance Testing"
+    ],
+    "avoid_testing": [
+      "Healthcare Compliance (HIPAA/PHI)",
+      "Aviation Safety Protocols",
+      "Complex B2B Contract Testing"
+    ],
+    "keywords": [
+      "product", "shopping cart", "checkout", "payment", "order", "purchase",
+      "inventory", "stock", "sku", "catalog", "pricing",
+      "shipping", "delivery", "fulfillment", "warehouse",
+      "customer", "cart", "wishlist", "add to cart",
+      "discount", "coupon", "promo code", "sale",
+      "returns", "refunds", "exchange",
+      "product page", "search", "filter", "sort",
+      "recommendation", "related products", "reviews", "ratings",
+      "payment gateway", "stripe", "paypal", "credit card"
+    ],
+    "business_context": [
+      "selling products online with shopping cart",
+      "processing customer orders and payments",
+      "managing product inventory and stock levels",
+      "handling shipping and delivery logistics",
+      "providing product recommendations and reviews",
+      "supporting returns and refunds",
+      "optimizing conversion rates and sales"
+    ]
+  },
+  "CRM (Customer Relationship Management)": {
+    "standard_testing": [
+      "Functional Testing",
+      "API & Integration Testing",
+      "Security & Role-Based Access",
+      "Data Migration Testing"
+    ],
+    "recommended_testing": [
+      "Workflow Automation Testing",
+      "Email Template & Trigger Testing",
+      "Analytics & Dashboard Accuracy Testing",
+      "Third-Party Plugin Compatibility"
+    ],
+    "avoid_testing": [
+      "Payment Gateway Validation",
+      "Performance Stress Testing",
+      "Image Rendering / Layout Tests"
+    ],
+    "keywords": [
+      "customer", "contact", "lead", "opportunity", "deal",
+      "sales", "pipeline", "forecast", "quota",
+      "account", "prospect", "relationship", "engagement",
+      "email campaign", "marketing automation", "drip campaign",
+      "activity", "task", "meeting", "call log",
+      "dashboard", "report", "analytics", "metrics",
+      "follow-up", "reminder", "notification",
+      "territory", "sales rep", "team assignment",
+      "conversion", "win rate", "close rate"
+    ],
+    "business_context": [
+      "managing customer contacts and relationships",
+      "tracking leads through sales pipeline",
+      "automating marketing campaigns and follow-ups",
+      "generating sales reports and forecasts",
+      "coordinating team activities and tasks",
+      "analyzing customer engagement metrics",
+      "supporting sales team collaboration"
+    ]
+  },
+  "Logistics / Supply Chain": {
+    "standard_testing": [
+      "Functional Testing",
+      "API Testing (Route & Fleet Data)",
+      "Performance Testing (Real-Time Tracking)",
+      "Security (Data Privacy, GPS Encryption)"
+    ],
+    "recommended_testing": [
+      "Real-Time Event Simulation Testing",
+      "Integration with IoT Devices / Sensors",
+      "Scheduling & Dispatch Accuracy Testing",
+      "Geolocation & Map API Validation",
+      "Inventory Synchronization Testing"
+    ],
+    "avoid_testing": [
+      "A/B Testing for Marketing Campaigns",
+      "Social Media Integration",
+      "UI Theme / Color Scheme Validation"
+    ],
+    "keywords": [
+      "shipment", "tracking", "delivery", "logistics", "freight",
+      "warehouse", "inventory", "stock", "pallet", "bin",
+      "carrier", "transporter", "courier", "shipping",
+      "route", "gps", "location", "real-time tracking",
+      "order fulfillment", "pick", "pack", "ship",
+      "barcode", "qr code", "rfid", "scanning",
+      "customs", "import", "export", "clearance",
+      "fleet management", "vehicle tracking", "driver",
+      "temperature monitoring", "cold chain", "iot sensor"
+    ],
+    "business_context": [
+      "tracking shipments and deliveries in real-time",
+      "managing warehouse inventory and operations",
+      "optimizing delivery routes and schedules",
+      "coordinating with multiple carriers and vendors",
+      "monitoring temperature-sensitive cargo",
+      "handling customs and international shipping",
+      "managing fleet vehicles and drivers"
+    ]
+  },
+  "Aeronautical / Aviation Systems": {
+    "standard_testing": [
+      "Functional Testing",
+      "Performance & Stress Testing",
+      "Security & Safety Protocol Validation",
+      "API & Data Exchange Testing"
+    ],
+    "recommended_testing": [
+      "Simulation Testing for Flight Scenarios",
+      "Real-Time Telemetry Data Validation",
+      "Regulatory Compliance Testing (FAA, DO-178C)",
+      "Failover & Recovery Testing",
+      "Latency & Communication Delay Testing"
+    ],
+    "avoid_testing": [
+      "UI Visual Testing",
+      "Social Media & Marketing Integrations",
+      "Multi-language Localization"
+    ],
+    "keywords": [
+      "flight", "aircraft", "aviation", "airline", "airport",
+      "pilot", "crew", "cabin", "cockpit",
+      "navigation", "gps", "radar", "transponder",
+      "air traffic control", "atc", "flight plan",
+      "takeoff", "landing", "departure", "arrival",
+      "altitude", "speed", "heading", "waypoint",
+      "maintenance", "aircraft log", "inspection",
+      "faa", "easa", "icao", "regulatory compliance",
+      "flight safety", "emergency systems", "redundancy",
+      "weather data", "turbulence", "visibility"
+    ],
+    "business_context": [
+      "managing flight operations and scheduling",
+      "tracking aircraft maintenance and inspections",
+      "ensuring flight safety and regulatory compliance",
+      "coordinating with air traffic control",
+      "processing real-time navigation and weather data",
+      "managing crew schedules and certifications",
+      "monitoring aircraft systems and sensors"
+    ]
+  },
+  "Salesforce (CRM Platform)": {
+    "standard_testing": [
+      "Functional Testing",
+      "Integration Testing (Apex, REST APIs)",
+      "Security & Access Control Testing",
+      "Regression Testing (Metadata-level)"
+    ],
+    "recommended_testing": [
+      "Lightning Component Testing",
+      "Custom Object & Field Validation",
+      "Workflow Rule Testing",
+      "Data Sync Testing with External CRMs",
+      "Governor Limits & API Quota Testing"
+    ],
+    "avoid_testing": [
+      "UI A/B Testing",
+      "Performance Load Testing",
+      "Browser Rendering Edge Cases"
+    ],
+    "keywords": [
+      "salesforce", "apex", "visualforce", "lightning",
+      "soql", "sosl", "trigger", "batch", "future method",
+      "governor limits", "managed package", "custom object",
+      "workflow", "process builder", "flow", "automation",
+      "permission set", "profile", "sharing rules",
+      "sandbox", "deployment", "changeset",
+      "rest api", "soap api", "bulk api", "streaming api",
+      "salesforce1", "mobile", "lightning component",
+      "integration", "middleware", "data loader",
+      "validation rule", "formula field", "roll-up summary"
+    ],
+    "business_context": [
+      "developing custom Apex code and triggers",
+      "building Lightning components and pages",
+      "automating business processes with workflows",
+      "managing user permissions and security",
+      "integrating with external systems via APIs",
+      "migrating and importing data into Salesforce",
+      "deploying changes between environments"
+    ]
+  }
+}

@@ -196,7 +196,7 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
                                 }
                                 isLoading={syncing[syncKey]}
                               >
-                                <SparklesIcon className="w-3 h-3 mr-1" /> Sync to Case
+                                <SparklesIcon className="w-3 h-3 mr-1" /> 
                               </Button>
                             )}
                           </div>
