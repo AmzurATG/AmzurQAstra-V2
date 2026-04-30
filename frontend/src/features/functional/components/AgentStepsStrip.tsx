@@ -95,9 +95,10 @@ function LazyAgentThumb({
       ref={setButtonRef}
       type="button"
       onClick={() => onOpen(entry, index)}
-      className="shrink-0 w-24 rounded-lg border border-gray-200 overflow-hidden bg-gray-50 hover:ring-2 hover:ring-primary-400 transition-shadow text-left"
+      className="shrink-0 w-full rounded-lg border border-gray-200 overflow-hidden bg-gray-50 hover:ring-2 hover:ring-primary-400 transition-shadow text-left h-full"
+      style={{ minWidth: 0, minHeight: 0 }}
     >
-      <div className="aspect-video bg-gray-200 flex items-center justify-center">
+      <div className="aspect-video bg-gray-200 flex items-center justify-center w-full">
         {blobUrl ? (
           <img src={blobUrl} alt="" className="w-full h-full object-cover object-top" />
         ) : (
@@ -245,8 +246,17 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
     return () => window.removeEventListener('keydown', onKey)
   }, [galleryIndex, withShots.length])
 
-  const scrollStrip = (delta: number) => {
-    stripScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' })
+  // Scroll by 10 thumbnails at a time
+  const THUMBS_PER_PAGE = 7;
+  // Dynamically calculate thumbnail width based on container size
+  const scrollStrip = (direction: 'left' | 'right') => {
+    if (!stripScrollRef.current) return;
+    const container = stripScrollRef.current;
+    const containerWidth = container.offsetWidth;
+    container.scrollBy({
+      left: direction === 'left' ? -containerWidth : containerWidth,
+      behavior: 'smooth',
+    });
   }
 
   useEffect(() => {
@@ -330,30 +340,43 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
               type="button"
               className="shrink-0 rounded-lg border border-gray-200 bg-white p-1.5 text-gray-600 shadow-sm hover:bg-gray-50 disabled:opacity-40"
               aria-label="Scroll screenshots left"
-              onClick={() => scrollStrip(-280)}
+              onClick={() => scrollStrip('left')}
             >
               <ChevronLeftIcon className="w-5 h-5" />
             </button>
             <div
               ref={stripScrollRef}
-              className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain pb-1 [scrollbar-width:thin]"
+              className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain pb-1 custom-scrollbar"
+              style={{
+                maxWidth: '100%',
+                WebkitOverflowScrolling: 'touch',
+                scrollbarWidth: 'thin',
+                minHeight: '110px',
+              }}
             >
-              <div className="flex w-max min-w-0 gap-2 pr-1">
+              <div
+                className="flex pr-1 gap-2"
+                style={{
+                  minWidth: '100%',
+                  width: withShots.length > THUMBS_PER_PAGE ? `${(withShots.length / THUMBS_PER_PAGE) * 100}%` : '100%',
+                }}
+              >
                 {withShots.map((entry, index) => {
                   const ck = blobCacheKey(entry, index)
                   return (
-                    <LazyAgentThumb
-                      key={ck}
-                      runId={runId}
-                      testResultId={testResultId}
-                      entry={entry}
-                      index={index}
-                      cacheKey={ck}
-                      blobUrl={blobByKey[ck]}
-                      onLoaded={onThumbLoaded}
-                      onOpen={onThumbOpen}
-                      registerThumb={registerThumb}
-                    />
+                    <div key={ck} style={{ flex: `1 1 0`, maxWidth: `calc(100% / ${THUMBS_PER_PAGE})` }}>
+                      <LazyAgentThumb
+                        runId={runId}
+                        testResultId={testResultId}
+                        entry={entry}
+                        index={index}
+                        cacheKey={ck}
+                        blobUrl={blobByKey[ck]}
+                        onLoaded={onThumbLoaded}
+                        onOpen={onThumbOpen}
+                        registerThumb={registerThumb}
+                      />
+                    </div>
                   )
                 })}
               </div>
@@ -362,7 +385,7 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
               type="button"
               className="shrink-0 rounded-lg border border-gray-200 bg-white p-1.5 text-gray-600 shadow-sm hover:bg-gray-50 disabled:opacity-40"
               aria-label="Scroll screenshots right"
-              onClick={() => scrollStrip(280)}
+              onClick={() => scrollStrip('right')}
             >
               <ChevronRightIcon className="w-5 h-5" />
             </button>
