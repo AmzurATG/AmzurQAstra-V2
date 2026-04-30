@@ -42,7 +42,7 @@ python -m venv venv
 .\venv\Scripts\Activate.ps1    # PowerShell
 # or: venv\Scripts\activate.bat   # CMD
 
-uv python -m pip install -r requirements.txt
+uv pip install -r requirements.txt
 uv run playwright install chromium
 alembic upgrade head
 uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000

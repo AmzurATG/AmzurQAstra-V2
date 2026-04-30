@@ -27,6 +27,7 @@ class TestCaseCreate(TestCaseBase):
     project_id: int
     requirement_id: Optional[int] = None
     user_story_id: Optional[int] = None
+    status: TestCaseStatus = TestCaseStatus.draft
     tags: Optional[str] = None
     integrity_check: bool = False
 

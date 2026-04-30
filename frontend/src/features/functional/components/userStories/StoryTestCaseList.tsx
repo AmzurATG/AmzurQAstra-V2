@@ -70,10 +70,10 @@ export const StoryTestCaseList = forwardRef<StoryTestCaseListHandle, StoryTestCa
   const [isLoading, setIsLoading] = useState(false)
   const [selectedDrafts, setSelectedDrafts] = useState<Set<number>>(new Set())
   const [promotingIds, setPromotingIds] = useState<Set<number>>(new Set())
-  const [isCreating, setIsCreating] = useState(false)
   const [editing, setEditing] = useState<TestCase | null>(null)
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isSavingEdit, setIsSavingEdit] = useState(false)
+  const [isCreatingNew, setIsCreatingNew] = useState(false)
 
   const loadCases = useCallback(async () => {
     setIsLoading(true)
@@ -230,31 +230,26 @@ export const StoryTestCaseList = forwardRef<StoryTestCaseListHandle, StoryTestCa
     }
   }
 
-  const handleCreateManual = async () => {
-    setIsCreating(true)
-    try {
-      // Manual cases authored inside a story land as DRAFT so they follow the
-      // same promotion flow as LLM-generated cases. The sibling flow on the
-      // Cases tab creates them READY directly — see CasesTab.handleCreateManualCase.
-      const res = await testCasesApi.create({
-        project_id: projectId,
-        user_story_id: storyId,
-        title: 'Untitled manual case',
-        description: '',
-        priority: 'medium',
-        category: 'regression',
-        status: 'draft',
-        is_generated: false,
-      })
-      toast.success('Manual case created (draft)')
-      setEditing(res.data)
-      setIsEditOpen(true)
-      await loadCases()
-    } catch {
-      toast.error('Failed to create case')
-    } finally {
-      setIsCreating(false)
-    }
+  const handleCreateManual = () => {
+    setEditing({
+      id: 0,
+      case_number: 0,
+      project_id: projectId,
+      user_story_id: storyId,
+      title: '',
+      description: '',
+      priority: 'medium',
+      category: 'regression',
+      status: 'draft',
+      is_generated: false,
+      is_automated: false,
+      integrity_check: false,
+      steps_count: 0,
+      created_at: '',
+      updated_at: '',
+    } as TestCase)
+    setIsCreatingNew(true)
+    setIsEditOpen(true)
   }
 
   const handleDelete = async (tc: TestCase) => {
@@ -277,12 +272,27 @@ export const StoryTestCaseList = forwardRef<StoryTestCaseListHandle, StoryTestCa
     if (!editing) return
     setIsSavingEdit(true)
     try {
-      await testCasesApi.update(editing.id, editing)
-      toast.success('Updated')
+      if (isCreatingNew) {
+        await testCasesApi.create({
+          project_id: editing.project_id,
+          user_story_id: editing.user_story_id,
+          title: editing.title,
+          description: editing.description,
+          priority: editing.priority,
+          category: editing.category,
+          status: editing.status,
+          is_generated: false,
+        })
+        toast.success('Manual case created')
+      } else {
+        await testCasesApi.update(editing.id, editing)
+        toast.success('Updated')
+      }
       setIsEditOpen(false)
+      setIsCreatingNew(false)
       await loadCases()
     } catch {
-      toast.error('Update failed')
+      toast.error(isCreatingNew ? 'Failed to create case' : 'Update failed')
     } finally {
       setIsSavingEdit(false)
     }
@@ -313,7 +323,7 @@ export const StoryTestCaseList = forwardRef<StoryTestCaseListHandle, StoryTestCa
             />
             Refresh
           </Button>
-          <Button size="sm" onClick={handleCreateManual} disabled={isCreating}>
+          <Button size="sm" onClick={handleCreateManual}>
             <PlusIcon className="mr-1 h-4 w-4" />
             New manual case
           </Button>
@@ -526,11 +536,13 @@ export const StoryTestCaseList = forwardRef<StoryTestCaseListHandle, StoryTestCa
 
       <TestCaseEditModal
         isOpen={isEditOpen}
-        onClose={() => setIsEditOpen(false)}
+        onClose={() => { setIsEditOpen(false); setIsCreatingNew(false) }}
         testCase={editing}
         setTestCase={(tc) => setEditing(tc)}
         onSave={handleSaveEdit}
         isSaving={isSavingEdit}
+        title={isCreatingNew ? 'New Manual Test Case' : 'Edit Test Case'}
+        saveLabel={isCreatingNew ? 'Save' : 'Save Changes'}
       />
     </div>
   )

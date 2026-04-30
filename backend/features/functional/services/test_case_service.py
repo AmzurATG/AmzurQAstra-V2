@@ -210,8 +210,8 @@ class TestCaseService:
         )
         self.db.add(test_case)
         await self.db.flush()
-        await self.db.refresh(test_case)
-        return test_case
+        # Re-fetch with relationships for proper serialization
+        return await self.get_by_id_with_steps(test_case.id)
     
     async def update(
         self, test_case_id: int, test_case_data: TestCaseUpdate

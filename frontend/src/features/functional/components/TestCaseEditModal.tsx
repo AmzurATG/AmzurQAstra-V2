@@ -11,6 +11,8 @@ interface TestCaseEditModalProps {
   setTestCase: (tc: TestCase) => void
   onSave: () => void
   isSaving: boolean
+  title?: string
+  saveLabel?: string
 }
 
 const PRIORITY_OPTIONS = ['critical', 'high', 'medium', 'low'] as const
@@ -23,7 +25,9 @@ export const TestCaseEditModal: React.FC<TestCaseEditModalProps> = ({
   testCase,
   setTestCase,
   onSave,
-  isSaving
+  isSaving,
+  title = 'Edit Test Case',
+  saveLabel = 'Save Changes',
 }) => {
   if (!testCase) return null
 
@@ -56,7 +60,7 @@ export const TestCaseEditModal: React.FC<TestCaseEditModalProps> = ({
               <Dialog.Panel className="w-full max-w-lg transform overflow-hidden rounded-xl bg-white shadow-2xl transition-all">
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
                   <Dialog.Title className="text-lg font-semibold text-gray-900">
-                    Edit Test Case
+                    {title}
                   </Dialog.Title>
                   <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
                     <XMarkIcon className="w-5 h-5" />
@@ -134,7 +138,7 @@ export const TestCaseEditModal: React.FC<TestCaseEditModalProps> = ({
 
                 <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
                   <Button variant="outline" onClick={onClose} disabled={isSaving}>Cancel</Button>
-                  <Button onClick={onSave} disabled={isSaving || !testCase.title} isLoading={isSaving}>Save Changes</Button>
+                  <Button onClick={onSave} disabled={isSaving || !testCase.title} isLoading={isSaving}>{saveLabel}</Button>
                 </div>
               </Dialog.Panel>
             </Transition.Child>
