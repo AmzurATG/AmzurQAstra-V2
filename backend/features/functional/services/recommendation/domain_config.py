@@ -56,3 +56,8 @@ def reload_domain_test_mapping(path: Optional[str] = None) -> DomainTestMappingF
 
 def mapping_to_llm_domain_ids(mapping: DomainTestMappingFile) -> List[str]:
     return [d.id for d in mapping.domains]
+
+
+def domains_catalog_for_prompt(mapping: DomainTestMappingFile) -> List[tuple[str, str]]:
+    """(domain_id, label) pairs for LLM system prompt — order matches YAML."""
+    return [(d.id, (d.label or "").strip() or d.id) for d in mapping.domains]

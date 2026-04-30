@@ -79,6 +79,8 @@ export interface TestRecommendationResultJson {
   domain_label?: string
   confidence?: number
   source?: string
+  /** LLM summary of what the BRD/stories imply the product is for */
+  intent_summary?: string
   report_summary?: string
   input_snapshot?: {
     run_kind?: string
@@ -101,6 +103,7 @@ export interface TestRecommendationResultJson {
     domain_id?: string
     confidence?: number
     rationale?: string
+    intent_summary?: string
     error?: string
   } | null
   standard_tests?: TestRecommendationStrategyItem[]

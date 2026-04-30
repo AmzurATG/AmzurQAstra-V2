@@ -164,7 +164,10 @@ class Settings(BaseSettings):
     # Requirement document uploads (5 MiB); enforced in RequirementService
     REQUIREMENT_UPLOAD_MAX_BYTES: int = 5 * 1024 * 1024
 
-    # Test recommendations: domain playbook (keywords + optional LLM domain fallback)
+    # Test recommendations: domain playbook (YAML) + LLM reads BRD/story intent to pick domain
+    # When True (default), LLM classifies domain first; keyword scores are diagnostics / fallback only.
+    TEST_RECOMMENDATION_USE_LLM_FOR_DOMAIN: bool = True
+    # When USE_LLM_FOR_DOMAIN is False: keyword-first, then LLM if confidence below threshold
     TEST_RECOMMENDATION_LLM_FALLBACK_ENABLED: bool = True
     TEST_RECOMMENDATION_DOMAIN_CONFIDENCE_THRESHOLD: float = 0.6
     TEST_RECOMMENDATION_LLM_MAX_CORPUS_CHARS: int = 48_000

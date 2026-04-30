@@ -412,15 +412,26 @@ export default function TestRecommendationRunModal({
                         {' · '}
                         Source: <span className="font-medium text-gray-900">{result.source || '—'}</span>
                       </div>
+                      {(result.intent_summary || result.llm_fallback?.intent_summary) && (
+                        <div className="rounded border border-blue-100 bg-blue-50/80 p-3 text-sm text-gray-800">
+                          <span className="font-medium text-gray-900">Product intent</span>
+                          <p className="mt-1 text-gray-700">
+                            {result.intent_summary || result.llm_fallback?.intent_summary}
+                          </p>
+                        </div>
+                      )}
                       {result.report_summary && (
                         <p className="text-xs text-gray-600">{result.report_summary}</p>
                       )}
                       {result.llm_fallback?.rationale && (
-                        <p className="text-xs text-gray-600">LLM note: {result.llm_fallback.rationale}</p>
+                        <p className="text-xs text-gray-600">Domain rationale: {result.llm_fallback.rationale}</p>
                       )}
                       {result.llm_fallback?.error && (
                         <p className="text-xs text-amber-800">
-                          LLM fallback error (local scores used): {result.llm_fallback.error}
+                          {result.source === 'keyword_fallback'
+                            ? 'LLM classification failed (keyword matching used): '
+                            : 'LLM note failed: '}
+                          {result.llm_fallback.error}
                         </p>
                       )}
                     </div>

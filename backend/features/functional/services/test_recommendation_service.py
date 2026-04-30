@@ -1,7 +1,8 @@
 """
-Test recommendations: domain playbook — keyword classification over BRD + user stories,
-optional LLM domain fallback, mapped standard tests and recommendations from YAML.
-Each completed run stores a PDF report path and an input snapshot of user stories used.
+Test recommendations: domain playbook from YAML.
+Domain is chosen by LLM from BRD + user story intent (default), with keyword scoring as
+fallback if the LLM fails; optional keyword-first mode for offline use.
+Each run persists result JSON, PDF path, and user story snapshot.
 """
 from __future__ import annotations
 
@@ -34,8 +35,8 @@ from features.functional.services.recommendation.domain_classifier import (
     strategies_for_domain,
 )
 from features.functional.services.recommendation.domain_config import (
+    domains_catalog_for_prompt,
     load_domain_test_mapping,
-    mapping_to_llm_domain_ids,
 )
 from features.functional.services.test_recommendation_pdf import build_test_recommendation_pdf
 
@@ -196,14 +197,17 @@ class TestRecommendationService:
         return warnings
 
     async def _llm_classify_domain(
-        self, corpus_for_llm: str, allowed_ids: List[str]
-    ) -> Optional[LlmDomainClassificationResult]:
-        system = build_test_recommendation_domain_system_message(allowed_ids)
+        self, corpus_for_llm: str, allowed_ids: List[str], domains_catalog: List[tuple[str, str]]
+    ) -> LlmDomainClassificationResult:
+        system = build_test_recommendation_domain_system_message(domains_catalog)
         messages = [
             Message(role="system", content=system),
             Message(
                 role="user",
-                content="Classify this product's domain using the following text:\n\n" + corpus_for_llm,
+                content=(
+                    "Infer product intent and classify the domain using the BRD and user stories below.\n\n"
+                    + corpus_for_llm
+                ),
             ),
         ]
         response = await asyncio.to_thread(
@@ -274,33 +278,70 @@ class TestRecommendationService:
         corpus = _build_corpus(brd_full, stories, truncated_note=truncated_notes)
 
         local = classify_domains_keyword(corpus, mapping, general_domain_id=GENERAL_DOMAIN_ID)
+        allowed_ids = [d.id for d in mapping.domains]
+        domains_catalog = domains_catalog_for_prompt(mapping)
 
-        chosen_domain = local.domain_id
-        chosen_label = local.label
-        chosen_confidence = local.confidence
-        source = "local"
+        chosen_domain: str
+        chosen_label: str
+        chosen_confidence: float
+        source: str
         llm_payload: Optional[Dict[str, Any]] = None
+        intent_summary = ""
 
-        threshold = float(settings.TEST_RECOMMENDATION_DOMAIN_CONFIDENCE_THRESHOLD)
-        if settings.TEST_RECOMMENDATION_LLM_FALLBACK_ENABLED and local.confidence < threshold:
-            allowed = mapping_to_llm_domain_ids(mapping)
-            capped = _truncate(corpus, settings.TEST_RECOMMENDATION_LLM_MAX_CORPUS_CHARS)
+        capped_corpus = _truncate(corpus, settings.TEST_RECOMMENDATION_LLM_MAX_CORPUS_CHARS)
+        use_llm_primary = bool(settings.TEST_RECOMMENDATION_USE_LLM_FOR_DOMAIN)
+
+        if use_llm_primary:
             try:
-                llm_result = await self._llm_classify_domain(capped, allowed)
+                llm_result = await self._llm_classify_domain(capped_corpus, allowed_ids, domains_catalog)
+                chosen_domain = llm_result.domain_id
+                rec = next((d for d in mapping.domains if d.id == chosen_domain), None)
+                chosen_label = rec.label if rec else chosen_domain
+                chosen_confidence = float(llm_result.confidence)
+                source = "llm"
+                intent_summary = (llm_result.intent_summary or "").strip()
                 llm_payload = {
                     "domain_id": llm_result.domain_id,
                     "confidence": llm_result.confidence,
                     "rationale": llm_result.rationale,
+                    "intent_summary": intent_summary,
                 }
-                if llm_result.confidence > local.confidence:
-                    chosen_domain = llm_result.domain_id
-                    rec = next((d for d in mapping.domains if d.id == chosen_domain), None)
-                    chosen_label = rec.label if rec else chosen_domain
-                    chosen_confidence = llm_result.confidence
-                    source = "llm"
             except Exception as e:
-                logger.exception("Test recommendation LLM domain fallback failed")
+                logger.exception("Test recommendation LLM domain classification failed")
                 llm_payload = {"error": str(e)[:500]}
+                chosen_domain = local.domain_id
+                chosen_label = local.label
+                chosen_confidence = float(local.confidence)
+                source = "keyword_fallback"
+                truncated_notes.append(
+                    "Domain was selected using keyword matching because LLM classification failed. "
+                    "Verify LLM API keys and connectivity."
+                )
+        else:
+            chosen_domain = local.domain_id
+            chosen_label = local.label
+            chosen_confidence = float(local.confidence)
+            source = "keyword"
+            threshold = float(settings.TEST_RECOMMENDATION_DOMAIN_CONFIDENCE_THRESHOLD)
+            if settings.TEST_RECOMMENDATION_LLM_FALLBACK_ENABLED and local.confidence < threshold:
+                try:
+                    llm_result = await self._llm_classify_domain(capped_corpus, allowed_ids, domains_catalog)
+                    intent_summary = (llm_result.intent_summary or "").strip()
+                    llm_payload = {
+                        "domain_id": llm_result.domain_id,
+                        "confidence": llm_result.confidence,
+                        "rationale": llm_result.rationale,
+                        "intent_summary": intent_summary,
+                    }
+                    if llm_result.confidence > local.confidence:
+                        chosen_domain = llm_result.domain_id
+                        rec = next((d for d in mapping.domains if d.id == chosen_domain), None)
+                        chosen_label = rec.label if rec else chosen_domain
+                        chosen_confidence = float(llm_result.confidence)
+                        source = "llm"
+                except Exception as e:
+                    logger.exception("Test recommendation LLM domain fallback failed")
+                    llm_payload = {"error": str(e)[:500]}
 
         std, recs = strategies_for_domain(chosen_domain, mapping, general_domain_id=GENERAL_DOMAIN_ID)
 
@@ -308,10 +349,12 @@ class TestRecommendationService:
         warnings.extend(truncated_notes)
 
         pct = float(chosen_confidence) * 100.0 if chosen_confidence is not None else 0.0
-        report_summary = (
-            f"Detected domain “{chosen_label}” ({pct:.0f}% confidence; source: {source}). "
+        base_tail = (
             f"This run used {len(story_snapshot)} user stor{'y' if len(story_snapshot) == 1 else 'ies'} "
             f"(up to {MAX_STORIES} by ascending id) and the selected requirement text."
+        )
+        report_summary = (
+            f"Detected domain “{chosen_label}” ({pct:.0f}% confidence; source: {source}). {base_tail}"
         )
 
         input_snapshot: Dict[str, Any] = {
@@ -344,6 +387,8 @@ class TestRecommendationService:
             "recommended_tests": recs,
             "warnings": warnings,
         }
+        if intent_summary:
+            result_dict["intent_summary"] = intent_summary
 
         run = TestRecommendationRun(
             project_id=project_id,

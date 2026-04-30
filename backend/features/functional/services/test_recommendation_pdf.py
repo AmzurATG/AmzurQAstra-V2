@@ -91,6 +91,14 @@ def build_test_recommendation_pdf(
     mc(5, summary)
     pdf.ln(3)
 
+    intent = str(result.get("intent_summary") or "").strip()
+    if intent:
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.cell(0, 8, "Product intent (from BRD and stories)", ln=True)
+        pdf.set_font("Helvetica", "", 10)
+        mc(5, intent)
+        pdf.ln(2)
+
     snap = result.get("input_snapshot") or {}
     if isinstance(snap, dict) and snap.get("user_stories_included"):
         pdf.set_font("Helvetica", "B", 13)

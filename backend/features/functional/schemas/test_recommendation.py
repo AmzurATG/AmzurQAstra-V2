@@ -16,6 +16,7 @@ class LlmDomainClassificationResult(BaseModel):
     domain_id: str
     confidence: float = Field(ge=0.0, le=1.0)
     rationale: str = ""
+    intent_summary: str = Field(default="", max_length=4000)
 
 
 class TestRecommendationRunResponse(BaseModel):
