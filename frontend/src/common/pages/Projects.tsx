@@ -6,7 +6,7 @@ import { Card } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
 import { Input } from '@common/components/ui/Input'
 import { PageLoader } from '@common/components/ui/Loader'
-import { PlusIcon, FolderIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, FolderIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 
 function emptyProjectForm() {
@@ -14,7 +14,7 @@ function emptyProjectForm() {
 }
 
 export default function Projects() {
-  const { projects, isLoading, fetchProjects } = useProjectStore()
+  const { projects, isLoading, fetchProjects, page, totalPages, total, hasNext, hasPrev } = useProjectStore()
   const [showCreate, setShowCreate] = useState(false)
   const [newProject, setNewProject] = useState(emptyProjectForm)
   const [creating, setCreating] = useState(false)
@@ -120,6 +120,38 @@ export default function Projects() {
           </Link>
         ))}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+          <p className="text-sm text-gray-600">
+            Showing {(page - 1) * 9 + 1}–{Math.min(page * 9, total)} of {total} projects
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchProjects(page - 1)}
+              disabled={!hasPrev}
+            >
+              <ChevronLeftIcon className="w-4 h-4 mr-1" />
+              Previous
+            </Button>
+            <span className="text-sm text-gray-700">
+              Page {page} of {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchProjects(page + 1)}
+              disabled={!hasNext}
+            >
+              Next
+              <ChevronRightIcon className="w-4 h-4 ml-1" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {projects.length === 0 && (
         <Card className="text-center py-12">
