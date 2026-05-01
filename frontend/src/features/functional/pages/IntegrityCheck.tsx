@@ -63,8 +63,13 @@ export default function IntegrityCheck() {
           pollRef.current = null
           setResult(res.data)
           setIsRunning(false)
-          if (res.data.status === 'completed') toast.success('Integrity check completed!')
-          else toast.error('Check encountered an error')
+          if (res.data.status === 'error') {
+            toast.error('Check encountered an error')
+          } else if (res.data.overall_status === 'passed') {
+            toast.success('Integrity check passed.')
+          } else {
+            toast.error('Integrity check reported failures.')
+          }
         }
       } catch {
         clearInterval(pollRef.current!)

@@ -37,6 +37,9 @@ class IntegrityCheckResult(BaseModel):
     steps_data = Column(JSONB, nullable=True)       # list[{step_number, description, screenshot_path}]
     screenshots = Column(JSONB, nullable=True)      # list[str] — /screenshots/<filename>
 
+    # Live poll payload while status is pending|running (multi-worker safe)
+    live_progress = Column(JSONB, nullable=True)
+
     # Timing
     duration_ms = Column(Integer, nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=True)

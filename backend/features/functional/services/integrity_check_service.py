@@ -7,22 +7,24 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession
+import httpx
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.db.models.project import Project
+from common.utils.logger import logger
+from features.functional.core.browser.agent_service import (
+    BrowserAgentService,
+    get_progress,
+    set_progress,
+)
 from features.functional.db.models.integrity_check_result import IntegrityCheckResult
-from features.functional.utils.credentials_redaction import redact_known_credentials
 from features.functional.schemas.integrity_check import (
     IntegrityCheckRequest,
     RunStartResponse,
     RunStatusResponse,
 )
-from features.functional.core.browser.agent_service import (
-    BrowserAgentService,
-    get_progress,
-)
-from common.utils.logger import logger
+from features.functional.utils.credentials_redaction import redact_known_credentials
 
 
 def _redact_ic_text(
@@ -36,6 +38,36 @@ def _redact_ic_text(
     return out if out is not None else ""
 
 
+async def _verify_app_url_reachable(url: str) -> tuple[bool, Optional[str]]:
+    """
+    Lightweight HTTP reachability before starting the browser agent.
+    Catches common 'app is down' cases (connection refused, timeouts) that the LLM might mis-label as PASS.
+    """
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0, connect=12.0),
+            follow_redirects=True,
+        ) as client:
+            r = await client.get(
+                url,
+                headers={"User-Agent": "QAstra-IntegrityCheck/1.0"},
+            )
+        if r.status_code >= 500:
+            return False, f"Server returned HTTP {r.status_code} — the application may be down or misconfigured."
+        return True, None
+    except httpx.ConnectError as e:
+        return (
+            False,
+            f"Could not connect to the application ({e!s}). Check that the URL is correct and the server is running.",
+        )
+    except httpx.UnsupportedProtocol:
+        return False, "Invalid URL (unsupported protocol)."
+    except httpx.TimeoutException:
+        return False, "Request timed out — the application did not respond in time."
+    except httpx.HTTPError as e:
+        return False, f"Could not reach the application: {e!s}"
+
+
 class IntegrityCheckService:
     """Manages the full lifecycle of an integrity check run."""
 
@@ -43,15 +75,9 @@ class IntegrityCheckService:
         self.db = db
         self._agent = BrowserAgentService()
 
-    # ── Start ─────────────────────────────────────────────────────────────────
-
     async def start_check(
         self, request: IntegrityCheckRequest, project_id: int
     ) -> RunStartResponse:
-        """
-        Persist a pending record, fire the agent as a background task,
-        and return the run_id immediately so the client can start polling.
-        """
         run_id = str(uuid.uuid4())
 
         record = IntegrityCheckResult(
@@ -66,7 +92,6 @@ class IntegrityCheckService:
 
         username = request.credentials.username if request.credentials else None
         password = request.credentials.password if request.credentials else None
-        # Google Sign-In for BIC is disabled until a supported flow ships (UI forces false too).
         use_google = False
 
         asyncio.create_task(
@@ -77,7 +102,45 @@ class IntegrityCheckService:
 
         return RunStartResponse(run_id=run_id, status="pending")
 
-    # ── Background worker ─────────────────────────────────────────────────────
+    async def _persist_live_progress(
+        self,
+        run_id: str,
+        payload: Dict[str, Any],
+        username: Optional[str],
+        password: Optional[str],
+    ) -> None:
+        from common.db.database import async_session_maker
+
+        raw_summary = payload.get("summary")
+        raw_error = payload.get("error")
+        safe: Dict[str, Any] = {
+            "status": payload.get("status"),
+            "percentage": int(payload.get("percentage") or 0),
+            "current_step": payload.get("current_step"),
+            "overall_status": payload.get("overall_status"),
+            "screenshots": list(payload.get("screenshots") or []),
+            "steps": list(payload.get("steps") or []),
+            "steps_total": int(payload.get("steps_total") or 0),
+            "steps_passed": int(payload.get("steps_passed") or 0),
+            "steps_failed": int(payload.get("steps_failed") or 0),
+            "summary": (_redact_ic_text(raw_summary, username, password) if raw_summary else None),
+            "error": (_redact_ic_text(raw_error, username, password) if raw_error else None),
+            "duration_ms": payload.get("duration_ms"),
+        }
+        try:
+            async with async_session_maker() as db:
+                row_result = await db.execute(
+                    select(IntegrityCheckResult).where(IntegrityCheckResult.run_id == run_id)
+                )
+                record = row_result.scalar_one_or_none()
+                if not record:
+                    return
+                if safe.get("status") == "running":
+                    record.status = "running"
+                record.live_progress = safe
+                await db.commit()
+        except Exception as exc:
+            logger.warning(f"[IntegrityCheck] live_progress flush failed run_id={run_id}: {exc}")
 
     async def _run_and_persist(
         self,
@@ -88,12 +151,58 @@ class IntegrityCheckService:
         password: Optional[str],
         use_google_signin: bool = False,
     ) -> None:
-        """Run agent then write final result to DB using a fresh session."""
         from common.db.database import async_session_maker
+
+        async def flush_live(_rid: str, payload: Dict[str, Any]) -> None:
+            await self._persist_live_progress(_rid, payload, username, password)
+
+        reachable, reach_err = await _verify_app_url_reachable(app_url)
+        if not reachable:
+            result: Dict[str, Any] = {
+                "status": "completed",
+                "overall_status": "failed",
+                "percentage": 100,
+                "current_step": "Application not reachable",
+                "screenshots": [],
+                "steps": [],
+                "steps_total": 0,
+                "steps_passed": 0,
+                "steps_failed": 0,
+                "summary": reach_err or "Application URL is not reachable.",
+                "duration_ms": 0,
+                "error": None,
+            }
+            set_progress(run_id, result)
+            async with async_session_maker() as db:
+                row_result = await db.execute(
+                    select(IntegrityCheckResult).where(IntegrityCheckResult.run_id == run_id)
+                )
+                record = row_result.scalar_one_or_none()
+                if record:
+                    record.status = "completed"
+                    record.overall_status = "failed"
+                    record.app_reachable = False
+                    record.live_progress = None
+                    record.summary = _redact_ic_text(result["summary"] or "", username, password)
+                    record.error_message = None
+                    record.screenshots = []
+                    record.steps_data = []
+                    record.steps_total = 0
+                    record.steps_passed = 0
+                    record.steps_failed = 0
+                    record.duration_ms = 0
+                    record.completed_at = datetime.utcnow()
+                    await db.commit()
+            return
 
         try:
             result = await self._agent.run(
-                run_id, app_url, username, password, use_google_signin
+                run_id,
+                app_url,
+                username,
+                password,
+                use_google_signin,
+                live_progress_writer=flush_live,
             )
         except Exception as exc:
             logger.error(f"[IntegrityCheck] agent failed run_id={run_id}: {exc}")
@@ -109,6 +218,7 @@ class IntegrityCheckService:
                 "duration_ms": 0,
                 "summary": "",
             }
+            set_progress(run_id, result)
 
         async with async_session_maker() as db:
             row_result = await db.execute(
@@ -123,22 +233,20 @@ class IntegrityCheckService:
                 record.steps_total = result.get("steps_total", 0)
                 record.steps_passed = result.get("steps_passed", 0)
                 record.steps_failed = result.get("steps_failed", 0)
-                record.summary = _redact_ic_text(
-                    result.get("summary") or "", username, password
+                record.summary = _redact_ic_text(result.get("summary") or "", username, password)
+                record.error_message = (
+                    _redact_ic_text(result.get("error"), username, password) or None
                 )
-                record.error_message = _redact_ic_text(
-                    result.get("error"), username, password
-                ) or None
                 record.duration_ms = result.get("duration_ms")
                 record.completed_at = datetime.utcnow()
+                record.live_progress = None
+                if result.get("overall_status") in ("passed", "failed"):
+                    record.app_reachable = True
                 await db.commit()
-
-    # ── Poll status ───────────────────────────────────────────────────────────
 
     async def _project_credential_strings_for_ic_run(
         self, run_id: str
     ) -> tuple[Optional[str], Optional[str]]:
-        """Best-effort username/password from project app_credentials for redacting API responses."""
         row_result = await self.db.execute(
             select(IntegrityCheckResult).where(IntegrityCheckResult.run_id == run_id)
         )
@@ -152,42 +260,55 @@ class IntegrityCheckService:
         c = proj.app_credentials or {}
         return c.get("username"), c.get("password")
 
+    def _run_status_from_live_dict(
+        self,
+        run_id: str,
+        progress: Dict[str, Any],
+        bu: Optional[str],
+        bp: Optional[str],
+    ) -> RunStatusResponse:
+        s_raw = progress.get("summary")
+        e_raw = progress.get("error")
+        summ_p = _redact_ic_text(s_raw, bu, bp) if s_raw else ""
+        err_p = _redact_ic_text(e_raw, bu, bp) if e_raw else ""
+        return RunStatusResponse(
+            run_id=run_id,
+            status=progress.get("status", "running"),
+            percentage=int(progress.get("percentage") or 0),
+            current_step=progress.get("current_step"),
+            overall_status=progress.get("overall_status"),
+            screenshots=list(progress.get("screenshots") or []),
+            steps=list(progress.get("steps") or []),
+            steps_total=int(progress.get("steps_total") or 0),
+            steps_passed=int(progress.get("steps_passed") or 0),
+            steps_failed=int(progress.get("steps_failed") or 0),
+            summary=summ_p or None,
+            error=err_p or None,
+            duration_ms=progress.get("duration_ms"),
+        )
+
     async def get_run_status(self, run_id: str) -> RunStatusResponse:
-        """
-        Check in-memory store first (live run), fall back to DB (historical).
-        Summary and error fields are redacted using project credentials when available.
-        """
         bu, bp = await self._project_credential_strings_for_ic_run(run_id)
 
         progress = get_progress(run_id)
         if progress:
-            s_raw = progress.get("summary")
-            e_raw = progress.get("error")
-            summ_p = _redact_ic_text(s_raw, bu, bp) if s_raw else ""
-            err_p = _redact_ic_text(e_raw, bu, bp) if e_raw else ""
-            return RunStatusResponse(
-                run_id=run_id,
-                status=progress.get("status", "running"),
-                percentage=progress.get("percentage", 0),
-                current_step=progress.get("current_step"),
-                overall_status=progress.get("overall_status"),
-                screenshots=progress.get("screenshots", []),
-                steps=progress.get("steps", []),
-                steps_total=progress.get("steps_total", 0),
-                steps_passed=progress.get("steps_passed", 0),
-                steps_failed=progress.get("steps_failed", 0),
-                summary=summ_p or None,
-                error=err_p or None,
-                duration_ms=progress.get("duration_ms"),
-            )
+            return self._run_status_from_live_dict(run_id, progress, bu, bp)
 
-        # Fallback: load from DB (e.g. after server restart)
         row_result = await self.db.execute(
             select(IntegrityCheckResult).where(IntegrityCheckResult.run_id == run_id)
         )
         record = row_result.scalar_one_or_none()
         if not record:
             return RunStatusResponse(run_id=run_id, status="not_found", percentage=0)
+
+        if record.live_progress and isinstance(record.live_progress, dict):
+            lp = record.live_progress
+            lp_status = lp.get("status") or record.status
+            if lp_status in ("running", "completed", "error") or record.status in (
+                "pending",
+                "running",
+            ):
+                return self._run_status_from_live_dict(run_id, lp, bu, bp)
 
         pct = 100 if record.status in ("completed", "error") else 0
         summ = _redact_ic_text(record.summary, bu, bp) if record.summary else ""
@@ -208,8 +329,6 @@ class IntegrityCheckService:
             error=err,
             duration_ms=record.duration_ms,
         )
-
-    # ── History ───────────────────────────────────────────────────────────────
 
     async def get_history(self, project_id: int, limit: int = 10) -> List[Dict[str, Any]]:
         result = await self.db.execute(

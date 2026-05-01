@@ -5,10 +5,11 @@ Default LLM: LiteLLM proxy (ChatLiteLLM); optional direct Gemini via settings.
 """
 import asyncio
 import base64
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from config import settings
 from common.utils.logger import logger
@@ -31,6 +32,51 @@ RULES:
 {auth_rules}
 - Be concise — maximum 15 steps total.
 """
+
+IC_MAX_STEPS = 15
+
+# Keywords suggesting the app or page is not usable (connection, chrome error pages, etc.)
+_FAIL_SUBSTRINGS = (
+    "fail",
+    "error",
+    "unable",
+    "could not",
+    "not found",
+    "404",
+    "500",
+    "invalid",
+    "refused",
+    "unreachable",
+    "can't be reached",
+    "cannot be reached",
+    "couldn’t be reached",  # unicode apostrophe variants sometimes appear in UI copy
+    "couldn't be reached",
+    "timed out",
+    "timeout",
+    "connection refused",
+    "connection reset",
+    "err_connection",
+    "name not resolved",
+    "dns",
+    "no internet",
+    "network change",
+    "offline",
+    "ssl error",
+    "certificate error",
+    "access denied",
+    "forbidden",
+    "403",
+    "502",
+    "503",
+    "504",
+    "network error",
+    "this site can't",
+    "this page isn",
+    "refused to connect",
+    "unexpectedly closed",
+)
+
+LiveProgressWriter = Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]]
 
 # ─── In-memory progress store ─────────────────────────────────────────────────
 # Maps run_id → progress dict so GET /status can poll without a DB hit.
@@ -62,7 +108,26 @@ def _redact_ic_text(
     return out if out is not None else ""
 
 
+def _running_percentage(step_num: int) -> int:
+    """
+    Map agent step index to ~5–90% so the final jump to 100% is reserved for completion.
+    Aligns UI progress to IC_MAX_STEPS instead of a fixed increment per step.
+    """
+    s = max(0, min(step_num, IC_MAX_STEPS))
+    return min(90, 5 + int((s / float(IC_MAX_STEPS)) * 85))
+
+
+def _final_text_indicates_failure(final_text: str) -> bool:
+    low = final_text.lower()
+    if any(k in low for k in _FAIL_SUBSTRINGS):
+        return True
+    if re.search(r"\bfail(ed|ure|ing)?\b", low):
+        return True
+    return False
+
+
 # ─── Service ──────────────────────────────────────────────────────────────────
+
 
 class BrowserAgentService:
     """Executes an integrity check in a visible Chrome window via browser-use 0.12+."""
@@ -88,7 +153,7 @@ class BrowserAgentService:
         if use_google_signin:
             login = (
                 "2. This app uses Google Sign-In only for this run:\n"
-                "   • Click \"Sign in with Google\" / \"Continue with Google\" (do not use the app's email+password form).\n"
+                '   • Click "Sign in with Google" / "Continue with Google" (do not use the app\'s email+password form).\n'
                 "   • Complete Google's account picker and consent in the browser window.\n"
                 f"   • Preferred account email when asked: {username or '(choose the correct work account)'}\n"
                 "   • If MFA appears, the user may need to complete it in this browser window.\n"
@@ -184,6 +249,19 @@ class BrowserAgentService:
             pass
         return "Working…"
 
+    async def _emit_progress(
+        self,
+        run_id: str,
+        payload: Dict[str, Any],
+        live_progress_writer: LiveProgressWriter,
+    ) -> None:
+        set_progress(run_id, payload)
+        if live_progress_writer:
+            try:
+                await live_progress_writer(run_id, payload)
+            except Exception as exc:
+                logger.warning(f"[BrowserAgent] live_progress DB write failed run_id={run_id}: {exc}")
+
     # ── main entry ────────────────────────────────────────────────────────────
 
     def _windows_run_sync(
@@ -193,11 +271,19 @@ class BrowserAgentService:
         username: Optional[str],
         password: Optional[str],
         use_google_signin: bool,
+        live_progress_writer: LiveProgressWriter,
     ) -> Dict[str, Any]:
         """Run the async agent on a fresh Proactor loop (required for subprocess/Chrome on Windows)."""
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
         return asyncio.run(
-            self._run_impl(run_id, app_url, username, password, use_google_signin)
+            self._run_impl(
+                run_id,
+                app_url,
+                username,
+                password,
+                use_google_signin,
+                live_progress_writer,
+            )
         )
 
     async def run(
@@ -207,6 +293,7 @@ class BrowserAgentService:
         username: Optional[str],
         password: Optional[str],
         use_google_signin: bool = False,
+        live_progress_writer: LiveProgressWriter = None,
     ) -> Dict[str, Any]:
         """
         Execute the integrity check task.
@@ -221,9 +308,15 @@ class BrowserAgentService:
                 username,
                 password,
                 use_google_signin,
+                live_progress_writer,
             )
         return await self._run_impl(
-            run_id, app_url, username, password, use_google_signin
+            run_id,
+            app_url,
+            username,
+            password,
+            use_google_signin,
+            live_progress_writer,
         )
 
     async def _run_impl(
@@ -233,6 +326,7 @@ class BrowserAgentService:
         username: Optional[str],
         password: Optional[str],
         use_google_signin: bool = False,
+        live_progress_writer: LiveProgressWriter = None,
     ) -> Dict[str, Any]:
         """Core agent run (must execute on a loop that supports subprocess — e.g. Proactor on Windows)."""
         # Import here to keep startup fast and avoid errors if not yet installed
@@ -243,35 +337,45 @@ class BrowserAgentService:
         steps_data: List[Dict] = []
         step_counter = [0]
 
-        set_progress(run_id, {
-            "status": "running",
-            "percentage": 5,
-            "current_step": "Opening Chrome browser and navigating to the application…",
-            "screenshots": [],
-            "steps": [],
-            "error": None,
-        })
+        await self._emit_progress(
+            run_id,
+            {
+                "status": "running",
+                "percentage": 5,
+                "current_step": "Opening Chrome browser and navigating to the application…",
+                "screenshots": [],
+                "steps": [],
+                "error": None,
+            },
+            live_progress_writer,
+        )
 
         async def _on_step(_state: Any, output: Any, step_num: int) -> None:
             step_counter[0] = step_num
             # Post-action screenshot is saved in _on_step_end.
 
             desc = self._action_description(output)
-            steps_data.append({
-                "step_number": step_num,
-                "description": desc,
-                "screenshot_path": None,
-            })
+            steps_data.append(
+                {
+                    "step_number": step_num,
+                    "description": desc,
+                    "screenshot_path": None,
+                }
+            )
 
-            pct = min(90, 5 + step_num * 11)
-            set_progress(run_id, {
-                "status": "running",
-                "percentage": pct,
-                "current_step": desc,
-                "screenshots": list(screenshots),
-                "steps": list(steps_data),
-                "error": None,
-            })
+            pct = _running_percentage(step_num)
+            await self._emit_progress(
+                run_id,
+                {
+                    "status": "running",
+                    "percentage": pct,
+                    "current_step": desc,
+                    "screenshots": list(screenshots),
+                    "steps": list(steps_data),
+                    "error": None,
+                },
+                live_progress_writer,
+            )
 
         async def _on_step_end(agent: Any) -> None:
             if not steps_data:
@@ -297,15 +401,19 @@ class BrowserAgentService:
             last["screenshot_path"] = path
             if path not in screenshots:
                 screenshots.append(path)
-            pct = min(90, 5 + step_num * 11)
-            set_progress(run_id, {
-                "status": "running",
-                "percentage": pct,
-                "current_step": last.get("description") or "",
-                "screenshots": list(screenshots),
-                "steps": list(steps_data),
-                "error": None,
-            })
+            pct = _running_percentage(step_num)
+            await self._emit_progress(
+                run_id,
+                {
+                    "status": "running",
+                    "percentage": pct,
+                    "current_step": last.get("description") or "",
+                    "screenshots": list(screenshots),
+                    "steps": list(steps_data),
+                    "error": None,
+                },
+                live_progress_writer,
+            )
 
         sensitive_data = None
         if username and password and not use_google_signin:
@@ -327,7 +435,7 @@ class BrowserAgentService:
                 use_vision=True,
             )
 
-            result = await agent.run(max_steps=15, on_step_end=_on_step_end)
+            result = await agent.run(max_steps=IC_MAX_STEPS, on_step_end=_on_step_end)
 
             # Extract final summary text
             final_text = ""
@@ -339,18 +447,20 @@ class BrowserAgentService:
             except Exception:
                 pass
 
-            _fail_kw = ["fail", "error", "unable", "could not", "not found", "404", "500", "invalid"]
+            text_fail = _final_text_indicates_failure(final_text)
             success = False
             if hasattr(result, "is_successful"):
                 flag = result.is_successful()
-                if flag is True:
-                    success = True
-                elif flag is False:
+                if flag is False:
                     success = False
+                elif flag is True:
+                    # Do not trust is_successful alone when the narrative describes failure or error pages.
+                    success = not text_fail
                 else:
-                    success = not any(kw in final_text.lower() for kw in _fail_kw)
+                    success = not text_fail
             else:
-                success = not any(kw in final_text.lower() for kw in _fail_kw)
+                success = not text_fail
+
             dur = int((datetime.utcnow() - start).total_seconds() * 1000)
             n = step_counter[0]
 
@@ -369,7 +479,7 @@ class BrowserAgentService:
                 "duration_ms": dur,
                 "error": None,
             }
-            set_progress(run_id, outcome)
+            await self._emit_progress(run_id, outcome, live_progress_writer)
             return outcome
 
         except Exception as exc:
@@ -391,5 +501,5 @@ class BrowserAgentService:
                 "duration_ms": dur,
                 "error": _redact_ic_text(exc_s, username, password),
             }
-            set_progress(run_id, err)
+            await self._emit_progress(run_id, err, live_progress_writer)
             return err
