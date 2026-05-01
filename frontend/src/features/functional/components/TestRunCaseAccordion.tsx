@@ -165,6 +165,7 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
                     testResultId={result.test_result_id}
                     agentLogs={detail.agent_logs}
                     primaryScreenshotPath={detail.screenshot_path ?? undefined}
+                    stepResults={detail.step_results ?? result.step_results}
                   />
                   {stepRows?.map((s, i) => {
                     const descText = formatStepDisplayValue(s.description)

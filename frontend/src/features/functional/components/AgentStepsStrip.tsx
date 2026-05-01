@@ -5,7 +5,8 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
 } from '@heroicons/react/24/outline'
-import type { AgentLogEntry } from '../types'
+import type { AgentLogEntry, TestStepResult } from '../types'
+import { formatStepDisplayValue } from '../utils/formatStepDisplayValue'
 import { fetchScreenshotBlobUrl } from '../utils/screenshotFetch'
 
 function screenshotBasename(path: string): string {
@@ -33,6 +34,7 @@ function LazyAgentThumb({
   onOpen,
   blobUrl,
   registerThumb,
+  captionLabel,
 }: {
   runId: number
   testResultId: number
@@ -43,6 +45,8 @@ function LazyAgentThumb({
   onOpen: (entry: AgentLogEntry, index: number) => void
   blobUrl: string | undefined
   registerThumb: (index: number, el: HTMLButtonElement | null) => void
+  /** e.g. "3 / 12" — screenshot index, not test-case step number */
+  captionLabel: string
 }) {
   const ref = useRef<HTMLButtonElement | null>(null)
 
@@ -106,10 +110,10 @@ function LazyAgentThumb({
         )}
       </div>
       <div
-        className="px-1 py-0.5 text-[9px] text-gray-600 truncate"
+        className="px-1 py-0.5 text-[9px] text-gray-600 truncate tabular-nums"
         title={entry.description}
       >
-        #{entry.agent_step}
+        {captionLabel}
       </div>
     </button>
   )
@@ -121,6 +125,8 @@ interface AgentStepsStripProps {
   agentLogs?: AgentLogEntry[] | null
   /** First / summary screenshot from test_result.screenshot_path (JWT-backed fetch). */
   primaryScreenshotPath?: string | null
+  /** Authoritative test-case steps for reference (optional); not 1:1 with each screenshot. */
+  stepResults?: TestStepResult[] | null
   /** When false, render nothing (row collapsed). */
   enabled?: boolean
 }
@@ -130,6 +136,7 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
   testResultId,
   agentLogs,
   primaryScreenshotPath,
+  stepResults,
   enabled = true,
 }) => {
   const logs = agentLogs ?? []
@@ -137,6 +144,10 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
     () => logs.filter((l) => l.screenshot_path),
     [logs]
   )
+  const orderedStepResults = useMemo(() => {
+    if (!stepResults?.length) return []
+    return [...stepResults].sort((a, b) => a.step_number - b.step_number)
+  }, [stepResults])
   const [blobByKey, setBlobByKey] = useState<Record<string, string>>({})
   const [primaryBlobUrl, setPrimaryBlobUrl] = useState<string | null>(null)
   /** Index into `withShots` when viewing agent step gallery; null = closed */
@@ -291,7 +302,7 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
 
   if (!primaryName && logs.length === 0) {
     return (
-      <p className="text-xs text-gray-400 italic py-1">No agent step log for this run.</p>
+      <p className="text-xs text-gray-400 italic py-1">No execution evidence captured for this run.</p>
     )
   }
 
@@ -326,14 +337,14 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
 
       {logs.length > 0 && withShots.length === 0 && (
         <p className="text-xs text-gray-400 italic py-1">
-          {logs.length} agent step(s); no screenshots captured.
+          {logs.length} browser action(s) recorded; no screenshots were saved.
         </p>
       )}
 
       {withShots.length > 0 && (
         <div className="min-w-0 max-w-full">
           <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
-            <PhotoIcon className="w-3.5 h-3.5" /> Agent steps (screenshots load as you scroll)
+            <PhotoIcon className="w-3.5 h-3.5" /> Screenshots from this run (load as you scroll)
           </p>
           <div className="flex items-center gap-1 min-w-0 max-w-full">
             <button
@@ -375,6 +386,7 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
                         onLoaded={onThumbLoaded}
                         onOpen={onThumbOpen}
                         registerThumb={registerThumb}
+                        captionLabel={`${index + 1} / ${withShots.length}`}
                       />
                     </div>
                   )
@@ -415,7 +427,9 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
             />
             <div className="p-4 text-sm">
               <p className="font-semibold text-gray-900">Run snapshot</p>
-              <p className="text-gray-600 mt-1 text-xs">Primary screenshot for this test result.</p>
+              <p className="text-gray-600 mt-1 text-xs">
+                Summary image for this test result (not tied to a single test step).
+              </p>
             </div>
           </div>
         </div>
@@ -472,16 +486,40 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
             ) : (
               <div className="p-16 text-gray-500 text-sm">Could not load image.</div>
             )}
-            <div className="p-4 text-sm border-t border-gray-100">
+            <div className="p-4 text-sm border-t border-gray-100 max-h-[40vh] overflow-y-auto">
               <p id="agent-gallery-title" className="font-semibold text-gray-900">
-                Agent step {galleryEntry.agent_step}
-                <span className="text-gray-500 font-normal text-xs ml-2">
-                  {galleryIndex !== null ? `${galleryIndex + 1} / ${withShots.length}` : ''}
-                </span>
+                Screenshot {(galleryIndex ?? 0) + 1} of {withShots.length}
               </p>
-              <p className="text-gray-600 mt-1">{galleryEntry.description}</p>
+              <p className="text-[10px] text-gray-500 mt-1">
+                Each image is from the browser automation trace. The counter is not the same as your
+                test-case step numbers.
+              </p>
+              <div className="mt-3">
+                <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+                  Browser action
+                </p>
+                <p className="text-gray-700 mt-0.5">{galleryEntry.description}</p>
+              </div>
               {galleryEntry.adaptation && (
                 <p className="text-xs text-purple-700 mt-2">{galleryEntry.adaptation}</p>
+              )}
+              {orderedStepResults.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-gray-100">
+                  <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                    Test case steps (reference)
+                  </p>
+                  <ol className="list-decimal list-inside space-y-1.5 text-xs text-gray-600">
+                    {orderedStepResults.map((s) => {
+                      const line = formatStepDisplayValue(s.description)
+                      return (
+                        <li key={s.step_number} className="pl-0.5">
+                          <span className="font-medium text-gray-700">Step {s.step_number}: </span>
+                          {line || '—'}
+                        </li>
+                      )
+                    })}
+                  </ol>
+                </div>
               )}
               <p className="text-[10px] text-gray-400 mt-3">
                 Use the side arrows or ← → keys for the next or previous screenshot. Esc to close.

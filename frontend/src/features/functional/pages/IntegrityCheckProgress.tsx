@@ -72,9 +72,14 @@ export default function IntegrityCheckProgress({
             : currentStep || 'Starting…'}
         </p>
         {!isFinished && (
-          <span className="flex items-center gap-1.5 text-xs text-blue-600 animate-pulse">
-            <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
-            Browser is running…
+          <span className="flex flex-col items-center gap-1">
+            <span className="flex items-center gap-1.5 text-xs text-blue-600 animate-pulse">
+              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+              Browser is running…
+            </span>
+            <span className="text-[10px] text-gray-400 text-center max-w-sm px-2">
+              Progress advances with each browser step and saved screenshot; 100% appears when the check finishes.
+            </span>
           </span>
         )}
       </div>

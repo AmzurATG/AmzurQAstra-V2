@@ -176,16 +176,6 @@ export function IntegrityCheckScreenshotGallery({
                   {galleryIndex + 1} / {screenshots.length}
                 </span>
               </p>
-              <p className="mt-2">
-                <a
-                  href={currentUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-primary-600 hover:underline"
-                >
-                  Open in new tab
-                </a>
-              </p>
               <p className="text-[10px] text-gray-400 mt-3">
                 Use the side arrows or ← → keys for the next or previous
                 screenshot. Esc to close.

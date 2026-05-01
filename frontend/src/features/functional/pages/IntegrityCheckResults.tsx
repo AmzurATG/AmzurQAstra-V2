@@ -54,7 +54,7 @@ export default function IntegrityCheckResults({ result }: Props) {
             <IntegrityCheckScreenshotGallery
               screenshots={result.screenshots}
               heading={`Screens from this run (${result.screenshots.length})`}
-              hint="Click a thumbnail for the gallery. Use ← → or the side arrows; Esc to close. You can still open the current shot in a new tab from the viewer."
+              hint="Click a thumbnail for the gallery. Use ← → or the side arrows; Esc to close."
               variant="comfortable"
             />
           )}

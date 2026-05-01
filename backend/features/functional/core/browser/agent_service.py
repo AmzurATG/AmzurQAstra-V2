@@ -108,13 +108,17 @@ def _redact_ic_text(
     return out if out is not None else ""
 
 
-def _running_percentage(step_num: int) -> int:
+def _integrity_running_pct(step_num: int, screenshot_count: int) -> int:
     """
-    Map agent step index to ~5–90% so the final jump to 100% is reserved for completion.
-    Aligns UI progress to IC_MAX_STEPS instead of a fixed increment per step.
+    Running progress ~5–90%. Uses both agent step index and saved screenshot count
+    (whichever advances further) so the ring tracks evidence and does not lag behind
+    when the step counter and captures differ.
     """
-    s = max(0, min(step_num, IC_MAX_STEPS))
-    return min(90, 5 + int((s / float(IC_MAX_STEPS)) * 85))
+    s = max(0, min(int(step_num), IC_MAX_STEPS))
+    sh = max(0, min(int(screenshot_count), IC_MAX_STEPS))
+    step_pct = min(90, 5 + int((s / float(IC_MAX_STEPS)) * 85))
+    shot_pct = min(90, 5 + int((sh / float(IC_MAX_STEPS)) * 85))
+    return min(90, max(step_pct, shot_pct))
 
 
 def _final_text_indicates_failure(final_text: str) -> bool:
@@ -199,55 +203,73 @@ class BrowserAgentService:
             logger.warning(f"[BrowserAgent] Screenshot save failed step {step}: {exc}")
             return None
 
-    def _humanize_action_dict(self, d: dict) -> str:
-        """Turn browser-use action payload into plain language for non-technical users."""
-        if not d:
-            return "Working on the page…"
-        for key, val in d.items():
-            if not isinstance(val, dict):
-                continue
-            k = key.lower()
-            if k in ("click", "click_element"):
-                idx = val.get("index")
-                return f"Clicked item {idx} on the page" if idx is not None else "Clicked something on the page"
-            if k in ("input", "input_text"):
-                idx = val.get("index")
-                return f"Typed into field {idx}" if idx is not None else "Entered text in a field"
-            if k in ("navigate", "go_to_url", "goto"):
-                full = val.get("url") or ""
-                short = full[:80] + ("…" if len(full) > 80 else "")
-                return f"Opened: {short}" if full else "Opened a new page"
-            if k in ("scroll", "scroll_down", "scroll_up"):
-                return "Scrolled the page"
-            if k in ("done", "complete"):
-                msg = (val.get("text") or val.get("message") or "").strip()
-                if msg:
-                    return f"Finished — {msg[:280]}" + ("…" if len(msg) > 280 else "")
-                return "Finished the check"
-            if k in ("go_back",):
-                return "Went back to the previous page"
-            if k in ("switch_tab",):
-                return "Switched browser tab"
-            if k in ("wait", "wait_for"):
-                return "Waited for the page to update"
-            if k in ("extract", "extract_content"):
-                return "Read content from the page"
-            if k == "send_keys":
-                return "Sent keyboard input"
-        return "Worked on the page"
-
-    def _action_description(self, output: Any) -> str:
-        """Extract a human-readable description from AgentOutput."""
+    def _action_kinds_from_output(self, output: Any) -> List[str]:
+        kinds: List[str] = []
         try:
             if output and hasattr(output, "action") and output.action:
-                parts = []
                 for act in output.action:
-                    model_dump = act.model_dump(exclude_none=True) if hasattr(act, "model_dump") else {}
-                    parts.append(self._humanize_action_dict(model_dump))
-                return " · ".join(parts) if parts else "Working…"
+                    model_dump = (
+                        act.model_dump(exclude_none=True) if hasattr(act, "model_dump") else {}
+                    )
+                    for key, val in model_dump.items():
+                        if not isinstance(val, dict):
+                            continue
+                        k = key.lower()
+                        if k in ("click", "click_element"):
+                            kinds.append("click")
+                        elif k in ("input", "input_text"):
+                            kinds.append("input")
+                        elif k in ("navigate", "go_to_url", "goto"):
+                            kinds.append("navigate")
+                        elif k in ("scroll", "scroll_down", "scroll_up"):
+                            kinds.append("scroll")
+                        elif k in ("done", "complete"):
+                            kinds.append("done")
+                        elif k in ("wait", "wait_for"):
+                            kinds.append("wait")
+                        elif k in ("extract", "extract_content"):
+                            kinds.append("extract")
+                        elif k in ("go_back",):
+                            kinds.append("back")
+                        elif k in ("switch_tab",):
+                            kinds.append("tab")
+                        elif k == "send_keys":
+                            kinds.append("keys")
         except Exception:
             pass
-        return "Working…"
+        return kinds
+
+    def _friendly_step_headline(self, output: Any, has_login_creds: bool) -> str:
+        """Short, non-technical line for the integrity-check progress UI."""
+        kinds = self._action_kinds_from_output(output)
+        if not kinds:
+            return "Working on the page…"
+        if kinds == ["done"] or (len(kinds) == 1 and kinds[0] == "done"):
+            return "Finishing the check"
+        inputs = sum(1 for k in kinds if k == "input")
+        clicks = sum(1 for k in kinds if k == "click")
+        navs = sum(1 for k in kinds if k == "navigate")
+        if navs and inputs == 0 and clicks == 0:
+            return "Opening the application"
+        if inputs >= 2 and clicks >= 1:
+            if has_login_creds:
+                return "Entered username and password, then continued"
+            return "Filled in multiple fields and continued"
+        if inputs >= 2:
+            return "Filled in the form fields"
+        if inputs >= 1 and clicks >= 1:
+            return "Entered details and clicked to continue"
+        if inputs == 1:
+            return "Filled in a form field"
+        if clicks >= 1:
+            return "Clicked to continue on the page"
+        if any(k == "scroll" for k in kinds):
+            return "Scrolled the page"
+        if any(k == "wait" for k in kinds):
+            return "Waiting for the page to update"
+        if any(k == "extract" for k in kinds):
+            return "Read content from the page"
+        return "Working on the page…"
 
     async def _emit_progress(
         self,
@@ -336,6 +358,7 @@ class BrowserAgentService:
         screenshots: List[str] = []
         steps_data: List[Dict] = []
         step_counter = [0]
+        has_login_creds = bool(username and password) and not use_google_signin
 
         await self._emit_progress(
             run_id,
@@ -354,7 +377,7 @@ class BrowserAgentService:
             step_counter[0] = step_num
             # Post-action screenshot is saved in _on_step_end.
 
-            desc = self._action_description(output)
+            desc = self._friendly_step_headline(output, has_login_creds)
             steps_data.append(
                 {
                     "step_number": step_num,
@@ -363,7 +386,7 @@ class BrowserAgentService:
                 }
             )
 
-            pct = _running_percentage(step_num)
+            pct = _integrity_running_pct(step_num, len(screenshots))
             await self._emit_progress(
                 run_id,
                 {
@@ -401,7 +424,7 @@ class BrowserAgentService:
             last["screenshot_path"] = path
             if path not in screenshots:
                 screenshots.append(path)
-            pct = _running_percentage(step_num)
+            pct = _integrity_running_pct(step_num, len(screenshots))
             await self._emit_progress(
                 run_id,
                 {
@@ -464,6 +487,20 @@ class BrowserAgentService:
             dur = int((datetime.utcnow() - start).total_seconds() * 1000)
             n = step_counter[0]
 
+            pre_complete_pct = min(95, max(_integrity_running_pct(n, len(screenshots)), 90))
+            await self._emit_progress(
+                run_id,
+                {
+                    "status": "running",
+                    "percentage": pre_complete_pct,
+                    "current_step": "Wrapping up result…",
+                    "screenshots": list(screenshots),
+                    "steps": list(steps_data),
+                    "error": None,
+                },
+                live_progress_writer,
+            )
+
             summary_safe = _redact_ic_text(final_text[:500], username, password)
             outcome: Dict[str, Any] = {
                 "status": "completed",
@@ -487,10 +524,11 @@ class BrowserAgentService:
             dur = int((datetime.utcnow() - start).total_seconds() * 1000)
             n = step_counter[0]
             exc_s = str(exc)
+            run_pct = _integrity_running_pct(n, len(screenshots))
             err: Dict[str, Any] = {
                 "status": "error",
                 "overall_status": "error",
-                "percentage": 100,
+                "percentage": max(5, min(92, run_pct)),
                 "current_step": "An error occurred",
                 "screenshots": list(screenshots),
                 "steps": list(steps_data),
