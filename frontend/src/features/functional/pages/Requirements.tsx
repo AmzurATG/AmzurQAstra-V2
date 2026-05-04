@@ -314,12 +314,26 @@ export default function Requirements() {
     return false
   }
 
+  const requirementHasCompletedGap = (req: Requirement) => {
+    const rid = Number(req.id)
+    return gapRuns.some(
+      (r) => r.requirement_id === rid && r.status === 'completed' && r.result_json != null,
+    )
+  }
+
+  /** Test recommendations require processed requirement, stories, and a completed gap analysis run. */
+  const testRecommendationsDisabledFor = (req: Requirement) => {
+    if (gapAnalysisDisabledFor(req)) return true
+    if (!requirementHasCompletedGap(req)) return true
+    return false
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Requirements</h1>
-          <p className="text-gray-600">Manage requirement documents for test generation</p>
+          <p className="text-gray-600">Manage requirement documents — run gap analysis first, then testing recommendations.</p>
         </div>
         <Button onClick={() => setIsUploadModalOpen(true)}>
           <ArrowUpTrayIcon className="w-4 h-4 mr-2" />
@@ -444,13 +458,15 @@ export default function Requirements() {
                         size="sm"
                         onClick={() => handleTestRecommendations(req)}
                         isLoading={testRecRunningId === req.id}
-                        disabled={rowActionBusy || gapAnalysisDisabledFor(req)}
+                        disabled={rowActionBusy || testRecommendationsDisabledFor(req)}
                         title={
                           !requirementHasParsedContent(req)
                             ? 'Upload and process a document first'
                             : userStoryTotal === 0
                               ? 'Import or create user stories first'
-                              : 'Run test recommendations (domain playbook)'
+                              : !requirementHasCompletedGap(req)
+                                ? 'Run gap analysis for this requirement first — test recommendations build on that report'
+                                : 'Test recommendations (playbook + gap context)'
                         }
                       >
                         <LightBulbIcon className="w-4 h-4 mr-1" />
@@ -601,7 +617,8 @@ export default function Requirements() {
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Test recommendation runs</h2>
               <p className="text-sm text-gray-500">
-                Domain-based standard and recommended test focus areas from the BRD and user stories.
+                Available after a completed <strong>gap analysis</strong> for the same requirement. Combines the YAML
+                playbook (general + industry domain), gap context, and tailored narrative.
               </p>
             </div>
           </div>
@@ -611,7 +628,8 @@ export default function Requirements() {
             </div>
           ) : testRecRuns.length === 0 ? (
             <p className="text-sm text-gray-500 text-center py-6">
-              No runs yet. Use <strong>Recommendations</strong> on a requirement row above.
+              No runs yet. Complete <strong>gap analysis</strong> on a requirement, then use <strong>Recommendations</strong>{' '}
+              on that row.
             </p>
           ) : (
             <div className="overflow-x-auto -mx-6 px-6">

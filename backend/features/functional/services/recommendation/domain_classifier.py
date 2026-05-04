@@ -124,6 +124,28 @@ def mapping_by_id(mapping: DomainTestMappingFile, domain_id: str) -> DomainRecor
     return None
 
 
+def _playbook_key(row: dict) -> Tuple[str, str]:
+    return (
+        str(row.get("category") or "").strip().lower(),
+        str(row.get("name") or "").strip().lower(),
+    )
+
+
+def _dedupe_merge_playbooks(primary: List[dict], secondary: List[dict]) -> List[dict]:
+    """Preserve order: all rows from primary, then rows from secondary whose (category, name) is new."""
+    seen: set[Tuple[str, str]] = set()
+    out: List[dict] = []
+    for r in primary + secondary:
+        k = _playbook_key(r)
+        if not k[0] and not k[1]:
+            continue
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(dict(r))
+    return out
+
+
 def strategies_for_domain(
     domain_id: str, mapping: DomainTestMappingFile, *, general_domain_id: str = "general"
 ) -> Tuple[List[dict], List[dict]]:
@@ -134,3 +156,25 @@ def strategies_for_domain(
     if not rec:
         return [], []
     return [t.model_dump() for t in rec.standard_tests], [t.model_dump() for t in rec.recommended_tests]
+
+
+def merged_strategies_for_domain(
+    domain_id: str, mapping: DomainTestMappingFile, *, general_domain_id: str = "general"
+) -> Tuple[List[dict], List[dict]]:
+    """
+    Merge general-domain playbook with the selected domain (dedupe by category + name).
+    Domain-specific rows keep YAML ordering after the general baseline.
+    """
+    gen = mapping_by_id(mapping, general_domain_id)
+    if not gen:
+        return strategies_for_domain(domain_id, mapping, general_domain_id=general_domain_id)
+    std_g = [t.model_dump() for t in gen.standard_tests]
+    rec_g = [t.model_dump() for t in gen.recommended_tests]
+    if domain_id == general_domain_id:
+        return list(std_g), list(rec_g)
+    dom = mapping_by_id(mapping, domain_id)
+    if not dom:
+        return list(std_g), list(rec_g)
+    std_d = [t.model_dump() for t in dom.standard_tests]
+    rec_d = [t.model_dump() for t in dom.recommended_tests]
+    return _dedupe_merge_playbooks(std_g, std_d), _dedupe_merge_playbooks(rec_g, rec_d)

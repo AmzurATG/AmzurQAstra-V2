@@ -72,6 +72,55 @@ function downloadRunJson(run: TestRecommendationRun) {
   URL.revokeObjectURL(url)
 }
 
+function priorityRank(p?: string): number {
+  const x = (p || '').toLowerCase()
+  if (x === 'critical') return 0
+  if (x === 'high') return 1
+  if (x === 'medium') return 2
+  return 3
+}
+
+/** Short list of high/critical items with reasons — appears under the main heading. */
+function HighPriorityCallout({
+  standard,
+  recommended,
+}: {
+  standard: TestRecommendationStrategyItem[]
+  recommended: TestRecommendationStrategyItem[]
+}) {
+  const all = [
+    ...standard.map((r) => ({ ...r, section: 'Standard' as const })),
+    ...recommended.map((r) => ({ ...r, section: 'Additional' as const })),
+  ]
+  const urgent = all.filter((r) => {
+    const p = (r.priority || '').toLowerCase()
+    return p === 'high' || p === 'critical'
+  })
+  if (urgent.length === 0) return null
+  urgent.sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority))
+  const pick = urgent.slice(0, 10)
+  return (
+    <div className="rounded-lg bg-white border border-amber-200/80 p-3 shadow-sm">
+      <h4 className="text-sm font-semibold text-amber-950 mb-2">Highest priority — what to validate first</h4>
+      <ul className="space-y-2.5 text-sm text-gray-800 list-disc pl-5 marker:text-amber-600">
+        {pick.map((r, i) => (
+          <li key={i} className="leading-snug">
+            <span className="font-semibold text-gray-900">
+              [{r.section}] {r.name}
+            </span>
+            {r.reason ? (
+              <span className="block text-gray-700 mt-1 leading-relaxed">
+                <span className="font-medium text-gray-800">Why it matters: </span>
+                {r.reason}
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function StrategyTable({
   title,
   items,
@@ -97,16 +146,24 @@ function StrategyTable({
               <th className="px-3 py-2">Category</th>
               <th className="px-3 py-2">Test focus</th>
               <th className="px-3 py-2">Priority</th>
-              <th className="px-3 py-2">Why</th>
+              <th className="px-3 py-2">Why it&apos;s necessary</th>
+              <th className="px-3 py-2">Tailored detail</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {items.map((row, idx) => (
-              <tr key={idx} className="bg-white">
+              <tr key={idx} className="bg-white align-top">
                 <td className="px-3 py-2 text-gray-700">{row.category ?? '—'}</td>
                 <td className="px-3 py-2 font-medium text-gray-900">{row.name ?? '—'}</td>
                 <td className="px-3 py-2 text-gray-600 capitalize">{row.priority ?? '—'}</td>
                 <td className="px-3 py-2 text-gray-600">{row.reason ?? '—'}</td>
+                <td className="px-3 py-2 text-gray-600 text-xs">
+                  {row.detailed_guidance?.trim() ? (
+                    <span className="italic text-gray-700 block whitespace-pre-wrap">{row.detailed_guidance}</span>
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -374,83 +431,33 @@ export default function TestRecommendationRunModal({
                       </Button>
                     </div>
 
-                    {snap?.user_stories_included && snap.user_stories_included.length > 0 && (
-                      <details className="text-sm rounded border border-gray-200 p-3">
-                        <summary className="cursor-pointer font-medium text-gray-800">
-                          User stories included in this run ({snap.user_stories_included.length}
-                          {typeof snap.user_stories_total_in_project === 'number'
-                            ? ` of ${snap.user_stories_total_in_project} in project`
-                            : ''}
-                          )
-                        </summary>
-                        <ul className="mt-2 space-y-1 text-gray-600 list-disc pl-5 max-h-40 overflow-y-auto">
-                          {snap.user_stories_included.map((s, i) => (
-                            <li key={s.id ?? i}>
-                              <span className="font-mono text-xs">{s.external_key || `#${s.id}`}</span>
-                              {s.title ? ` — ${s.title}` : ''}
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
-                    )}
+                    <div className="space-y-6">
+                      <div className="space-y-2">
+                        <h3 className="text-2xl font-bold text-gray-900 tracking-tight">
+                          Test Strategy Recommendations
+                        </h3>
+                        <p className="text-gray-600 leading-relaxed">
+                          This report provides a tailored testing strategy based on your project requirements and current backlog state.
+                          We focus on the most critical areas to ensure high quality and mitigate potential risks.
+                        </p>
+                      </div>
 
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm text-gray-600">Detected domain</span>
-                        <span className="font-semibold text-gray-900">
-                          {result.domain_label || result.domain_id || '—'}
-                        </span>
-                        <span className="text-xs px-2 py-0.5 rounded bg-white text-gray-600 border border-gray-200">
-                          {result.domain_id}
-                        </span>
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        Confidence:{' '}
-                        <span className="font-medium text-gray-900">
-                          {typeof result.confidence === 'number' ? `${(result.confidence * 100).toFixed(0)}%` : '—'}
-                        </span>
-                        {' · '}
-                        Source: <span className="font-medium text-gray-900">{result.source || '—'}</span>
-                      </div>
-                      {(result.intent_summary || result.llm_fallback?.intent_summary) && (
-                        <div className="rounded border border-blue-100 bg-blue-50/80 p-3 text-sm text-gray-800">
-                          <span className="font-medium text-gray-900">Product intent</span>
-                          <p className="mt-1 text-gray-700">
-                            {result.intent_summary || result.llm_fallback?.intent_summary}
+                      {result.detailed_report?.summary_paragraph ? (
+                        <div className="bg-slate-50 border-l-4 border-amber-500 p-5 rounded-r-lg shadow-sm">
+                          <h4 className="text-sm font-bold text-amber-900 uppercase tracking-wider mb-2">Executive Summary</h4>
+                          <p className="text-gray-800 leading-relaxed text-lg italic">
+                            &ldquo;{result.detailed_report.summary_paragraph}&rdquo;
                           </p>
                         </div>
-                      )}
-                      {result.report_summary && (
-                        <p className="text-xs text-gray-600">{result.report_summary}</p>
-                      )}
-                      {result.llm_fallback?.rationale && (
-                        <p className="text-xs text-gray-600">Domain rationale: {result.llm_fallback.rationale}</p>
-                      )}
-                      {result.llm_fallback?.error && (
-                        <p className="text-xs text-amber-800">
-                          {result.source === 'keyword_fallback'
-                            ? 'LLM classification failed (keyword matching used): '
-                            : 'LLM note failed: '}
-                          {result.llm_fallback.error}
-                        </p>
-                      )}
-                    </div>
+                      ) : null}
 
-                    {result.local_classification?.evidence &&
-                      Object.keys(result.local_classification.evidence).length > 0 && (
-                        <details className="text-sm rounded border border-gray-200 p-3">
-                          <summary className="cursor-pointer font-medium text-gray-800">Keyword evidence</summary>
-                          <ul className="mt-2 space-y-1 text-gray-600 list-disc pl-5">
-                            {Object.entries(result.local_classification.evidence).map(([dom, terms]) => (
-                              <li key={dom}>
-                                <span className="font-medium text-gray-800">{dom}</span>
-                                {': '}
-                                {terms && terms.length ? terms.join(', ') : '—'}
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      )}
+                      <HighPriorityCallout standard={standard} recommended={recommended} />
+
+                      <div className="space-y-8 pt-4">
+                        <StrategyTable title="Primary Test Focus Areas" items={standard} />
+                        <StrategyTable title="Additional Recommended Coverage" items={recommended} />
+                      </div>
+                    </div>
 
                     {(result.warnings?.length ?? 0) > 0 && (
                       <div className="rounded-md bg-amber-50 border border-amber-100 p-3 text-sm text-amber-900 space-y-1">
@@ -460,8 +467,162 @@ export default function TestRecommendationRunModal({
                       </div>
                     )}
 
-                    <StrategyTable title="Standard tests" items={standard} />
-                    <StrategyTable title="Additional recommendations" items={recommended} />
+                    <details className="group text-sm rounded-lg border border-gray-200 bg-gray-50/80">
+                      <summary className="cursor-pointer font-semibold text-gray-800 px-4 py-3 list-none flex items-center gap-2 [&::-webkit-details-marker]:hidden">
+                        <span className="text-amber-700 group-open:rotate-90 transition-transform inline-block">▸</span>
+                        Supporting details — domain detection, gap analysis, methodology
+                      </summary>
+                      <div className="px-4 pb-4 pt-2 space-y-4 border-t border-gray-200">
+                        {snap?.user_stories_included && snap.user_stories_included.length > 0 && (
+                          <details className="text-sm rounded border border-gray-200 p-3 bg-white">
+                            <summary className="cursor-pointer font-medium text-gray-800">
+                              User stories included in this run ({snap.user_stories_included.length}
+                              {typeof snap.user_stories_total_in_project === 'number'
+                                ? ` of ${snap.user_stories_total_in_project} in project`
+                                : ''}
+                              )
+                            </summary>
+                            <ul className="mt-2 space-y-1 text-gray-600 list-disc pl-5 max-h-40 overflow-y-auto">
+                              {snap.user_stories_included.map((s, i) => (
+                                <li key={s.id ?? i}>
+                                  <span className="font-mono text-xs">{s.external_key || `#${s.id}`}</span>
+                                  {s.title ? ` — ${s.title}` : ''}
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+
+                        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm text-gray-600">Detected domain</span>
+                            <span className="font-semibold text-gray-900">
+                              {result.domain_label || result.domain_id || '—'}
+                            </span>
+                            <span className="text-xs px-2 py-0.5 rounded bg-gray-50 text-gray-600 border border-gray-200">
+                              {result.domain_id}
+                            </span>
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            Confidence:{' '}
+                            <span className="font-medium text-gray-900">
+                              {typeof result.confidence === 'number'
+                                ? `${(result.confidence * 100).toFixed(0)}%`
+                                : '—'}
+                            </span>
+                            {' · '}
+                            Source: <span className="font-medium text-gray-900">{result.source || '—'}</span>
+                          </div>
+                          {(result.intent_summary || result.llm_fallback?.intent_summary) && (
+                            <div className="rounded border border-blue-100 bg-blue-50/80 p-3 text-sm text-gray-800">
+                              <span className="font-medium text-gray-900">Product intent</span>
+                              <p className="mt-1 text-gray-700">
+                                {result.intent_summary || result.llm_fallback?.intent_summary}
+                              </p>
+                            </div>
+                          )}
+                          {result.report_summary && (
+                            <p className="text-xs text-gray-600">{result.report_summary}</p>
+                          )}
+                          {result.llm_fallback?.rationale && (
+                            <p className="text-xs text-gray-600">Domain rationale: {result.llm_fallback.rationale}</p>
+                          )}
+                          {result.llm_fallback?.error && (
+                            <p className="text-xs text-amber-800">
+                              {result.source === 'keyword_fallback'
+                                ? 'LLM classification failed (keyword matching used): '
+                                : 'LLM note failed: '}
+                              {result.llm_fallback.error}
+                            </p>
+                          )}
+                        </div>
+
+                        {result.local_classification?.evidence &&
+                          Object.keys(result.local_classification.evidence).length > 0 && (
+                            <details className="text-sm rounded border border-gray-200 p-3 bg-white">
+                              <summary className="cursor-pointer font-medium text-gray-800">Keyword evidence</summary>
+                              <ul className="mt-2 space-y-1 text-gray-600 list-disc pl-5">
+                                {Object.entries(result.local_classification.evidence).map(([dom, terms]) => (
+                                  <li key={dom}>
+                                    <span className="font-medium text-gray-800">{dom}</span>
+                                    {': '}
+                                    {terms && terms.length ? terms.join(', ') : '—'}
+                                  </li>
+                                ))}
+                              </ul>
+                            </details>
+                          )}
+
+                        {result.playbook_merge_note && (
+                          <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-800">
+                            <h4 className="font-semibold text-gray-900 mb-1">How this playbook is built</h4>
+                            <p className="text-gray-700 leading-relaxed">
+                              {result.playbook_merge_note.replace(/\*\*/g, '')}
+                            </p>
+                          </div>
+                        )}
+
+                        {result.gap_analysis_snapshot && (
+                          <div className="rounded-lg border border-gray-200 p-4 text-sm space-y-2 bg-white">
+                            <h4 className="font-semibold text-gray-900">Gap analysis context</h4>
+                            <p className="text-xs text-gray-500">
+                              Run #{result.gap_analysis_snapshot.gap_analysis_run_id ?? '—'} · Coverage
+                              estimate:{' '}
+                              {result.gap_analysis_snapshot.coverage_estimate_percent != null &&
+                              result.gap_analysis_snapshot.coverage_estimate_percent !== undefined
+                                ? `${result.gap_analysis_snapshot.coverage_estimate_percent}%`
+                                : '—'}{' '}
+                              · Gaps: {result.gap_analysis_snapshot.gaps_count ?? '—'} · Suggested stories:{' '}
+                              {result.gap_analysis_snapshot.suggested_stories_count ?? '—'}
+                            </p>
+                            {result.gap_analysis_snapshot.summary && (
+                              <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                {result.gap_analysis_snapshot.summary}
+                              </p>
+                            )}
+                            {result.gap_analysis_snapshot.suggested_user_stories_preview &&
+                              result.gap_analysis_snapshot.suggested_user_stories_preview.length > 0 && (
+                                <details className="text-xs text-gray-600">
+                                  <summary className="cursor-pointer font-medium text-gray-800">
+                                    Suggested stories from gap analysis (
+                                    {result.gap_analysis_snapshot.suggested_user_stories_preview.length})
+                                  </summary>
+                                  <ul className="mt-2 space-y-2 list-disc pl-5">
+                                    {result.gap_analysis_snapshot.suggested_user_stories_preview.map((s, i) => (
+                                      <li key={i}>
+                                        <span className="font-medium text-gray-800">{s.title}</span>
+                                        {s.rationale ? (
+                                          <p className="text-gray-600 mt-0.5">{s.rationale}</p>
+                                        ) : null}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </details>
+                              )}
+                            {result.gap_analysis_snapshot.notes_excerpt ? (
+                              <p className="text-xs text-gray-500 border-t border-gray-100 pt-2">
+                                Notes (excerpt): {result.gap_analysis_snapshot.notes_excerpt}
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
+
+                        {result.detailed_report?.summary_paragraph && (
+                          <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-4 text-sm">
+                            <h4 className="font-semibold text-gray-900 mb-2">Recommendation Summary</h4>
+                            <p className="text-gray-800 leading-relaxed whitespace-pre-wrap">
+                              {result.detailed_report.summary_paragraph}
+                            </p>
+                          </div>
+                        )}
+
+                        {result.detail_llm_error && (
+                          <p className="text-xs text-amber-800 bg-amber-50/80 border border-amber-100 rounded p-2">
+                            Detailed narrative could not be fully generated: {result.detail_llm_error}
+                          </p>
+                        )}
+                      </div>
+                    </details>
                   </>
                 )}
 

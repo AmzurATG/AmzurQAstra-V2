@@ -5,6 +5,7 @@ import pytest
 
 from features.functional.services.recommendation.domain_classifier import (
     classify_domains_keyword,
+    merged_strategies_for_domain,
     strategies_for_domain,
     _count_keyword,
 )
@@ -81,6 +82,13 @@ def test_strategies_for_unknown_falls_back_general(mini_mapping):
 def test_strategies_for_healthcare(mini_mapping):
     std, rec = strategies_for_domain("healthcare", mini_mapping, general_domain_id="general")
     assert any(s["name"] == "PHI" for s in std)
+    assert any(s["name"] == "FHIR" for s in rec)
+
+
+def test_merged_strategies_combine_general_and_domain(mini_mapping):
+    std, rec = merged_strategies_for_domain("healthcare", mini_mapping, general_domain_id="general")
+    std_names = [s["name"] for s in std]
+    assert "Smoke" in std_names and "PHI" in std_names
     assert any(s["name"] == "FHIR" for s in rec)
 
 

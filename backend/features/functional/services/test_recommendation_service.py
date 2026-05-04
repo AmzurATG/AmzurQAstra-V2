@@ -26,13 +26,20 @@ from config import settings
 from features.functional.core.llm_prompts.test_recommendation_domain import (
     build_test_recommendation_domain_system_message,
 )
+from features.functional.core.llm_prompts.test_recommendation_report import (
+    TEST_RECOMMENDATION_REPORT_SYSTEM,
+)
 from features.functional.db.models.gap_analysis_run import GapAnalysisRun
 from features.functional.db.models.requirement import Requirement
 from features.functional.db.models.test_recommendation_run import TestRecommendationRun
-from features.functional.schemas.test_recommendation import LlmDomainClassificationResult
+from features.functional.schemas.test_recommendation import (
+    LlmDomainClassificationResult,
+    LlmTestRecommendationDetailResult,
+    PlaybookGuidanceRow,
+)
 from features.functional.services.recommendation.domain_classifier import (
     classify_domains_keyword,
-    strategies_for_domain,
+    merged_strategies_for_domain,
 )
 from features.functional.services.recommendation.domain_config import (
     domains_catalog_for_prompt,
@@ -90,6 +97,87 @@ def _build_corpus(brd: str, stories: List[UserStory], *, truncated_note: List[st
     if len(stories) > MAX_STORIES:
         truncated_note.append(f"Only first {MAX_STORIES} user stories were included.")
     return "\n".join(lines)
+
+
+def _build_gap_text_for_llm(gap_json: Dict[str, Any]) -> str:
+    """Compact gap analysis narrative for the detail LLM."""
+    lines: List[str] = []
+    lines.append("=== GAP ANALYSIS RESULTS ===")
+    lines.append(str(gap_json.get("summary") or "").strip() or "(no summary)")
+    cov = gap_json.get("coverage_estimate_percent")
+    if cov is not None:
+        lines.append(f"Estimated backlog coverage vs BRD: {cov}%")
+    gaps = gap_json.get("gaps") or []
+    if isinstance(gaps, list) and gaps:
+        lines.append(f"Gaps flagged ({len(gaps)}):")
+        for i, g in enumerate(gaps[:25], 1):
+            if isinstance(g, dict):
+                lines.append(
+                    f"  {i}. [{g.get('type', 'unknown')}] {g.get('detail', '')} "
+                    f"(story: {g.get('related_story_key', '—')})"
+                )
+    sugg = gap_json.get("suggested_user_stories") or []
+    if isinstance(sugg, list) and sugg:
+        lines.append(f"Suggested user stories from gap analysis ({len(sugg)}):")
+        for i, s in enumerate(sugg[:20], 1):
+            if isinstance(s, dict):
+                desc = (s.get("description") or "")[:400]
+                ac = (s.get("acceptance_criteria") or "")[:400]
+                lines.append(
+                    f"  {i}. {s.get('title', '')}\n"
+                    f"     Rationale: {(s.get('rationale') or '')[:500]}\n"
+                    f"     Description: {desc}\n"
+                    f"     AC: {ac}"
+                )
+    notes = str(gap_json.get("notes") or "").strip()
+    if notes:
+        lines.append(f"Analyst notes: {notes[:2500]}")
+    return "\n".join(lines)[:24_000]
+
+
+def _build_gap_snapshot(gap_run: GapAnalysisRun, gap_json: Dict[str, Any]) -> Dict[str, Any]:
+    gaps = gap_json.get("gaps") or []
+    sugg = gap_json.get("suggested_user_stories") or []
+    return {
+        "gap_analysis_run_id": gap_run.id,
+        "summary": (gap_json.get("summary") or "")[:4000],
+        "coverage_estimate_percent": gap_json.get("coverage_estimate_percent"),
+        "gaps_count": len(gaps) if isinstance(gaps, list) else 0,
+        "suggested_stories_count": len(sugg) if isinstance(sugg, list) else 0,
+        "suggested_user_stories_preview": [
+            {
+                "title": (s.get("title") or "")[:500],
+                "rationale": ((s.get("rationale") or "")[:800] if isinstance(s, dict) else ""),
+            }
+            for s in (sugg[:20] if isinstance(sugg, list) else [])
+            if isinstance(s, dict)
+        ],
+        "notes_excerpt": (str(gap_json.get("notes") or ""))[:2000],
+    }
+
+
+def _pad_guidance(
+    playbook: List[dict], rows: List[PlaybookGuidanceRow]
+) -> List[PlaybookGuidanceRow]:
+    out = list(rows)
+    while len(out) < len(playbook):
+        pb = playbook[len(out)]
+        out.append(
+            PlaybookGuidanceRow(
+                category=str(pb.get("category") or ""),
+                name=str(pb.get("name") or ""),
+                guidance="",
+            )
+        )
+    if len(out) > len(playbook):
+        out = out[: len(playbook)]
+    return out
+
+
+def _inject_detailed_guidance(playbook: List[dict], guidance_rows: List[PlaybookGuidanceRow]) -> None:
+    for row, g in zip(playbook, _pad_guidance(playbook, guidance_rows)):
+        extra = (g.guidance or "").strip()
+        row["detailed_guidance"] = extra
 
 
 async def _write_pdf_to_storage(project_id: int, run_id: int, data: bytes) -> str:
@@ -165,11 +253,12 @@ class TestRecommendationService:
             )
         return req
 
-    async def _gap_alignment_warnings(self, requirement_id: int) -> List[str]:
+    async def _gap_alignment_warnings(self, project_id: int, requirement_id: int) -> List[str]:
         warnings: List[str] = []
         res = await self.db.execute(
             select(GapAnalysisRun)
             .where(
+                GapAnalysisRun.project_id == project_id,
                 GapAnalysisRun.requirement_id == requirement_id,
                 GapAnalysisRun.status == "completed",
             )
@@ -222,6 +311,74 @@ class TestRecommendationService:
             raise ValueError(f"Invalid domain_id from LLM: {llm.domain_id}")
         return llm
 
+    async def _get_latest_completed_gap_run(
+        self, project_id: int, requirement_id: int
+    ) -> Optional[GapAnalysisRun]:
+        res = await self.db.execute(
+            select(GapAnalysisRun)
+            .where(
+                GapAnalysisRun.project_id == project_id,
+                GapAnalysisRun.requirement_id == requirement_id,
+                GapAnalysisRun.status == "completed",
+            )
+            .order_by(GapAnalysisRun.created_at.desc())
+            .limit(1)
+        )
+        return res.scalar_one_or_none()
+
+    async def _require_completed_gap_analysis(self, project_id: int, requirement_id: int) -> GapAnalysisRun:
+        run = await self._get_latest_completed_gap_run(project_id, requirement_id)
+        if not run or not run.result_json:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Run and complete gap analysis for this requirement before test recommendations. "
+                    "Gap analysis compares the BRD to your user stories and grounds this testing strategy report."
+                ),
+            )
+        return run
+
+    async def _llm_expand_test_recommendation_detail(
+        self,
+        *,
+        capped_corpus: str,
+        standard_tests: List[dict],
+        recommended_tests: List[dict],
+        gap_text: str,
+        domain_label: str,
+    ) -> Tuple[Optional[LlmTestRecommendationDetailResult], Optional[str]]:
+        playbook_payload = {
+            "standard_tests": standard_tests,
+            "recommended_tests": recommended_tests,
+        }
+        playbook_json = json.dumps(playbook_payload, indent=2)
+        if len(playbook_json) > 20_000:
+            playbook_json = playbook_json[:20_000] + "\n...[truncated]"
+        user_msg = (
+            f"Selected domain (playbook profile): {domain_label}\n\n"
+            f"{gap_text}\n\n"
+            f"PLAYBOOK JSON (preserve row order for standard_guidance and recommended_guidance):\n"
+            f"{playbook_json}\n\n"
+            f"BRD AND USER STORIES:\n{capped_corpus}"
+        )
+        messages = [
+            Message(role="system", content=TEST_RECOMMENDATION_REPORT_SYSTEM),
+            Message(role="user", content=user_msg),
+        ]
+        try:
+            response = await asyncio.to_thread(
+                self.llm.chat_sync,
+                messages=messages,
+                temperature=0.2,
+            )
+            raw = response.content or ""
+            parsed = _extract_json_object(raw)
+            detail = LlmTestRecommendationDetailResult.model_validate(parsed)
+            return detail, None
+        except Exception as e:
+            logger.exception("Test recommendation detail LLM failed")
+            return None, str(e)[:800]
+
     async def run_recommendation(
         self, project_id: int, requirement_id: int, user_id: int
     ) -> TestRecommendationRun:
@@ -249,6 +406,8 @@ class TestRecommendationService:
         self, project_id: int, requirement_id: int, user_id: int
     ) -> TestRecommendationRun:
         requirement = await self._precheck(project_id, requirement_id)
+        gap_run = await self._require_completed_gap_analysis(project_id, requirement_id)
+        gap_json: Dict[str, Any] = dict(gap_run.result_json or {})
 
         stories_total = await self.db.scalar(
             select(func.count()).select_from(UserStory).where(UserStory.project_id == project_id)
@@ -343,10 +502,43 @@ class TestRecommendationService:
                     logger.exception("Test recommendation LLM domain fallback failed")
                     llm_payload = {"error": str(e)[:500]}
 
-        std, recs = strategies_for_domain(chosen_domain, mapping, general_domain_id=GENERAL_DOMAIN_ID)
+        std, recs = merged_strategies_for_domain(
+            chosen_domain, mapping, general_domain_id=GENERAL_DOMAIN_ID
+        )
+        std = [dict(x) for x in std]
+        recs = [dict(x) for x in recs]
 
-        warnings = await self._gap_alignment_warnings(requirement_id)
+        detail_err: Optional[str] = None
+        detail_payload: Optional[Dict[str, Any]] = None
+        if settings.TEST_RECOMMENDATION_DETAIL_LLM_ENABLED:
+            gap_llm_text = _build_gap_text_for_llm(gap_json)
+            expanded, detail_err = await self._llm_expand_test_recommendation_detail(
+                capped_corpus=capped_corpus,
+                standard_tests=std,
+                recommended_tests=recs,
+                gap_text=gap_llm_text,
+                domain_label=chosen_label,
+            )
+            if expanded:
+                _inject_detailed_guidance(std, expanded.standard_guidance)
+                _inject_detailed_guidance(recs, expanded.recommended_guidance)
+                detail_payload = {
+                    "summary_paragraph": expanded.summary_paragraph,
+                }
+            else:
+                for row in std + recs:
+                    row["detailed_guidance"] = ""
+        else:
+            for row in std + recs:
+                row["detailed_guidance"] = ""
+
+        warnings = await self._gap_alignment_warnings(project_id, requirement_id)
         warnings.extend(truncated_notes)
+        if detail_err:
+            warnings.append(
+                "Detailed strategy narrative (LLM) could not be generated; YAML playbook rows and "
+                f"merge are still shown. Reason: {detail_err[:400]}"
+            )
 
         pct = float(chosen_confidence) * 100.0 if chosen_confidence is not None else 0.0
         base_tail = (
@@ -365,7 +557,10 @@ class TestRecommendationService:
             "user_stories_total_in_project": stories_total,
             "max_stories_cap": MAX_STORIES,
             "ordering": "user_stories.id ascending",
+            "gap_analysis_run_id": gap_run.id,
         }
+
+        gap_snapshot = _build_gap_snapshot(gap_run, gap_json)
 
         result_dict: Dict[str, Any] = {
             "domain_id": chosen_domain,
@@ -374,6 +569,15 @@ class TestRecommendationService:
             "source": source,
             "report_summary": report_summary,
             "input_snapshot": input_snapshot,
+            "gap_analysis_snapshot": gap_snapshot,
+            "playbook_merge_note": (
+                "Test focus lists combine the **general** baseline playbook with the "
+                f"**{chosen_label}** domain playbook from `domain_test_mapping.yaml` "
+                "(duplicate category + name rows removed). "
+                "Each item includes YAML `category`, `name`, `priority`, and `reason`; "
+                "`detailed_guidance` adds tailored depth where the narrative LLM succeeded."
+            ),
+            "detailed_report": detail_payload,
             "local_classification": {
                 "domain_id": local.domain_id,
                 "confidence": local.confidence,
@@ -389,6 +593,8 @@ class TestRecommendationService:
         }
         if intent_summary:
             result_dict["intent_summary"] = intent_summary
+        if detail_err:
+            result_dict["detail_llm_error"] = detail_err
 
         run = TestRecommendationRun(
             project_id=project_id,

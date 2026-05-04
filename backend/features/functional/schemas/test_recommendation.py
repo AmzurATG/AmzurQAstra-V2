@@ -19,6 +19,20 @@ class LlmDomainClassificationResult(BaseModel):
     intent_summary: str = Field(default="", max_length=4000)
 
 
+class PlaybookGuidanceRow(BaseModel):
+    category: str = ""
+    name: str = ""
+    guidance: str = ""
+
+
+class LlmTestRecommendationDetailResult(BaseModel):
+    """Structured narrative + per-playbook-row expansion (parallel to merged YAML playbook)."""
+
+    summary_paragraph: str = ""
+    standard_guidance: list[PlaybookGuidanceRow] = Field(default_factory=list)
+    recommended_guidance: list[PlaybookGuidanceRow] = Field(default_factory=list)
+
+
 class TestRecommendationRunResponse(BaseModel):
     id: int
     project_id: int

@@ -171,6 +171,11 @@ class Settings(BaseSettings):
     TEST_RECOMMENDATION_LLM_FALLBACK_ENABLED: bool = True
     TEST_RECOMMENDATION_DOMAIN_CONFIDENCE_THRESHOLD: float = 0.6
     TEST_RECOMMENDATION_LLM_MAX_CORPUS_CHARS: int = 48_000
+    # Second LLM call: narrative + per-playbook-row guidance (requires gap analysis snapshot)
+    TEST_RECOMMENDATION_DETAIL_LLM_ENABLED: bool = True
+
+    # PDF generation (fpdf2)
+    PDF_FONT_PATH: Optional[str] = None
 
     # Default Admin Account
     ADMIN_EMAIL: str = "admin@qastra.dev"

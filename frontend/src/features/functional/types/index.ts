@@ -72,6 +72,22 @@ export interface TestRecommendationStrategyItem {
   name?: string
   priority?: string
   reason?: string
+  /** Requirement-specific expansion (LLM); YAML playbook remains source for category/name/reason */
+  detailed_guidance?: string
+}
+
+export interface TestRecommendationGapSnapshot {
+  gap_analysis_run_id?: number
+  summary?: string
+  coverage_estimate_percent?: number | null
+  gaps_count?: number
+  suggested_stories_count?: number
+  suggested_user_stories_preview?: Array<{ title?: string; rationale?: string }>
+  notes_excerpt?: string
+}
+
+export interface TestRecommendationDetailedReport {
+  summary_paragraph?: string
 }
 
 export interface TestRecommendationResultJson {
@@ -109,6 +125,10 @@ export interface TestRecommendationResultJson {
   standard_tests?: TestRecommendationStrategyItem[]
   recommended_tests?: TestRecommendationStrategyItem[]
   warnings?: string[]
+  gap_analysis_snapshot?: TestRecommendationGapSnapshot
+  playbook_merge_note?: string
+  detailed_report?: TestRecommendationDetailedReport | null
+  detail_llm_error?: string
 }
 
 export interface TestRecommendationRun {
