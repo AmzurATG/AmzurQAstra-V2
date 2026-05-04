@@ -749,7 +749,12 @@ class TestExecutionService:
         return row.scalar_one_or_none()
 
     async def sync_adapted_step(self, result_id: int, step_number: int) -> bool:
-        """Sync an AI-adapted step back to the original test case."""
+        """Sync an AI-adapted step back to the original test case.
+        
+        Updates the test step's target/value based on the AI adaptation,
+        and also updates the description and expected_result to reflect
+        what the AI learned during execution.
+        """
         result = await self.db.execute(
             select(TestResult).where(TestResult.id == result_id)
         )
@@ -777,12 +782,17 @@ class TestExecutionService:
         if not adaptation_text:
             return False
 
+        # Also get the actual_result from the step_results for this step
+        actual_result_text = ""
+        if tr.step_results:
+            step_res = next(
+                (sr for sr in tr.step_results if sr.get("step_number") == step_number),
+                None,
+            )
+            if step_res:
+                actual_result_text = str(step_res.get("actual_result") or "").strip()
+
         # Support varied LLM phrasings instead of one rigid sentence template.
-        # Example accepted phrasings:
-        # - "Adapted: found 'Sign In' instead"
-        # - "Used 'Submit' button"
-        # - "Changed selector to '#login-btn'"
-        # - "Entered value 'john@example.com'"
         quoted = re.findall(r"['\"]([^'\"]{1,200})['\"]", adaptation_text)
         candidate_target = quoted[-1].strip() if quoted else ""
 
@@ -805,13 +815,20 @@ class TestExecutionService:
             step.target = candidate_target
             updated = True
 
-        # Fallback: persist adaptation note so "Sync to Case" never silently fails
-        # when parser cannot infer a concrete target/value.
-        if not updated:
-            existing_desc = (step.description or "").strip()
-            note = f"[Synced adaptation] {adaptation_text}"
-            step.description = f"{existing_desc}\n{note}".strip() if existing_desc else note
-            updated = True
+        # Always update description to include the AI adaptation note
+        existing_desc = (step.description or "").strip()
+        # Remove any previous sync note to avoid duplicates
+        lines = existing_desc.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("[Synced adaptation]")]
+        clean_desc = "\n".join(lines).strip()
+        
+        note = f"[Synced adaptation] {adaptation_text}"
+        step.description = f"{clean_desc}\n{note}".strip() if clean_desc else note
+        updated = True
+
+        # Update expected_result if we have an actual result from execution
+        if actual_result_text:
+            step.expected_result = actual_result_text
 
         if updated:
             await self.db.commit()
