@@ -27,53 +27,53 @@ def upgrade() -> None:
     -- ==========================================================
     DO $$
     BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'userrole') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'userrole') THEN
             CREATE TYPE userrole AS ENUM ('admin', 'manager', 'tester', 'viewer');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'requirementsourcetype') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'requirementsourcetype') THEN
             CREATE TYPE requirementsourcetype AS ENUM ('upload', 'jira', 'azure_devops', 'confluence', 'manual');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'testcasepriority') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'testcasepriority') THEN
             CREATE TYPE testcasepriority AS ENUM ('critical', 'high', 'medium', 'low');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'testcasecategory') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'testcasecategory') THEN
             CREATE TYPE testcasecategory AS ENUM ('smoke', 'regression', 'e2e', 'integration', 'sanity');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'testcasestatus') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'testcasestatus') THEN
             CREATE TYPE testcasestatus AS ENUM ('draft', 'ready', 'deprecated');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'teststepaction') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'teststepaction') THEN
             CREATE TYPE teststepaction AS ENUM (
                 'navigate', 'click', 'type', 'fill', 'select', 'check', 'uncheck',
                 'hover', 'screenshot', 'wait', 'assert_text', 'assert_visible',
                 'assert_url', 'assert_title', 'custom'
             );
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'testrunstatus') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'testrunstatus') THEN
             CREATE TYPE testrunstatus AS ENUM ('pending', 'running', 'passed', 'failed', 'cancelled', 'error');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'testresultstatus') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'testresultstatus') THEN
             CREATE TYPE testresultstatus AS ENUM ('passed', 'failed', 'skipped', 'error');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'integrationtype') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'integrationtype') THEN
             CREATE TYPE integrationtype AS ENUM ('jira', 'redmine', 'azure_devops', 'slack', 'confluence', 'github', 'gitlab', 'teams');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'integrationcategory') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'integrationcategory') THEN
             CREATE TYPE integrationcategory AS ENUM ('project_management', 'communication', 'documentation', 'version_control');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'syncstatus') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'syncstatus') THEN
             CREATE TYPE syncstatus AS ENUM ('idle', 'syncing', 'success', 'failed');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'userstorystatus') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'userstorystatus') THEN
             CREATE TYPE userstorystatus AS ENUM ('open', 'in_progress', 'done', 'blocked', 'closed');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'userstorypriority') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'userstorypriority') THEN
             CREATE TYPE userstorypriority AS ENUM ('low', 'medium', 'high', 'critical');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'userstorysource') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'userstorysource') THEN
             CREATE TYPE userstorysource AS ENUM ('jira', 'redmine', 'azure_devops', 'manual');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'userstoryitemtype') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'userstoryitemtype') THEN
             CREATE TYPE userstoryitemtype AS ENUM ('epic', 'story', 'bug', 'task', 'subtask', 'feature', 'requirement', 'other');
         END IF;
     END$$;

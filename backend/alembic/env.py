@@ -8,7 +8,7 @@ import sys
 from logging.config import fileConfig
 from pathlib import Path
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 from alembic import context
 
 # ---------------------------------------------------------------------------
@@ -61,6 +61,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        version_table_schema=settings.DB_SCHEMA,
+        include_schemas=True,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -74,7 +76,25 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        # Create the target schema if it doesn't exist
+        schema = settings.DB_SCHEMA
+        connection.execute(
+            text(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        )
+        # Set search_path to ONLY the target schema so that
+        # CREATE TABLE/TYPE IF NOT EXISTS checks don't find
+        # objects in other schemas and skip creation.
+        connection.execute(
+            text(f"SET search_path TO {schema}")
+        )
+        connection.commit()
+
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            version_table_schema=schema,
+            include_schemas=True,
+        )
         with context.begin_transaction():
             context.run_migrations()
 
