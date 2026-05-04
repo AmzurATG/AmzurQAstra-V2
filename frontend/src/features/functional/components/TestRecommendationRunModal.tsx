@@ -152,7 +152,10 @@ function StrategyTable({
           </thead>
           <tbody className="divide-y divide-gray-100">
             {items.map((row, idx) => (
-              <tr key={idx} className="bg-white align-top">
+              <tr
+                key={idx}
+                className="align-top odd:bg-white even:bg-gray-50/90"
+              >
                 <td className="px-3 py-2 text-gray-700">{row.category ?? '—'}</td>
                 <td className="px-3 py-2 font-medium text-gray-900">{row.name ?? '—'}</td>
                 <td className="px-3 py-2 text-gray-600 capitalize">{row.priority ?? '—'}</td>
@@ -321,7 +324,7 @@ export default function TestRecommendationRunModal({
             leaveFrom="opacity-100 scale-100"
             leaveTo="opacity-0 scale-95"
           >
-            <Dialog.Panel className="w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-lg bg-white shadow-xl flex flex-col">
+            <Dialog.Panel className="w-full max-w-[min(calc(100vw-2rem),61.6rem)] max-h-[90vh] overflow-hidden rounded-lg bg-white shadow-xl flex flex-col">
               <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-4 py-3">
                 <div className="flex items-center gap-2 min-w-0">
                   <LightBulbIcon className="w-6 h-6 text-amber-500 flex-shrink-0" />
