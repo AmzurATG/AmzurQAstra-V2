@@ -15,6 +15,7 @@ import {
   ChevronRightIcon,
   ArrowLeftIcon,
   BookOpenIcon,
+  ChartBarIcon,
 } from '@heroicons/react/24/outline'
 
 // Global navigation (when NOT inside a project)
@@ -33,6 +34,7 @@ const getProjectNav = (projectId: string) => [
   { name: 'User Stories', href: `/projects/${projectId}/user-stories`, icon: BookOpenIcon },
   { name: 'Requirements', href: `/projects/${projectId}/requirements`, icon: DocumentTextIcon },
   { name: 'Functional Testing', href: `/projects/${projectId}/functional-testing`, icon: PlayIcon },
+  { name: 'Analytics', href: `/projects/${projectId}/analytics`, icon: ChartBarIcon },
   { name: 'Integrity Check', href: `/projects/${projectId}/integrity-check`, icon: ShieldCheckIcon },
   { name: 'Integrations', href: `/projects/${projectId}/integrations`, icon: LinkIcon },
 ]

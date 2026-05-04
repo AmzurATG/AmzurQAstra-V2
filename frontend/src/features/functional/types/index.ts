@@ -292,6 +292,97 @@ export interface DashboardOverview {
   activity_by_day: DashboardActivityDay[]
 }
 
+/** GET /functional/analytics/project — project Test Report Analytics */
+export type AnalyticsWindow = '7d' | '30d' | '90d'
+
+export interface AnalyticsKpiPoint {
+  key: string
+  label: string
+  value: string
+  delta?: string | null
+  trend: 'up' | 'down' | 'flat'
+  higher_is_better: boolean
+  help: string
+}
+
+export interface AnalyticsLatestRunBreakdown {
+  run_id: number
+  run_number: number
+  passed: number
+  failed: number
+  not_executed: number
+  error: number
+  cancelled_runs_in_window: number
+}
+
+export interface AnalyticsTrendPoint {
+  x: string
+  run_id: number
+  run_number: number
+  value: number
+}
+
+export interface AnalyticsBarPoint {
+  facet_value: string
+  passed: number
+  failed: number
+  not_executed: number
+  error: number
+}
+
+export interface AnalyticsFailureCluster {
+  signature: string
+  count: number
+  sample_test_case_id?: number | null
+  sample_test_case_title?: string | null
+  sample_screenshot_path?: string | null
+  last_seen_run_id: number
+}
+
+export interface AnalyticsTopFailingTest {
+  test_case_id: number
+  title: string
+  fail_count: number
+  recent_statuses: string[]
+  latest_run_id?: number | null
+}
+
+export interface AnalyticsFlakyTest {
+  test_case_id: number
+  title: string
+  flips: number
+  last_status: string
+}
+
+export interface AnalyticsSlowTest {
+  test_case_id: number
+  title: string
+  p95_ms: number
+  runs_used: number
+}
+
+export interface AnalyticsStaleTest {
+  test_case_id: number
+  title: string
+  last_executed_at?: string | null
+}
+
+export interface ProjectAnalytics {
+  source: string
+  window: string
+  kpis: AnalyticsKpiPoint[]
+  latest_run: AnalyticsLatestRunBreakdown | null
+  pass_rate_trend: AnalyticsTrendPoint[]
+  failures_by_category: AnalyticsBarPoint[]
+  failures_by_priority: AnalyticsBarPoint[]
+  top_failing: AnalyticsTopFailingTest[]
+  failure_clusters: AnalyticsFailureCluster[]
+  flaky: AnalyticsFlakyTest[]
+  slowest: AnalyticsSlowTest[]
+  stale: AnalyticsStaleTest[]
+  generated_at: string
+}
+
 export interface TestRunStartResponse {
   run_id: number
   status: string

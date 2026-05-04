@@ -15,6 +15,7 @@ import Requirements from '@features/functional/pages/Requirements'
 import TestCaseDetail from '@features/functional/pages/TestCaseDetail'
 import TestRunDetail from '@features/functional/pages/TestRunDetail'
 import FunctionalTesting from '@features/functional/pages/FunctionalTesting'
+import Analytics from '@features/functional/pages/analytics/Analytics'
 import CasesTab from '@features/functional/pages/functional-testing/CasesTab'
 import LiveTab from '@features/functional/pages/functional-testing/LiveTab'
 import HistoryTab from '@features/functional/pages/functional-testing/HistoryTab'
@@ -144,6 +145,7 @@ function App() {
                 element={<LegacyTestRunDetailRedirect />}
               />
 
+              <Route path="analytics" element={<Analytics />} />
               <Route path="integrity-check" element={<IntegrityCheck />} />
               <Route path="integrations" element={<ProjectIntegrations />} />
               <Route path="integrations/jira" element={<JiraIntegration />} />

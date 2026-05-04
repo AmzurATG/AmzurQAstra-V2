@@ -1,5 +1,5 @@
-import { useState, type ComponentType } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { type ComponentType } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowPathIcon,
   ChartBarIcon,
@@ -33,6 +33,8 @@ const STATUS_CFG: Record<string, StatusCfg> = {
   error: { icon: XCircleIcon, color: 'text-red-500', bg: 'bg-red-50' },
 }
 
+const FILTER_VALUES = ['all', 'passed', 'failed', 'running', 'cancelled'] as const
+
 /**
  * Functional Testing → History tab.
  *
@@ -43,8 +45,16 @@ const STATUS_CFG: Record<string, StatusCfg> = {
 export default function HistoryTab() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
-  const [filter, setFilter] = useState('all')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const raw = searchParams.get('status_filter') ?? 'all'
+  const filter = FILTER_VALUES.includes(raw as (typeof FILTER_VALUES)[number]) ? raw : 'all'
 
+  const setFilter = (f: string) => {
+    const next = new URLSearchParams(searchParams)
+    if (f === 'all') next.delete('status_filter')
+    else next.set('status_filter', f)
+    setSearchParams(next, { replace: true })
+  }
   const { runs, summary, loading, page, setPage, meta, pageSize, reload } =
     useTestRunsList(projectId, filter)
 

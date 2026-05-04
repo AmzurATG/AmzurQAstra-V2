@@ -18,6 +18,7 @@ import type {
   GapAnalysisRun,
   AcceptGapSuggestionsResponse,
   TestRecommendationRun,
+  ProjectAnalytics,
 } from '../types'
 
 export interface PaginatedResponse<T> {
@@ -34,6 +35,23 @@ export interface PaginatedResponse<T> {
 export const dashboardApi = {
   overview: async (): Promise<DashboardOverview> => {
     const response = await apiClient.get<DashboardOverview>('/functional/dashboard/overview')
+    return response.data
+  },
+}
+
+/** Project-scoped Test Report Analytics */
+export const analyticsApi = {
+  getProject: async (
+    projectId: number,
+    params?: { source?: string; window?: string }
+  ): Promise<ProjectAnalytics> => {
+    const response = await apiClient.get<ProjectAnalytics>('/functional/analytics/project', {
+      params: {
+        project_id: projectId,
+        source: params?.source ?? 'functional',
+        window: params?.window ?? '30d',
+      },
+    })
     return response.data
   },
 }
