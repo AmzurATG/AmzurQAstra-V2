@@ -34,6 +34,8 @@ RULES:
 """
 
 IC_MAX_STEPS = 15
+# BIC UI shows at most this many screenshot-based tiers (matches typical 4–5 captures per run).
+IC_UI_MAX_SCREENSHOTS = 5
 
 # Keywords suggesting the app or page is not usable (connection, chrome error pages, etc.)
 _FAIL_SUBSTRINGS = (
@@ -108,17 +110,105 @@ def _redact_ic_text(
     return out if out is not None else ""
 
 
-def _integrity_running_pct(step_num: int, screenshot_count: int) -> int:
+class _IcUiProgress:
     """
-    Running progress ~5–90%. Uses both agent step index and saved screenshot count
-    (whichever advances further) so the ring tracks evidence and does not lag behind
-    when the step counter and captures differ.
+    Integrity-check progress for the UI: login-flow milestones + ≤5 screenshot tiers + step fallback.
+    Caller enforces monotonic increase across emits. Caps at 99 until terminal outcome (100%).
     """
-    s = max(0, min(int(step_num), IC_MAX_STEPS))
-    sh = max(0, min(int(screenshot_count), IC_MAX_STEPS))
-    step_pct = min(90, 5 + int((s / float(IC_MAX_STEPS)) * 85))
-    shot_pct = min(90, 5 + int((sh / float(IC_MAX_STEPS)) * 85))
-    return min(90, max(step_pct, shot_pct))
+
+    def __init__(self, *, manual_login: bool, google_sso: bool) -> None:
+        self.manual_login = manual_login
+        self.google_sso = google_sso
+        self.nav_count = 0
+        self.input_count = 0
+        self.click_count = 0
+        self.done_count = 0
+
+    def observe_kinds(self, kinds: List[str]) -> None:
+        for k in kinds:
+            if k == "navigate":
+                self.nav_count += 1
+            elif k == "input":
+                self.input_count += 1
+            elif k == "click":
+                self.click_count += 1
+            elif k == "done":
+                self.done_count += 1
+
+    def _screenshot_pct(self, screenshot_count: int) -> int:
+        n = max(0, min(int(screenshot_count), IC_UI_MAX_SCREENSHOTS))
+        tiers = {0: 0, 1: 18, 2: 36, 3: 54, 4: 72, 5: 88}
+        return tiers.get(n, 88)
+
+    def _step_fallback_pct(self, step_num: int) -> int:
+        """Sparse milestones but many agent steps (e.g. repeated waits)."""
+        s = max(0, min(int(step_num), IC_MAX_STEPS))
+        return min(88, 8 + int((s / float(IC_MAX_STEPS)) * 80))
+
+    def _milestone_pct(self) -> int:
+        if self.google_sso:
+            p = 10
+            if self.nav_count >= 1:
+                p = max(p, 14)
+            if self.click_count >= 1:
+                p = max(p, 32)
+            if self.click_count >= 2:
+                p = max(p, 52)
+            if self.click_count >= 3:
+                p = max(p, 72)
+            if self.click_count >= 4:
+                p = max(p, 85)
+            if self.input_count >= 1:
+                p = max(p, 48)
+            if self.done_count >= 1:
+                p = max(p, 99)
+            return min(99, p)
+
+        if self.manual_login:
+            p = 10
+            if self.nav_count >= 1:
+                p = max(p, 14)
+            # Cookie / dismiss banners: small bump, does not skip to "logged in".
+            if self.click_count >= 1 and self.input_count == 0:
+                p = max(p, 22)
+            if self.input_count >= 1:
+                p = max(p, 25)
+            if self.input_count >= 2:
+                p = max(p, 50)
+            # Login submit after both fields (spec: ~80%). Single-field logins may only reach 72 until done.
+            if self.input_count >= 2 and self.click_count >= 1:
+                p = max(p, 80)
+            elif self.input_count >= 1 and self.click_count >= 1:
+                p = max(p, 72)
+            if self.done_count >= 1:
+                p = max(p, 99)
+            return min(99, p)
+
+        # No credentials — verify page only; rely more on screenshots + light interactions.
+        p = 10
+        if self.nav_count >= 1:
+            p = max(p, 14)
+        if self.input_count >= 1:
+            p = max(p, 30)
+        if self.input_count >= 2:
+            p = max(p, 48)
+        if self.click_count >= 1:
+            p = max(p, 55)
+        if self.click_count >= 2:
+            p = max(p, 72)
+        if self.done_count >= 1:
+            p = max(p, 99)
+        return min(99, p)
+
+    def running_pct(self, screenshot_count: int, step_num: int) -> int:
+        return min(
+            99,
+            max(
+                self._milestone_pct(),
+                self._screenshot_pct(screenshot_count),
+                self._step_fallback_pct(step_num),
+            ),
+        )
 
 
 def _final_text_indicates_failure(final_text: str) -> bool:
@@ -359,12 +449,20 @@ class BrowserAgentService:
         steps_data: List[Dict] = []
         step_counter = [0]
         has_login_creds = bool(username and password) and not use_google_signin
+        ic_prog = _IcUiProgress(manual_login=has_login_creds, google_sso=use_google_signin)
+        last_emit_pct = [12]
+
+        def _emit_running_pct(*, step_num: int) -> int:
+            raw = ic_prog.running_pct(len(screenshots), step_num)
+            v = max(last_emit_pct[0], raw)
+            last_emit_pct[0] = v
+            return v
 
         await self._emit_progress(
             run_id,
             {
                 "status": "running",
-                "percentage": 5,
+                "percentage": last_emit_pct[0],
                 "current_step": "Opening Chrome browser and navigating to the application…",
                 "screenshots": [],
                 "steps": [],
@@ -377,6 +475,9 @@ class BrowserAgentService:
             step_counter[0] = step_num
             # Post-action screenshot is saved in _on_step_end.
 
+            kinds = self._action_kinds_from_output(output)
+            ic_prog.observe_kinds(kinds)
+
             desc = self._friendly_step_headline(output, has_login_creds)
             steps_data.append(
                 {
@@ -386,7 +487,7 @@ class BrowserAgentService:
                 }
             )
 
-            pct = _integrity_running_pct(step_num, len(screenshots))
+            pct = _emit_running_pct(step_num=step_num)
             await self._emit_progress(
                 run_id,
                 {
@@ -424,7 +525,7 @@ class BrowserAgentService:
             last["screenshot_path"] = path
             if path not in screenshots:
                 screenshots.append(path)
-            pct = _integrity_running_pct(step_num, len(screenshots))
+            pct = _emit_running_pct(step_num=step_num)
             await self._emit_progress(
                 run_id,
                 {
@@ -487,7 +588,8 @@ class BrowserAgentService:
             dur = int((datetime.utcnow() - start).total_seconds() * 1000)
             n = step_counter[0]
 
-            pre_complete_pct = min(95, max(_integrity_running_pct(n, len(screenshots)), 90))
+            pre_complete_pct = max(last_emit_pct[0], 99)
+            last_emit_pct[0] = pre_complete_pct
             await self._emit_progress(
                 run_id,
                 {
@@ -524,7 +626,8 @@ class BrowserAgentService:
             dur = int((datetime.utcnow() - start).total_seconds() * 1000)
             n = step_counter[0]
             exc_s = str(exc)
-            run_pct = _integrity_running_pct(n, len(screenshots))
+            run_pct = max(last_emit_pct[0], min(92, ic_prog.running_pct(len(screenshots), n)))
+            last_emit_pct[0] = run_pct
             err: Dict[str, Any] = {
                 "status": "error",
                 "overall_status": "error",

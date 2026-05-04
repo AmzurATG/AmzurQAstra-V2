@@ -78,7 +78,7 @@ export default function IntegrityCheckProgress({
               Browser is running…
             </span>
             <span className="text-[10px] text-gray-400 text-center max-w-sm px-2">
-              Progress advances with each browser step and saved screenshot; 100% appears when the check finishes.
+              Progress follows login milestones and up to five saved screenshots; it reaches 99% while wrapping up, then 100% when the run completes.
             </span>
           </span>
         )}
