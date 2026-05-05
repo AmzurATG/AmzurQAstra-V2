@@ -57,7 +57,28 @@ export default function Login() {
             <Button type="submit" className="w-full" isLoading={isLoading}>
               Sign in
             </Button>
+
+            <div className="text-right">
+              <button
+                type="button"
+                onClick={() => navigate('/forgot-password')}
+                className="text-sm text-blue-600 hover:text-blue-500"
+              >
+                Forgot password?
+              </button>
+            </div>
           </form>
+
+          <p className="text-center text-sm text-gray-600 mt-6">
+            Don&apos;t have an account?{' '}
+            <button
+              type="button"
+              onClick={() => navigate('/signup')}
+              className="text-primary-600 hover:text-primary-700 font-medium"
+            >
+              Sign up
+            </button>
+          </p>
         </div>
       </div>
     </div>

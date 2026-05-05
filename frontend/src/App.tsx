@@ -5,6 +5,10 @@ import MainLayout from '@common/components/layout/MainLayout'
 import ProjectLayout from '@common/components/layout/ProjectLayout'
 import { ErrorBoundary } from '@common/components/layout/ErrorBoundary'
 import Login from '@common/pages/Login'
+import Signup from '@common/pages/Signup'
+import SecurityQuestions from '@common/pages/SecurityQuestions'
+import VerifyEmail from '@common/pages/VerifyEmail'
+import ForgotPassword from '@common/pages/ForgotPassword'
 import Dashboard from '@common/pages/Dashboard'
 import Projects from '@common/pages/Projects'
 import Settings from '@common/pages/Settings'
@@ -99,6 +103,10 @@ function App() {
     <ErrorBoundary>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/security-questions" element={<SecurityQuestions />} />
+        <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
         
         <Route
           path="/"

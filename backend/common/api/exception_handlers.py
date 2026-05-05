@@ -69,11 +69,21 @@ async def _validation_error_handler(request: Request, exc: RequestValidationErro
         rid, request.method, request.url.path,
         [f"{e['loc']} — {e['msg']}" for e in errors],
     )
+    # Sanitize errors: remove non-serializable 'ctx' values (e.g. ValueError objects)
+    sanitized_errors = []
+    for e in errors:
+        clean = {k: v for k, v in e.items() if k != "ctx"}
+        if "ctx" in e and isinstance(e["ctx"], dict):
+            clean["ctx"] = {
+                k: str(v) if not isinstance(v, (str, int, float, bool, list, dict, type(None))) else v
+                for k, v in e["ctx"].items()
+            }
+        sanitized_errors.append(clean)
     return _json_error(
         status.HTTP_422_UNPROCESSABLE_ENTITY,
         message="Request validation failed",
         error_code="VALIDATION_ERROR",
-        details={"errors": errors},
+        details={"errors": sanitized_errors},
     )
 
 
