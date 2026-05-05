@@ -75,6 +75,7 @@ export default function ForgotPassword() {
         answer: answers[q.id].trim(),
       }))
       const res = await passwordResetApi.verifySecurity(email, answerPayload)
+      console.log('Security verification response:', res)
       toast.success('Security answers verified! Check your email for the reset token.')
       setStep('reset')
     } catch (err: any) {
