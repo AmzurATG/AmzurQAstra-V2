@@ -10,11 +10,12 @@ export default function Login() {
   const { login, isLoading } = useAuthStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [rememberMe, setRememberMe] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await login(email, password)
+      await login(email, password, rememberMe)
       navigate('/')
       toast.success('Welcome back!')
     } catch (error) {
@@ -58,7 +59,16 @@ export default function Login() {
               Sign in
             </Button>
 
-            <div className="text-right">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+                Remember me
+              </label>
               <button
                 type="button"
                 onClick={() => navigate('/forgot-password')}

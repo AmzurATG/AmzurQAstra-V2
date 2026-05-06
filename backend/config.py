@@ -102,6 +102,8 @@ class Settings(BaseSettings):
     )
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    REMEMBER_ME_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    JWT_NONCE: Optional[str] = None  # Stable nonce for JWT; if unset, tokens invalidate on restart
 
     # LLM
     OPENAI_API_KEY: Optional[str] = None

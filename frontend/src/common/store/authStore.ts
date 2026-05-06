@@ -4,6 +4,17 @@ import { User } from '@common/types/auth'
 import { authApi } from '@common/api/auth'
 import { clearAllPmSyncPreferences } from '@features/functional/utils/pmSyncPreferences'
 
+const STORAGE_KEY = 'qastra-auth'
+const REMEMBER_KEY = 'qastra-remember'
+
+/** Returns the appropriate storage based on prior remember-me choice. */
+function getStorage() {
+  if (localStorage.getItem(REMEMBER_KEY) === '1') {
+    return localStorage
+  }
+  return sessionStorage
+}
+
 interface AuthState {
   user: User | null
   token: string | null
@@ -11,7 +22,7 @@ interface AuthState {
   isAuthenticated: boolean
   isLoading: boolean
   
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>
   logout: () => void
   fetchUser: () => Promise<void>
   setToken: (token: string) => void
@@ -27,10 +38,22 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
       isLoading: false,
 
-      login: async (email: string, password: string) => {
+      login: async (email: string, password: string, rememberMe = false) => {
         set({ isLoading: true })
         try {
-          const response = await authApi.login({ email, password })
+          const response = await authApi.login({ email, password, remember_me: rememberMe })
+
+          // Persist remember-me preference and migrate storage if needed
+          if (rememberMe) {
+            localStorage.setItem(REMEMBER_KEY, '1')
+            // Move persisted state to localStorage
+            sessionStorage.removeItem(STORAGE_KEY)
+          } else {
+            localStorage.removeItem(REMEMBER_KEY)
+            // Move persisted state to sessionStorage
+            localStorage.removeItem(STORAGE_KEY)
+          }
+
           set({
             token: response.access_token,
             refreshToken: response.refresh_token,
@@ -44,6 +67,9 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () => {
         clearAllPmSyncPreferences()
+        localStorage.removeItem(REMEMBER_KEY)
+        localStorage.removeItem(STORAGE_KEY)
+        sessionStorage.removeItem(STORAGE_KEY)
         set({
           user: null,
           token: null,
@@ -70,8 +96,8 @@ export const useAuthStore = create<AuthState>()(
       },
     }),
     {
-      name: 'qastra-auth',
-      storage: createJSONStorage(() => sessionStorage),
+      name: STORAGE_KEY,
+      storage: createJSONStorage(() => getStorage()),
       partialize: (state) => ({
         token: state.token,
         refreshToken: state.refreshToken,

@@ -12,9 +12,9 @@ import hashlib
 
 from config import settings
 
-# Random nonce generated once per process start.
-# Every server restart produces a new value, invalidating all prior JWTs.
-BOOT_NONCE: str = secrets.token_hex(16)
+# Stable nonce from settings (survives restarts). Falls back to a random
+# per-process nonce when JWT_NONCE is not configured in .env.
+BOOT_NONCE: str = settings.JWT_NONCE or secrets.token_hex(16)
 
 
 # =============================================================================

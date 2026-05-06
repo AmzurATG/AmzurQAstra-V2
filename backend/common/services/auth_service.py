@@ -58,14 +58,19 @@ class AuthService:
             return None
         return user
     
-    async def login(self, email: str, password: str) -> Optional[Token]:
+    async def login(self, email: str, password: str, remember_me: bool = False) -> Optional[Token]:
         """Login and return JWT tokens."""
         user = await self.authenticate(email, password)
         if not user:
             return None
         
         access_token = create_access_token(subject=str(user.id))
-        refresh_token = create_refresh_token(subject=str(user.id))
+        
+        if remember_me:
+            refresh_expires = timedelta(days=settings.REMEMBER_ME_REFRESH_TOKEN_EXPIRE_DAYS)
+            refresh_token = create_refresh_token(subject=str(user.id), expires_delta=refresh_expires)
+        else:
+            refresh_token = create_refresh_token(subject=str(user.id))
         
         return Token(
             access_token=access_token,

@@ -278,6 +278,23 @@ a = Analysis(
         'win32con',
         'pywintypes',
 
+        # ── Python Stdlib (email) ──────────────────────────────
+        'email',
+        'email.mime',
+        'email.mime.application',
+        'email.mime.audio',
+        'email.mime.base',
+        'email.mime.image',
+        'email.mime.message',
+        'email.mime.multipart',
+        'email.mime.nonmultipart',
+        'email.mime.text',
+        'email.message',
+        'email.policy',
+        'email.contentmanager',
+        'email.encoders',
+        'email.utils',
+
         # ── Misc Transitive ────────────────────────────────────
         'importlib_metadata',
         'zipp',
