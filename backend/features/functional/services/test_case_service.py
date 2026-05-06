@@ -2,14 +2,21 @@
 Test Case Service
 """
 import re
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete as sa_delete, or_, select, func
 from sqlalchemy.orm import selectinload
 
 from common.api.pagination import PaginationParams
 from common.db.models.user_story import UserStory
-from features.functional.db.models.test_case import TestCase, TestCaseCategory, TestCasePriority, TestCaseStatus
+from features.functional.db.models.requirement import Requirement
+from features.functional.db.models.test_case import (
+    TestCase,
+    TestCaseCategory,
+    TestCasePriority,
+    TestCaseStatus,
+    TestCaseSource,
+)
 from features.functional.db.models.test_result import TestResult
 from features.functional.db.models.test_step import TestStep
 from features.functional.schemas.test_case import (
@@ -18,7 +25,12 @@ from features.functional.schemas.test_case import (
     TestCaseResponse,
     UserStoryBrief,
 )
+from features.functional.schemas.test_case_import import (
+    CsvImportErrorItem,
+    TestCaseCsvImportResponse,
+)
 from features.functional.schemas.test_step import TestStepCreate, TestStepUpdate
+from features.functional.services.test_case_csv_import import CaseDraft
 
 
 class TestCaseService:
@@ -190,6 +202,7 @@ class TestCaseService:
                 tags=tc.tags,
                 is_automated=tc.is_automated,
                 is_generated=tc.is_generated,
+                source=tc.source,
                 integrity_check=tc.integrity_check,
                 jira_key=tc.jira_key,
                 created_by=tc.created_by,
@@ -203,10 +216,12 @@ class TestCaseService:
     async def create(self, test_case_data: TestCaseCreate, created_by: int) -> TestCase:
         """Create a new test case."""
         numbers = await self.allocate_case_numbers(test_case_data.project_id, 1)
+        payload = test_case_data.model_dump()
         test_case = TestCase(
-            **test_case_data.model_dump(),
+            **payload,
             case_number=numbers[0],
             created_by=created_by,
+            source=TestCaseSource.manual,
         )
         self.db.add(test_case)
         await self.db.flush()
@@ -320,3 +335,297 @@ class TestCaseService:
         
         await self.db.flush()
         return await self.get_steps(test_case_id)
+
+    async def _existing_case_external_keys(self, project_id: int) -> set[str]:
+        r = await self.db.execute(
+            select(TestCase.jira_key).where(
+                TestCase.project_id == project_id,
+                TestCase.jira_key.is_not(None),
+            )
+        )
+        return {str(k).strip() for k in r.scalars().all() if k and str(k).strip()}
+
+    async def _csv_import_foreign_key_issues(
+        self, project_id: int, groups: Dict[str, CaseDraft]
+    ) -> List[Tuple[str, CsvImportErrorItem]]:
+        """(case_key, error) for missing requirement_id / user_story_id in this project."""
+
+        out: List[Tuple[str, CsvImportErrorItem]] = []
+        req_ids = {g.requirement_id for g in groups.values() if g.requirement_id}
+        us_ids = {g.user_story_id for g in groups.values() if g.user_story_id}
+
+        if req_ids:
+            r = await self.db.execute(
+                select(Requirement.id).where(
+                    Requirement.project_id == project_id,
+                    Requirement.id.in_(req_ids),
+                )
+            )
+            found_req = set(r.scalars().all())
+            missing_req = req_ids - found_req
+            if missing_req:
+                for ck, g in groups.items():
+                    if g.requirement_id in missing_req:
+                        row = min(g.source_rows) if g.source_rows else 0
+                        out.append(
+                            (
+                                ck,
+                                CsvImportErrorItem(
+                                    row=row,
+                                    column="requirement_id",
+                                    message=f"requirement_id {g.requirement_id} not found in this project.",
+                                ),
+                            )
+                        )
+
+        if us_ids:
+            r = await self.db.execute(
+                select(UserStory.id).where(
+                    UserStory.project_id == project_id,
+                    UserStory.id.in_(us_ids),
+                )
+            )
+            found_us = set(r.scalars().all())
+            missing_us = us_ids - found_us
+            if missing_us:
+                for ck, g in groups.items():
+                    if g.user_story_id in missing_us:
+                        row = min(g.source_rows) if g.source_rows else 0
+                        out.append(
+                            (
+                                ck,
+                                CsvImportErrorItem(
+                                    row=row,
+                                    column="user_story_id",
+                                    message=f"user_story_id {g.user_story_id} not found in this project.",
+                                ),
+                            )
+                        )
+
+        return out
+
+    async def import_test_cases_from_csv(
+        self,
+        *,
+        project_id: int,
+        created_by: int,
+        file_bytes: bytes,
+        dry_run: bool = False,
+        import_mode: str = "strict",
+    ) -> TestCaseCsvImportResponse:
+        """
+        Import test cases and optional steps from a single UTF-8 CSV.
+
+        import_mode:
+        - strict: any validation problem aborts the whole import (no rows written).
+        - permissive: row-level step issues are kept in `errors` but valid cases are written;
+          duplicate external keys, invalid FKs, and constraint violations skip those cases only
+          (see `warnings` and `skipped_case_groups`).
+        """
+        from features.functional.services import test_case_csv_import as tc_csv
+
+        mode = (import_mode or "strict").strip().lower()
+        if mode not in ("strict", "permissive"):
+            return TestCaseCsvImportResponse(
+                dry_run=dry_run,
+                import_mode=import_mode,
+                message="import_mode must be 'strict' or 'permissive'.",
+                errors=[
+                    CsvImportErrorItem(
+                        row=0,
+                        message="Invalid import_mode (use strict or permissive).",
+                    )
+                ],
+            )
+
+        warnings: List[CsvImportErrorItem] = []
+
+        if len(file_bytes) > tc_csv.MAX_CSV_BYTES:
+            return TestCaseCsvImportResponse(
+                dry_run=dry_run,
+                import_mode=mode,
+                message="File too large.",
+                errors=[
+                    CsvImportErrorItem(
+                        row=0,
+                        message=f"Maximum upload size is {tc_csv.MAX_CSV_BYTES // (1024 * 1024)} MiB.",
+                    )
+                ],
+            )
+
+        text, dec_warn = tc_csv.decode_csv_bytes(file_bytes)
+        warnings.extend(dec_warn)
+
+        col_map, body, parse_fatal = tc_csv.parse_csv_to_rows(text)
+        errors: List[CsvImportErrorItem] = list(parse_fatal)
+        if errors and not body:
+            return TestCaseCsvImportResponse(
+                dry_run=dry_run,
+                import_mode=mode,
+                errors=errors,
+                warnings=warnings,
+                message="Could not parse CSV.",
+            )
+
+        groups, errors = tc_csv.build_case_groups(col_map, body, errors)
+        tc_csv.validate_groups_non_empty(groups, errors)
+
+        constraint_hits = tc_csv.collect_case_constraint_violations(groups)
+        skip_keys: set[str] = set()
+
+        if mode == "strict":
+            if constraint_hits:
+                errors.extend(item for _, item in constraint_hits)
+            if errors:
+                return TestCaseCsvImportResponse(
+                    dry_run=dry_run,
+                    import_mode=mode,
+                    errors=errors,
+                    warnings=warnings,
+                    message="Import aborted (strict mode): fix validation errors and try again.",
+                )
+        else:
+            for ck, item in constraint_hits:
+                warnings.append(item)
+                skip_keys.add(ck)
+
+        existing_ext = await self._existing_case_external_keys(project_id)
+        dup_hits: List[Tuple[str, CsvImportErrorItem]] = []
+        for ck, g in groups.items():
+            if ck in existing_ext:
+                row = min(g.source_rows) if g.source_rows else 0
+                dup_hits.append(
+                    (
+                        ck,
+                        CsvImportErrorItem(
+                            row=row,
+                            column="case_key",
+                            message=f"case_key {ck!r} already exists on a test case in this project (external id).",
+                        ),
+                    )
+                )
+
+        fk_hits = await self._csv_import_foreign_key_issues(project_id, groups)
+
+        if mode == "strict":
+            if dup_hits:
+                errors.extend(item for _, item in dup_hits)
+            if fk_hits:
+                errors.extend(item for _, item in fk_hits)
+            if errors:
+                return TestCaseCsvImportResponse(
+                    dry_run=dry_run,
+                    import_mode=mode,
+                    errors=errors,
+                    warnings=warnings,
+                    message="Import aborted (strict mode): fix validation errors and try again.",
+                )
+        else:
+            for ck, item in dup_hits:
+                warnings.append(item)
+                skip_keys.add(ck)
+            for ck, item in fk_hits:
+                warnings.append(item)
+                skip_keys.add(ck)
+
+        eligible = {k: g for k, g in groups.items() if k not in skip_keys}
+        skipped = len(groups) - len(eligible)
+        step_total = sum(len(g.steps) for g in eligible.values())
+        case_total = len(eligible)
+
+        if case_total == 0:
+            return TestCaseCsvImportResponse(
+                dry_run=dry_run,
+                import_mode=mode,
+                created_cases=0,
+                created_steps=0,
+                skipped_case_groups=skipped,
+                errors=errors,
+                warnings=warnings,
+                message="No test cases to import (all skipped or file empty).",
+            )
+
+        if dry_run:
+            return TestCaseCsvImportResponse(
+                dry_run=True,
+                import_mode=mode,
+                created_cases=case_total,
+                created_steps=step_total,
+                skipped_case_groups=skipped,
+                errors=errors,
+                warnings=warnings,
+                message=f"Dry run: would create {case_total} case(s) and {step_total} step(s).",
+            )
+
+        sorted_keys = sorted(eligible.keys())
+        numbers = await self.allocate_case_numbers(project_id, len(sorted_keys))
+        orm_cases: List[TestCase] = []
+        key_to_orm: Dict[str, TestCase] = {}
+
+        for i, ck in enumerate(sorted_keys):
+            g = eligible[ck]
+            tc = TestCase(
+                project_id=project_id,
+                case_number=numbers[i],
+                title=(g.title or ck).strip()[:500],
+                description=g.description or None,
+                preconditions=g.preconditions or None,
+                priority=g.priority,
+                category=g.category,
+                status=g.status,
+                tags=(g.tags.strip() if g.tags else None) or None,
+                requirement_id=g.requirement_id,
+                user_story_id=g.user_story_id,
+                jira_key=ck[:50],
+                is_automated=True,
+                is_generated=False,
+                source=TestCaseSource.csv,
+                created_by=created_by,
+            )
+            orm_cases.append(tc)
+            key_to_orm[ck] = tc
+
+        self.db.add_all(orm_cases)
+        await self.db.flush()
+
+        step_batch: List[TestStep] = []
+        STEP_CHUNK = 400
+        created_steps = 0
+
+        for ck in sorted_keys:
+            g = eligible[ck]
+            tc = key_to_orm[ck]
+            for st in g.steps:
+                assert st.step_number is not None
+                step_batch.append(
+                    TestStep(
+                        test_case_id=tc.id,
+                        step_number=st.step_number,
+                        action=st.action,
+                        target=(st.target[:500] if st.target else None),
+                        value=st.value,
+                        description=st.description,
+                        expected_result=st.expected_result,
+                    )
+                )
+                if len(step_batch) >= STEP_CHUNK:
+                    self.db.add_all(step_batch)
+                    await self.db.flush()
+                    created_steps += len(step_batch)
+                    step_batch = []
+
+        if step_batch:
+            self.db.add_all(step_batch)
+            await self.db.flush()
+            created_steps += len(step_batch)
+
+        return TestCaseCsvImportResponse(
+            dry_run=False,
+            import_mode=mode,
+            created_cases=case_total,
+            created_steps=created_steps,
+            skipped_case_groups=skipped,
+            errors=errors,
+            warnings=warnings,
+            message=f"Imported {case_total} case(s) and {created_steps} step(s).",
+        )

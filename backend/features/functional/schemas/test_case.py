@@ -9,6 +9,7 @@ from features.functional.db.models.test_case import (
     TestCasePriority,
     TestCaseCategory,
     TestCaseStatus,
+    TestCaseSource,
 )
 from features.functional.schemas.test_step import TestStepResponse
 
@@ -67,6 +68,7 @@ class TestCaseResponse(TestCaseBase):
     tags: Optional[str] = None
     is_automated: bool
     is_generated: bool
+    source: TestCaseSource = TestCaseSource.manual
     integrity_check: bool = False
     jira_key: Optional[str] = None
     created_by: Optional[int] = None

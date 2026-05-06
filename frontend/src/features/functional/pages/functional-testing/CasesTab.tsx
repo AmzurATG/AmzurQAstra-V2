@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowPathIcon, PlayIcon, PlusIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, PlayIcon, PlusIcon, DocumentArrowUpIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 
 import { Button } from '@common/components/ui/Button'
@@ -12,6 +12,7 @@ import { useProjectStore } from '@common/store/projectStore'
 import { testCasesApi, testStepsApi } from '../../api'
 import { CredentialsOverride } from '../../components/CredentialsOverride'
 import { TestCaseEditModal } from '../../components/TestCaseEditModal'
+import { CsvImportModal } from '../../components/CsvImportModal'
 import { TestCaseTable } from '../../components/TestCaseTable'
 import { useRequiredActiveTestRun } from '../../context/ActiveTestRunProvider'
 import { useTestCaseFilters } from '../../hooks/useTestCaseFilters'
@@ -68,6 +69,7 @@ export default function CasesTab() {
     setPage,
     pagination,
     loadTestCases,
+    loadTestCasesAfterImport,
   } = useTestCaseFilters(projectId)
 
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
@@ -77,6 +79,7 @@ export default function CasesTab() {
     loadTestCaseSelection(projectId)
   )
 
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingTestCase, setEditingTestCase] = useState<TestCase | null>(null)
   const [isSaving, setIsSaving] = useState(false)
@@ -369,6 +372,9 @@ export default function CasesTab() {
           <Button onClick={runAll} disabled={runDisabled}>
             <PlayIcon className="w-4 h-4 mr-2" /> {runAllLabel}
           </Button>
+          <Button variant="outline" onClick={() => setIsImportModalOpen(true)}>
+            <DocumentArrowUpIcon className="w-4 h-4 mr-2" /> Import CSV
+          </Button>
           <Button onClick={handleCreateManualCase}>
             <PlusIcon className="w-4 h-4 mr-2" /> New Case
           </Button>
@@ -479,6 +485,16 @@ export default function CasesTab() {
           onPageChange={setPage}
         />
       </Card>
+
+      <CsvImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        projectId={pid}
+        onImported={({ wroteCases }) => {
+          if (wroteCases) void loadTestCasesAfterImport()
+          else void loadTestCases()
+        }}
+      />
 
       <TestCaseEditModal
         isOpen={isEditModalOpen}

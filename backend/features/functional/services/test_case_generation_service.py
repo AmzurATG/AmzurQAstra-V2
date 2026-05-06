@@ -9,7 +9,12 @@ import json
 from common.llm import get_llm_client
 from common.utils.logger import logger
 from common.db.models.user_story import UserStory
-from features.functional.db.models.test_case import TestCase, TestCasePriority, TestCaseCategory
+from features.functional.db.models.test_case import (
+    TestCase,
+    TestCasePriority,
+    TestCaseCategory,
+    TestCaseSource,
+)
 from features.functional.schemas.test_case import GenerateTestCasesRequest
 from features.functional.services.requirement_service import RequirementService
 from features.functional.services.test_case_service import TestCaseService
@@ -133,6 +138,7 @@ class TestCaseGenerationService:
                     priority=TestCasePriority(tc_data.get("priority", "medium").lower()),
                     category=TestCaseCategory(tc_data.get("category", "regression").lower()),
                     is_generated=True,
+                    source=TestCaseSource.ai,
                     generation_prompt=content[:1000],  # Store truncated prompt
                 )
                 self.db.add(test_case)
@@ -293,6 +299,7 @@ class TestCaseGenerationService:
                     priority=TestCasePriority(priority_str),
                     category=TestCaseCategory(category_str),
                     is_generated=True,
+                    source=TestCaseSource.ai,
                     generation_prompt=content[:1000],
                 )
                 self.db.add(test_case)

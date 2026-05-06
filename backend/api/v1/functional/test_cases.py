@@ -2,7 +2,8 @@
 Test Cases Endpoints
 """
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, File, Form, UploadFile
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.db.database import get_db
@@ -16,6 +17,7 @@ from features.functional.schemas.test_case import (
     TestCaseWithSteps,
     GenerateTestCasesRequest,
 )
+from features.functional.schemas.test_case_import import TestCaseCsvImportResponse
 from features.functional.services.test_case_service import TestCaseService
 
 
@@ -55,6 +57,47 @@ async def list_test_cases(
         total=total,
         page=pagination.page,
         page_size=pagination.page_size,
+    )
+
+
+@router.get("/csv-template")
+async def download_test_case_csv_template(
+    current_user: User = Depends(get_current_active_user),
+):
+    """Download example CSV and column notes (UTF-8)."""
+    from features.functional.services.test_case_csv_import import csv_template_text
+
+    body = csv_template_text()
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="qastra-test-cases-template.csv"',
+        },
+    )
+
+
+@router.post("/import-csv", response_model=TestCaseCsvImportResponse)
+async def import_test_cases_csv(
+    project_id: int = Form(...),
+    dry_run: bool = Form(False),
+    import_mode: str = Form("strict"),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import test cases and steps from one UTF-8 CSV (see GET /csv-template)."""
+    from features.functional.services.analytics.access import assert_project_access
+
+    await assert_project_access(db, current_user, project_id)
+    content = await file.read()
+    service = TestCaseService(db)
+    return await service.import_test_cases_from_csv(
+        project_id=project_id,
+        created_by=current_user.id,
+        file_bytes=content,
+        dry_run=dry_run,
+        import_mode=import_mode or "strict",
     )
 
 

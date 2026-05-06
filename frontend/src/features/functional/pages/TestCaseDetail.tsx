@@ -14,6 +14,7 @@ import {
   XMarkIcon,
   ShieldCheckIcon,
   CheckCircleIcon,
+  DocumentArrowUpIcon,
 } from '@heroicons/react/24/outline'
 import { testCasesApi, testStepsApi } from '../api'
 import type { TestCase, TestStep, TestStepAction } from '../types'
@@ -25,6 +26,11 @@ const ACTION_OPTIONS: TestStepAction[] = [
   'hover', 'wait', 'screenshot', 'assert_visible', 'assert_text', 
   'assert_url', 'assert_title', 'custom'
 ]
+
+function detailSource(tc: TestCase): 'manual' | 'ai' | 'csv' {
+  if (tc.source) return tc.source
+  return tc.is_generated ? 'ai' : 'manual'
+}
 
 export default function TestCaseDetail() {
   const { projectId, testCaseId } = useParams<{ projectId: string; testCaseId: string }>()
@@ -223,10 +229,21 @@ export default function TestCaseDetail() {
             #{testCase.case_number ?? testCase.id}
           </span>
           <h1 className="text-2xl font-bold text-gray-900">{testCase.title}</h1>
-          {testCase.is_generated && (
+          {detailSource(testCase) === 'ai' && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded">
               <SparklesIcon className="w-3 h-3" />
-              AI Generated
+              AI generated
+            </span>
+          )}
+          {detailSource(testCase) === 'csv' && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-teal-100 text-teal-800 rounded">
+              <DocumentArrowUpIcon className="w-3 h-3" />
+              CSV import
+            </span>
+          )}
+          {detailSource(testCase) === 'manual' && (
+            <span className="inline-flex items-center px-2 py-0.5 text-xs bg-slate-100 text-slate-600 rounded">
+              Manual
             </span>
           )}
         </div>

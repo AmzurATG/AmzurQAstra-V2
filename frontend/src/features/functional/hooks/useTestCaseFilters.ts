@@ -26,6 +26,25 @@ export function useTestCaseFilters(projectId: string | undefined) {
     lastFilterSig.current = null
   }, [projectId])
 
+  const buildListParams = useCallback(
+    (pageNum: number) => {
+      const params: {
+        page: number
+        page_size: number
+        priority?: string
+        category?: string
+        status?: string
+        search?: string
+      } = { page: pageNum, page_size: DEFAULT_PAGE_SIZE }
+      if (priorityFilter !== 'all') params.priority = priorityFilter
+      if (categoryFilter !== 'all') params.category = categoryFilter
+      if (statusFilter !== 'all') params.status = statusFilter
+      if (searchQuery) params.search = searchQuery
+      return params
+    },
+    [priorityFilter, categoryFilter, statusFilter, searchQuery]
+  )
+
   const loadTestCases = useCallback(async () => {
     if (!projectId) return
     setIsLoading(true)
@@ -39,20 +58,10 @@ export function useTestCaseFilters(projectId: string | undefined) {
         if (page !== 1) setPage(1)
       }
 
-      const params: {
-        page: number
-        page_size: number
-        priority?: string
-        category?: string
-        status?: string
-        search?: string
-      } = { page: pageToUse, page_size: DEFAULT_PAGE_SIZE }
-      if (priorityFilter !== 'all') params.priority = priorityFilter
-      if (categoryFilter !== 'all') params.category = categoryFilter
-      if (statusFilter !== 'all') params.status = statusFilter
-      if (searchQuery) params.search = searchQuery
-
-      const response = await testCasesApi.list(Number(projectId), params)
+      const response = await testCasesApi.list(
+        Number(projectId),
+        buildListParams(pageToUse)
+      )
       const data = response.data as PaginatedResponse<TestCase>
       setTestCases(data.items || [])
       setPagination({
@@ -66,15 +75,35 @@ export function useTestCaseFilters(projectId: string | undefined) {
     } finally {
       setIsLoading(false)
     }
-  }, [
-    projectId,
-    filterSig,
-    page,
-    priorityFilter,
-    categoryFilter,
-    statusFilter,
-    searchQuery,
-  ])
+  }, [projectId, filterSig, page, buildListParams])
+
+  /**
+   * After CSV import: new rows get the highest case_number and sort to the end of the list.
+   * Jump to the last page so the user actually sees what they imported.
+   */
+  const loadTestCasesAfterImport = useCallback(async () => {
+    if (!projectId) return
+    setIsLoading(true)
+    try {
+      const probe = await testCasesApi.list(Number(projectId), buildListParams(1))
+      const d = probe.data as PaginatedResponse<TestCase>
+      const lastPage = Math.max(1, d.total_pages || 1)
+      setPage(lastPage)
+      const response = await testCasesApi.list(Number(projectId), buildListParams(lastPage))
+      const data = response.data as PaginatedResponse<TestCase>
+      setTestCases(data.items || [])
+      setPagination({
+        total: data.total,
+        total_pages: data.total_pages || 1,
+        has_next: data.has_next,
+        has_prev: data.has_prev,
+      })
+    } catch (error) {
+      console.error('Failed to load test cases:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [projectId, buildListParams])
 
   useEffect(() => {
     loadTestCases()
@@ -96,5 +125,6 @@ export function useTestCaseFilters(projectId: string | undefined) {
     setPage,
     pagination,
     loadTestCases,
+    loadTestCasesAfterImport,
   }
 }

@@ -158,6 +158,8 @@ export interface UserStoryBrief {
   item_type: string
 }
 
+export type TestCaseSource = 'manual' | 'ai' | 'csv'
+
 export interface TestCase {
   id: number
   /** Per-project sequence for display (1, 2, 3 …); URLs still use `id`. */
@@ -173,6 +175,8 @@ export interface TestCase {
   category: TestCaseCategory
   status: TestCaseStatus
   is_generated: boolean
+  /** manual = UI; ai = LLM; csv = spreadsheet import */
+  source?: TestCaseSource
   is_automated: boolean
   integrity_check: boolean
   tags?: string
@@ -181,6 +185,23 @@ export interface TestCase {
   steps?: TestStep[]
   created_at: string
   updated_at: string
+}
+
+export interface CsvImportErrorItem {
+  row: number
+  column?: string | null
+  message: string
+}
+
+export interface TestCaseCsvImportResponse {
+  dry_run: boolean
+  import_mode: string
+  created_cases: number
+  created_steps: number
+  skipped_case_groups: number
+  errors: CsvImportErrorItem[]
+  warnings: CsvImportErrorItem[]
+  message: string
 }
 
 // Test Step Types

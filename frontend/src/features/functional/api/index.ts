@@ -2,6 +2,7 @@ import { apiClient } from '@common/api/client'
 import type {
   Requirement,
   TestCase,
+  TestCaseCsvImportResponse,
   TestStep,
   TestRun,
   TestRunSummary,
@@ -251,6 +252,26 @@ export const testCasesApi = {
   regenerateSteps: (testCaseId: number) =>
     apiClient.post<{ success: boolean; steps_created: number; error?: string }>(
       `/functional/test-cases/${testCaseId}/regenerate-steps`
+    ),
+
+  getCsvTemplate: () =>
+    apiClient.get<string>('/functional/test-cases/csv-template', { responseType: 'text' }),
+
+  importCsv: (formData: FormData) =>
+    apiClient.post<TestCaseCsvImportResponse>(
+      '/functional/test-cases/import-csv',
+      formData,
+      {
+        // Instance default is application/json; must not send FormData with that header.
+        transformRequest: [
+          (data, headers) => {
+            if (data instanceof FormData) {
+              delete headers['Content-Type']
+            }
+            return data
+          },
+        ],
+      }
     ),
 }
 

@@ -32,6 +32,14 @@ class TestCaseStatus(str, enum.Enum):
     deprecated = "deprecated"
 
 
+class TestCaseSource(str, enum.Enum):
+    """How the test case was authored (UI / import vs LLM)."""
+
+    manual = "manual"
+    ai = "ai"
+    csv = "csv"
+
+
 class TestCase(BaseModel):
     """Test case model."""
     
@@ -64,6 +72,12 @@ class TestCase(BaseModel):
     # LLM generation info
     is_generated = Column(Boolean, default=False)
     generation_prompt = Column(Text, nullable=True)
+    #: manual = UI; ai = LLM; csv = bulk import
+    source = Column(
+        Enum(TestCaseSource, native_enum=False, length=16),
+        default=TestCaseSource.manual,
+        nullable=False,
+    )
     
     # Created by
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
