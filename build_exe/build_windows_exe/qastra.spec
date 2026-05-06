@@ -8,12 +8,23 @@ block_cipher = None
 
 import os
 import sys
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 # SPECPATH is a PyInstaller built-in — the directory containing this .spec file
 SPEC_DIR = SPECPATH
 PROJECT_ROOT = os.path.normpath(os.path.join(SPEC_DIR, '..', '..'))
 # Use the interpreter that runs PyInstaller (e.g. project .venv, backend\venv, or uv env)
 _SITE_PACKAGES = os.path.join(sys.prefix, "Lib", "site-packages")
+
+# ── Auto-collect problematic packages ───────────────────────
+# Google is a namespace package — individual subpackages are easily missed
+_google_hidden = collect_submodules('google')
+
+# Certifi CA bundle (cacert.pem) must be included as data
+_certifi_data = collect_data_files('certifi')
+
+# Timezone data files
+_tzdata_data = collect_data_files('tzdata')
 
 a = Analysis(
     [os.path.join(SPEC_DIR, 'launcher.py')],
@@ -26,11 +37,15 @@ a = Analysis(
         (os.path.join(_SITE_PACKAGES, 'litellm'), 'litellm'),
         # browser_use needs .md prompt templates in agent/system_prompts/
         (os.path.join(_SITE_PACKAGES, 'browser_use'), 'browser_use'),
-    ],
-    hiddenimports=[
+    ] + _certifi_data + _tzdata_data,
+    hiddenimports=_google_hidden + [
         # =====================================================================
         # Complete hidden imports — derived from a clean venv install of
         # backend/requirements.txt (170 packages, direct + transitive).
+        #
+        # NOTE: Python & Node.js are NOT required on the target machine.
+        # - Python interpreter + stdlib are bundled by PyInstaller.
+        # - React frontend is pre-built into backend/static/ at build time.
         # =====================================================================
 
         # ── Uvicorn & ASGI ──────────────────────────────────────
@@ -123,7 +138,9 @@ a = Analysis(
         'httpx_sse',
         'httpcore',
         'h11',
-        'httplib2',        'pyparsing',        'aiohttp',
+        'httplib2',
+        'pyparsing',
+        'aiohttp',
         'aiosignal',
         'aiohappyeyeballs',
         'multidict',
@@ -220,7 +237,9 @@ a = Analysis(
         'jmespath',
 
         # ── Jira Integration ───────────────────────────────────
-        'jira',        'jira.exceptions',        'portalocker',
+        'jira',
+        'jira.exceptions',
+        'portalocker',
 
         # ── Redis / Celery ─────────────────────────────────────
         'redis',
@@ -273,12 +292,18 @@ a = Analysis(
         'tzdata',
         'uuid_extensions',        # uuid7 package import name
 
-        # ── Windows-Specific ───────────────────────────────────
+        # ── Windows-Specific (pywin32) ─────────────────────────
         'win32api',
         'win32con',
+        'win32event',
+        'win32file',
+        'win32pipe',
         'pywintypes',
+        'pythoncom',
+        'pywin32',
+        'pyjwt',
 
-        # ── Python Stdlib (email) ──────────────────────────────
+        # ── Python Stdlib (commonly missed by PyInstaller) ─────
         'email',
         'email.mime',
         'email.mime.application',
@@ -290,10 +315,27 @@ a = Analysis(
         'email.mime.nonmultipart',
         'email.mime.text',
         'email.message',
+        'email.header',
         'email.policy',
         'email.contentmanager',
         'email.encoders',
         'email.utils',
+        'smtplib',
+        'ssl',
+        '_ssl',
+        'ctypes',
+        'ctypes.wintypes',
+        'html',
+        'html.parser',
+        'http',
+        'http.client',
+        'http.cookies',
+        'http.cookiejar',
+        'logging.handlers',
+        'xml',
+        'xml.etree',
+        'xml.etree.ElementTree',
+        'sqlite3',
 
         # ── Misc Transitive ────────────────────────────────────
         'importlib_metadata',
