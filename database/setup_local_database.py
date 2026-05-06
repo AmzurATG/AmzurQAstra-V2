@@ -18,8 +18,14 @@ import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
-# Load .env from the backend directory
-load_dotenv(Path(__file__).resolve().parent.parent / "backend" / ".env")
+# Load .env from the backend directory — MUST exist
+_ENV_FILE = Path(__file__).resolve().parent.parent / "backend" / ".env"
+if not _ENV_FILE.is_file():
+    print(f"ERROR: Required .env file not found at: {_ENV_FILE}")
+    print("Copy backend/.env.example to backend/.env and configure it.")
+    sys.exit(1)
+
+load_dotenv(_ENV_FILE)
 
 # Application database / user defaults (from .env)
 APP_DB = os.getenv("DB_NAME")
@@ -27,6 +33,11 @@ APP_USER = os.getenv("DB_USER")
 APP_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = int(os.getenv("DB_PORT"))
+DB_SCHEMA = os.getenv("DB_SCHEMA")
+
+if not all([APP_DB, APP_USER, APP_PASSWORD, DB_HOST, DB_PORT, DB_SCHEMA]):
+    print("ERROR: DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, and DB_SCHEMA must be set in backend/.env")
+    sys.exit(1)
 
 
 def get_credentials() -> tuple[str, str]:
@@ -102,11 +113,13 @@ def setup_database(su_user: str, su_password: str) -> None:
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cur = conn.cursor()
 
-        cur.execute(f"GRANT ALL ON SCHEMA public TO {APP_USER};")
-        cur.execute(f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {APP_USER};")
-        cur.execute(f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {APP_USER};")
-        cur.execute(f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO {APP_USER};")
-        print(f"  Granted schema-level privileges to '{APP_USER}'.")
+        # Create and grant privileges on the configured schema
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {DB_SCHEMA} AUTHORIZATION {APP_USER};")
+        cur.execute(f"GRANT ALL ON SCHEMA {DB_SCHEMA} TO {APP_USER};")
+        cur.execute(f"ALTER DEFAULT PRIVILEGES IN SCHEMA {DB_SCHEMA} GRANT ALL ON TABLES TO {APP_USER};")
+        cur.execute(f"ALTER DEFAULT PRIVILEGES IN SCHEMA {DB_SCHEMA} GRANT ALL ON SEQUENCES TO {APP_USER};")
+        cur.execute(f"ALTER DEFAULT PRIVILEGES IN SCHEMA {DB_SCHEMA} GRANT ALL ON FUNCTIONS TO {APP_USER};")
+        print(f"  Created schema '{DB_SCHEMA}' and granted privileges to '{APP_USER}'.")
 
         cur.close()
         print()

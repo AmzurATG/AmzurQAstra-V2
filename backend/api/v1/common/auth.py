@@ -39,7 +39,7 @@ async def login(
 ):
     """Login and get JWT tokens."""
     auth_service = AuthService(db)
-    token = await auth_service.login(credentials.email, credentials.password)
+    token = await auth_service.login(credentials.email, credentials.password, credentials.remember_me)
     
     if not token:
         raise HTTPException(

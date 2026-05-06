@@ -87,6 +87,7 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str
+    DB_SCHEMA: str
     DB_ECHO: bool = False
 
     # Redis
@@ -101,6 +102,8 @@ class Settings(BaseSettings):
     )
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    REMEMBER_ME_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    JWT_NONCE: Optional[str] = None  # Stable nonce for JWT; if unset, tokens invalidate on restart
 
     # LLM
     OPENAI_API_KEY: Optional[str] = None
@@ -207,5 +210,16 @@ class Settings(BaseSettings):
                 p = _BACKEND_DIR / p
         return str(p.resolve())
 
+
+# ---------------------------------------------------------------------------
+# Enforce .env file existence — no fallback to env vars or defaults for
+# required fields. Every deployment MUST have a .env alongside the app.
+# ---------------------------------------------------------------------------
+_env_path = Path(_resolve_env_file())
+if not _env_path.is_file():
+    raise FileNotFoundError(
+        f"Required .env file not found at: {_env_path}\n"
+        "Copy .env.example to .env and configure it before starting the application."
+    )
 
 settings = Settings()

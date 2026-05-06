@@ -27,6 +27,12 @@ class User(BaseModel):
     role = Column(Enum(UserRole, name='userrole', create_type=False), default=UserRole.tester, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     is_superuser = Column(Boolean, default=False, nullable=False)
+    is_verified = Column(Boolean, default=True, nullable=False)  # Default True for existing users
+    
+    # Signup profile fields
+    company_name = Column(String(255), nullable=True)
+    country_code = Column(String(10), nullable=True)
+    phone_number = Column(String(20), nullable=True)
     
     # Organization
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)

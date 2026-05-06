@@ -6,12 +6,20 @@ import asyncio
 import sys
 from pathlib import Path
 
+# Ensure the backend package is importable
+_BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
+sys.path.insert(0, str(_BACKEND_DIR))
+
+# Enforce .env existence before importing config
+_ENV_FILE = _BACKEND_DIR / ".env"
+if not _ENV_FILE.is_file():
+    print(f"ERROR: Required .env file not found at: {_ENV_FILE}")
+    print("Copy backend/.env.example to backend/.env and configure it.")
+    sys.exit(1)
+
 import bcrypt
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-
-# Ensure the backend package is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 
 async def reset_admin():
@@ -34,10 +42,14 @@ async def reset_admin():
     print(f"Password hash generated successfully")
     print(f"Verification: {bcrypt.checkpw(password_bytes, hashed.encode('utf-8'))}")
     print(f"\nConnecting to: {db_url}")
+    print(f"Schema: {settings.DB_SCHEMA}")
     
     engine = create_async_engine(db_url)
     
     async with engine.begin() as conn:
+        # Set search_path to the configured schema
+        await conn.execute(text(f"SET search_path TO {settings.DB_SCHEMA}"))
+
         # Check existing users
         result = await conn.execute(text("SELECT id, email, hashed_password FROM users"))
         users = result.fetchall()

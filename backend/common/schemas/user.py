@@ -45,6 +45,7 @@ class UserLogin(BaseModel):
     """Schema for user login."""
     email: str  # Use str instead of EmailStr for login flexibility
     password: str
+    remember_me: bool = False
 
 
 class Token(BaseModel):

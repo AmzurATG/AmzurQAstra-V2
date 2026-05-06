@@ -2,13 +2,20 @@
 SQLAlchemy Base Model
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, DateTime, func
+from sqlalchemy import Column, Integer, DateTime, func, MetaData
 from sqlalchemy.orm import DeclarativeBase, declared_attr
+
+from config import settings
+
+# Use the configured schema for all tables
+_schema = settings.DB_SCHEMA
 
 
 class Base(DeclarativeBase):
     """Base class for all database models."""
-    
+
+    metadata = MetaData(schema=_schema)
+
     @declared_attr
     def __tablename__(cls) -> str:
         """Generate table name from class name."""

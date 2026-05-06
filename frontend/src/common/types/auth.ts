@@ -5,6 +5,10 @@ export interface User {
   role: 'admin' | 'manager' | 'tester' | 'viewer'
   is_active: boolean
   is_superuser: boolean
+  is_verified: boolean
+  company_name?: string
+  country_code?: string
+  phone_number?: string
   organization_id?: number
   created_at: string
   updated_at: string
@@ -13,6 +17,7 @@ export interface User {
 export interface LoginCredentials {
   email: string
   password: string
+  remember_me?: boolean
 }
 
 export interface Token {

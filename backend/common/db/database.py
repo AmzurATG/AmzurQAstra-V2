@@ -2,6 +2,7 @@
 SQLAlchemy Database Configuration
 """
 from typing import AsyncGenerator
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -14,6 +15,15 @@ engine = create_async_engine(
     echo=settings.DB_ECHO,
     poolclass=NullPool,
 )
+
+
+# Set search_path to the configured schema on every new connection
+@event.listens_for(engine.sync_engine, "connect")
+def _set_search_path(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute(f"SET search_path TO {settings.DB_SCHEMA}")
+    cursor.close()
+
 
 # Create session factory
 async_session_maker = async_sessionmaker(
