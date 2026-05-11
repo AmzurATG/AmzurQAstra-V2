@@ -2,17 +2,18 @@
 Common API Dependencies
 """
 from datetime import datetime, timezone
-from typing import Generator, Optional
+from typing import Optional
+
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
-from jose import JWTError, jwt
+
+from jose import JWTError
 
 from common.db.database import get_db
 from common.db.models.user import User
 from common.utils.security import verify_token, BOOT_NONCE
 from config import settings
-
 
 security = HTTPBearer()
 
@@ -27,7 +28,7 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     try:
         token = credentials.credentials
         payload = verify_token(token)
@@ -41,11 +42,12 @@ async def get_current_user(
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    
+
     from common.services.auth_service import AuthService
+
     auth_service = AuthService(db)
     user = await auth_service.get_user_by_id(int(user_id))
-    
+
     if user is None:
         raise credentials_exception
 
@@ -53,7 +55,11 @@ async def get_current_user(
     iat = payload.get("iat")
     if iat is not None and user.created_at is not None:
         issued_at = datetime.fromtimestamp(iat, tz=timezone.utc)
-        created_at = user.created_at.replace(tzinfo=timezone.utc) if user.created_at.tzinfo is None else user.created_at
+        created_at = (
+            user.created_at.replace(tzinfo=timezone.utc)
+            if user.created_at.tzinfo is None
+            else user.created_at
+        )
         if issued_at < created_at:
             raise credentials_exception
 

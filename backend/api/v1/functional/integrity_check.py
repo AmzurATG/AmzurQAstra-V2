@@ -2,13 +2,16 @@
 Integrity Check Endpoints
 POST  /run             — start async check, return run_id
 GET   /{run_id}/status — poll live progress
+GET   /{run_id}/pdf    — download report PDF (terminal runs only)
+POST  /{run_id}/email  — email report PDF
 GET   /preview/{pid}   — preview flagged test cases (unchanged)
 GET   /history/{pid}   — past runs
 """
-from typing import List, Optional
+import asyncio
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
@@ -17,6 +20,13 @@ from common.db.database import get_db
 from common.db.models.user import User
 from common.db.models.user_story import UserStory
 from common.api.deps import get_current_active_user
+from common.schemas.report_email import SendReportEmailRequest
+from common.services.smtp_mailer import (
+    SmtpSendError,
+    build_integrity_check_report_email_envelope,
+    is_smtp_configured,
+    send_email_with_pdf_attachment,
+)
 from features.functional.schemas.integrity_check import (
     IntegrityCheckRequest,
     RunStartResponse,
@@ -59,6 +69,89 @@ async def get_run_status(
     """Poll live progress or fetch historical result for a given run_id."""
     service = IntegrityCheckService(db)
     return await service.get_run_status(run_id)
+
+
+@router.get("/{run_id}/pdf")
+async def download_integrity_check_pdf(
+    run_id: str,
+    project_id: int = Query(..., description="Project id (scope)"),
+    download: bool = Query(False, description="If true, use attachment disposition"),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = IntegrityCheckService(db)
+    record = await service.get_run_record(run_id, project_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if record.status not in ("completed", "error"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Report is not ready yet. Wait until the run finishes.",
+        )
+    data, filename = await service.get_pdf_bytes(run_id, project_id)
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="PDF could not be generated for this run",
+        )
+    disp = "attachment" if download else "inline"
+    cd = f'{disp}; filename*=UTF-8\'\'{quote(filename or "bic-report.pdf")}'
+    return Response(content=data, media_type="application/pdf", headers={"Content-Disposition": cd})
+
+
+@router.post("/{run_id}/email", status_code=status.HTTP_200_OK)
+async def email_integrity_check_pdf(
+    run_id: str,
+    body: SendReportEmailRequest,
+    project_id: int = Query(..., description="Project id (scope)"),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not is_smtp_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Email delivery is not configured on the server. "
+                "Set SMTP_HOST and EMAIL_FROM_ADDRESS (see .env.example)."
+            ),
+        )
+    service = IntegrityCheckService(db)
+    record = await service.get_run_record(run_id, project_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if record.status not in ("completed", "error"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Report is not ready yet. Wait until the run finishes.",
+        )
+    data, filename = await service.get_pdf_bytes(run_id, project_id)
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="PDF not available for this run",
+        )
+    subject, text_body, html_body = build_integrity_check_report_email_envelope(
+        run_id=record.run_id,
+        project_id=project_id,
+        app_url=record.app_url,
+        run_completed_at=record.completed_at,
+    )
+    try:
+        await asyncio.to_thread(
+            send_email_with_pdf_attachment,
+            to_addr=str(body.to),
+            subject=subject,
+            text_body=text_body,
+            html_body=html_body,
+            pdf_bytes=data,
+            attachment_filename=filename or "bic-report.pdf",
+        )
+    except SmtpSendError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=e.message,
+        ) from e
+    return {"detail": "Report email sent"}
 
 
 # ── History ───────────────────────────────────────────────────────────────────

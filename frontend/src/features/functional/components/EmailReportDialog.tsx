@@ -2,10 +2,10 @@ import { Fragment, useEffect, useState, type FormEvent } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
 import { EnvelopeIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
-import { gapAnalysisApi, testRecommendationsApi } from '../api'
+import { gapAnalysisApi, testRecommendationsApi, integrityCheckApi } from '../api'
 import toast from 'react-hot-toast'
 
-export type ReportEmailKind = 'gap' | 'testRec'
+export type ReportEmailKind = 'gap' | 'testRec' | 'bic'
 
 function formatDetail(err: unknown): string {
   const e = err as { response?: { data?: { detail?: unknown } } }
@@ -21,7 +21,7 @@ interface EmailReportDialogProps {
   isOpen: boolean
   onClose: () => void
   projectId: string
-  runId: number | null
+  runId: number | string | null
   kind: ReportEmailKind
   reportLabel: string
 }
@@ -52,16 +52,18 @@ export default function EmailReportDialog({
       toast.error('Enter a recipient email address')
       return
     }
-    if (runId == null) {
+    if (runId == null || runId === '') {
       toast.error('No run is selected. Close this dialog and open the report again.')
       return
     }
     setSending(true)
     try {
       if (kind === 'gap') {
-        await gapAnalysisApi.emailReport(runId, projectId, trimmed)
+        await gapAnalysisApi.emailReport(runId as number, projectId, trimmed)
+      } else if (kind === 'testRec') {
+        await testRecommendationsApi.emailReport(runId as number, projectId, trimmed)
       } else {
-        await testRecommendationsApi.emailReport(runId, projectId, trimmed)
+        await integrityCheckApi.emailReport(String(runId), projectId, trimmed)
       }
       toast.success('Report emailed successfully')
       onClose()

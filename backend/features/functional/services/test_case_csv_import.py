@@ -25,7 +25,7 @@ from features.functional.db.models.test_case import (
 from features.functional.db.models.test_step import TestStepAction
 from features.functional.schemas.test_case_import import CsvImportErrorItem
 
-MAX_CSV_BYTES = 15 * 1024 * 1024  # 15 MiB
+MAX_CSV_BYTES = 5 * 1024 * 1024  # 5 MiB
 MAX_DATA_ROWS = 12_000
 
 
@@ -305,7 +305,7 @@ def build_case_groups(
                 g.category = TestCaseCategory(cv)
         st = get(rd, "status")
         if st:
-            sv = _parse_enum_str(st, VALID_STATUSES, TestCaseStatus.ready.value, field_name="status", row=row_num, errors=errors)
+            sv = _parse_enum_str(st, VALID_STATUSES, TestCaseStatus.draft.value, field_name="status", row=row_num, errors=errors)
             if sv != "__invalid__":
                 g.status = TestCaseStatus(sv)
         if get(rd, "tags"):
@@ -460,7 +460,7 @@ def collect_case_constraint_violations(
 
 
 CSV_TEMPLATE_BODY = """case_key,title,description,preconditions,priority,category,status,tags,requirement_id,user_story_id,step_number,action,target,value,step_description,expected_result
-LOGIN-001,User can log in,,,high,regression,ready,,,,,,,,,
+LOGIN-001,User can log in,,,high,regression,draft,,,,,,,,,
 LOGIN-001,,,,,,,,,,1,navigate,https://app.example.com/login,,,Login page loads
 LOGIN-001,,,,,,,,,,2,type,#email,user@example.com,,,
 LOGIN-001,,,,,,,,,,3,type,#password,secret,,,
@@ -478,7 +478,7 @@ def csv_template_text() -> str:
         "# title on first row per case; omit title on step-only rows (falls back to case_key).\n"
         "# Leave all step columns empty for cases with zero steps — valid for placeholders.\n"
         "# Import modes (API): strict = abort whole file on any error; permissive = skip bad cases, import the rest.\n"
-        "# priority: critical|high|medium|low  category: smoke|regression|e2e|integration|sanity  status: draft|ready|deprecated\n"
+        "# priority: critical|high|medium|low  category: smoke|regression|e2e|integration|sanity  status: draft|ready|deprecated (default: draft)\n"
         "# action: navigate|click|type|fill|select|check|uncheck|hover|screenshot|wait|assert_text|assert_visible|assert_url|assert_title|custom\n"
         "\n"
     )

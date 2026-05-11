@@ -115,6 +115,78 @@ Kind regards,
     return subject, text_body, html_body
 
 
+def build_integrity_check_report_email_envelope(
+    *,
+    run_id: str,
+    project_id: int,
+    app_url: str | None,
+    run_completed_at: datetime | None,
+) -> Tuple[str, str, str]:
+    """
+    Return (subject, plain_text, html) for BIC / integrity check PDF emails.
+    """
+    app = html.escape(settings.APP_NAME or "QAstra")
+    rid = html.escape((run_id or "").strip() or "unknown")
+    url_plain = (app_url or "").strip() or "—"
+    url_h = html.escape(url_plain)
+
+    if run_completed_at is not None:
+        if run_completed_at.tzinfo is None:
+            dt_utc = run_completed_at.replace(tzinfo=timezone.utc)
+        else:
+            dt_utc = run_completed_at.astimezone(timezone.utc)
+        gen_line = dt_utc.strftime("%Y-%m-%d %H:%M UTC")
+        gen_line_plain = gen_line
+    else:
+        gen_line = "See timestamp in your QAstra workspace"
+        gen_line_plain = gen_line
+
+    if len(run_id) > 8:
+        subject = (
+            f"{settings.APP_NAME} — Build integrity check report "
+            f"(project #{project_id}, run {run_id[:8]}…)"
+        )
+    else:
+        subject = (
+            f"{settings.APP_NAME} — Build integrity check report "
+            f"(project #{project_id}, run {run_id})"
+        )
+
+    text_body = f"""Dear colleague,
+
+Please find attached the Build integrity check (BIC) report for this QAstra project.
+
+Project id: {project_id}
+Run id: {run_id}
+Application URL: {url_plain}
+Report run completed: {gen_line_plain}
+
+The PDF attachment matches the report you can download from the Build Integrity Check page in the application.
+
+If you did not expect this message, you may disregard it.
+
+Kind regards,
+{settings.APP_NAME}
+"""
+
+    html_body = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1a1a1a;">
+<p>Dear colleague,</p>
+<p>Please find attached the <strong>Build integrity check</strong> report for this QAstra project.</p>
+<ul style="margin:0 0 1em 1.2em;padding:0;">
+<li>Project id: <strong>{project_id}</strong></li>
+<li>Run id: <strong>{rid}</strong></li>
+<li>Application URL: <strong>{url_h}</strong></li>
+<li>Run completed: <strong>{html.escape(gen_line)}</strong></li>
+</ul>
+<p>The PDF attachment matches the report you can download from the Build Integrity Check page in the application.</p>
+<p>If you did not expect this message, you may disregard it.</p>
+<p style="margin-top:1.5em;">Kind regards,<br><strong>{app}</strong></p>
+</body></html>"""
+
+    return subject, text_body, html_body
+
+
 def _safe_attachment_filename(name: str) -> str:
     out = []
     for c in name:

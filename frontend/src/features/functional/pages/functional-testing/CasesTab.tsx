@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowPathIcon, PlayIcon, PlusIcon, DocumentArrowUpIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, PlayIcon, PlusIcon, DocumentArrowUpIcon, CheckBadgeIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 
 import { Button } from '@common/components/ui/Button'
@@ -263,6 +263,24 @@ export default function CasesTab() {
     )
   }
 
+  const handleBulkStatus = async (newStatus: 'ready' | 'draft' | 'deprecated') => {
+    if (!projectId || selectedIds.size === 0) {
+      toast.error('Select cases first')
+      return
+    }
+    const ids = Array.from(selectedIds)
+    const label = newStatus === 'ready' ? 'Ready' : newStatus === 'draft' ? 'Draft' : 'Deprecated'
+    try {
+      const res = await testCasesApi.bulkUpdateStatus(pid, ids, newStatus as import('../../types').TestCaseStatus)
+      const updated = res.data.updated
+      toast.success(`${updated} case${updated !== 1 ? 's' : ''} marked as ${label}`)
+      setSelectedIds(new Set())
+      loadTestCases()
+    } catch {
+      toast.error(`Failed to update status to ${label}`)
+    }
+  }
+
   const runAll = () =>
     dispatchRun(buildRequest(), 'Preparing full test run…')
 
@@ -361,13 +379,30 @@ export default function CasesTab() {
             Refresh
           </Button>
           {selectedIds.size > 0 && (
-            <Button
-              variant="outline"
-              onClick={runSelected}
-              disabled={activeRun.isCreating || activeRun.isRunning}
-            >
-              <PlayIcon className="w-4 h-4 mr-1" /> Run ({selectedIds.size})
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                onClick={runSelected}
+                disabled={activeRun.isCreating || activeRun.isRunning}
+              >
+                <PlayIcon className="w-4 h-4 mr-1" /> Run ({selectedIds.size})
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => handleBulkStatus('ready')}
+                title="Mark selected cases as Ready"
+              >
+                <CheckBadgeIcon className="w-4 h-4 mr-1 text-green-600" />
+                Mark Ready ({selectedIds.size})
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => handleBulkStatus('draft')}
+                title="Mark selected cases as Draft"
+              >
+                Mark Draft ({selectedIds.size})
+              </Button>
+            </>
           )}
           <Button onClick={runAll} disabled={runDisabled}>
             <PlayIcon className="w-4 h-4 mr-2" /> {runAllLabel}

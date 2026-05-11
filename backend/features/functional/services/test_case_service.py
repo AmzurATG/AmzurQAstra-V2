@@ -2,12 +2,16 @@
 Test Case Service
 """
 import re
+import time
 from typing import Dict, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete as sa_delete, or_, select, func
 from sqlalchemy.orm import selectinload
 
 from common.api.pagination import PaginationParams
+from common.utils.logger import get_logger
+
+logger = get_logger("qastra.test")
 from common.db.models.user_story import UserStory
 from features.functional.db.models.requirement import Requirement
 from features.functional.db.models.test_case import (
@@ -425,6 +429,10 @@ class TestCaseService:
         from features.functional.services import test_case_csv_import as tc_csv
 
         mode = (import_mode or "strict").strip().lower()
+        logger.info(
+            "[csv_import] start project_id=%s user_id=%s mode=%s dry_run=%s file_bytes=%d",
+            project_id, created_by, mode, dry_run, len(file_bytes),
+        )
         if mode not in ("strict", "permissive"):
             return TestCaseCsvImportResponse(
                 dry_run=dry_run,
@@ -477,6 +485,10 @@ class TestCaseService:
             if constraint_hits:
                 errors.extend(item for _, item in constraint_hits)
             if errors:
+                logger.warning(
+                    "[csv_import] aborted strict mode project_id=%s error_count=%d first_error=%r",
+                    project_id, len(errors), errors[0].message if errors else "",
+                )
                 return TestCaseCsvImportResponse(
                     dry_run=dry_run,
                     import_mode=mode,
@@ -513,6 +525,10 @@ class TestCaseService:
             if fk_hits:
                 errors.extend(item for _, item in fk_hits)
             if errors:
+                logger.warning(
+                    "[csv_import] aborted strict mode (dup/fk) project_id=%s error_count=%d",
+                    project_id, len(errors),
+                )
                 return TestCaseCsvImportResponse(
                     dry_run=dry_run,
                     import_mode=mode,
@@ -546,6 +562,11 @@ class TestCaseService:
             )
 
         if dry_run:
+            logger.info(
+                "[csv_import] dry_run project_id=%s mode=%s cases_would_create=%d steps_would_create=%d"
+                " skipped=%d warnings=%d errors=%d",
+                project_id, mode, case_total, step_total, skipped, len(warnings), len(errors),
+            )
             return TestCaseCsvImportResponse(
                 dry_run=True,
                 import_mode=mode,
@@ -557,40 +578,50 @@ class TestCaseService:
                 message=f"Dry run: would create {case_total} case(s) and {step_total} step(s).",
             )
 
+        t_start = time.monotonic()
         sorted_keys = sorted(eligible.keys())
         numbers = await self.allocate_case_numbers(project_id, len(sorted_keys))
-        orm_cases: List[TestCase] = []
+
+        CASE_CHUNK = 200
+        STEP_CHUNK = 400
         key_to_orm: Dict[str, TestCase] = {}
+        created_steps = 0
 
-        for i, ck in enumerate(sorted_keys):
-            g = eligible[ck]
-            tc = TestCase(
-                project_id=project_id,
-                case_number=numbers[i],
-                title=(g.title or ck).strip()[:500],
-                description=g.description or None,
-                preconditions=g.preconditions or None,
-                priority=g.priority,
-                category=g.category,
-                status=g.status,
-                tags=(g.tags.strip() if g.tags else None) or None,
-                requirement_id=g.requirement_id,
-                user_story_id=g.user_story_id,
-                jira_key=ck[:50],
-                is_automated=True,
-                is_generated=False,
-                source=TestCaseSource.csv,
-                created_by=created_by,
+        # Insert test cases in chunks so very large imports don't build a single
+        # unbounded flush. key_to_orm is populated progressively.
+        for chunk_start in range(0, len(sorted_keys), CASE_CHUNK):
+            chunk_keys = sorted_keys[chunk_start : chunk_start + CASE_CHUNK]
+            chunk_cases: List[TestCase] = []
+            for i, ck in enumerate(chunk_keys):
+                g = eligible[ck]
+                tc = TestCase(
+                    project_id=project_id,
+                    case_number=numbers[chunk_start + i],
+                    title=(g.title or ck).strip()[:500],
+                    description=g.description or None,
+                    preconditions=g.preconditions or None,
+                    priority=g.priority,
+                    category=g.category,
+                    status=g.status,
+                    tags=(g.tags.strip() if g.tags else None) or None,
+                    requirement_id=g.requirement_id,
+                    user_story_id=g.user_story_id,
+                    jira_key=ck[:50],
+                    is_automated=True,
+                    is_generated=False,
+                    source=TestCaseSource.csv,
+                    created_by=created_by,
+                )
+                chunk_cases.append(tc)
+                key_to_orm[ck] = tc
+            self.db.add_all(chunk_cases)
+            await self.db.flush()
+            logger.debug(
+                "[csv_import] flushed case chunk offset=%d size=%d project_id=%s",
+                chunk_start, len(chunk_cases), project_id,
             )
-            orm_cases.append(tc)
-            key_to_orm[ck] = tc
-
-        self.db.add_all(orm_cases)
-        await self.db.flush()
 
         step_batch: List[TestStep] = []
-        STEP_CHUNK = 400
-        created_steps = 0
 
         for ck in sorted_keys:
             g = eligible[ck]
@@ -618,6 +649,14 @@ class TestCaseService:
             self.db.add_all(step_batch)
             await self.db.flush()
             created_steps += len(step_batch)
+
+        duration_ms = round((time.monotonic() - t_start) * 1000)
+        logger.info(
+            "[csv_import] done project_id=%s mode=%s created_cases=%d created_steps=%d"
+            " skipped=%d warnings=%d errors=%d duration_ms=%d user_id=%s",
+            project_id, mode, case_total, created_steps, skipped,
+            len(warnings), len(errors), duration_ms, created_by,
+        )
 
         return TestCaseCsvImportResponse(
             dry_run=False,

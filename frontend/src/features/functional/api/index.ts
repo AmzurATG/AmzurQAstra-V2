@@ -216,33 +216,18 @@ export const testCasesApi = {
     apiClient.delete(`/functional/test-cases/${id}`),
 
   /**
-   * Fan-out bulk status update. Isolation seam: when a native bulk endpoint
-   * ships, swap this implementation without touching call sites.
-   * Returns per-id outcomes so callers can surface partial failures.
+   * Native bulk status endpoint — single DB update scoped to project_id.
+   * Returns { updated: number, status: string }.
    */
-  bulkUpdateStatus: async (
+  bulkUpdateStatus: (
+    projectId: number,
     ids: number[],
     status: import('../types').TestCaseStatus
-  ): Promise<{ succeeded: number[]; failed: Array<{ id: number; error: string }> }> => {
-    const results = await Promise.allSettled(
-      ids.map((id) => apiClient.put<TestCase>(`/functional/test-cases/${id}`, { status }))
-    )
-    const succeeded: number[] = []
-    const failed: Array<{ id: number; error: string }> = []
-    results.forEach((r, i) => {
-      const id = ids[i]
-      if (r.status === 'fulfilled') {
-        succeeded.push(id)
-      } else {
-        const reason = r.reason as { response?: { data?: { detail?: string } }; message?: string }
-        failed.push({
-          id,
-          error: reason?.response?.data?.detail || reason?.message || 'Update failed',
-        })
-      }
-    })
-    return { succeeded, failed }
-  },
+  ) =>
+    apiClient.patch<{ updated: number; status: string }>(
+      `/functional/test-cases/bulk-status`,
+      { project_id: projectId, case_ids: ids, status }
+    ),
 
   generate: (requirementId: number) =>
     apiClient.post<TestCase[]>(`/functional/test-cases/generate`, {
@@ -354,6 +339,22 @@ export const integrityCheckApi = {
 
   getPreview: (projectId: number) =>
     apiClient.get<import('../types').IntegrityCheckPreview>(`/functional/integrity-check/preview/${projectId}`),
+
+  getPdf: (runId: string, projectId: string, download?: boolean) =>
+    apiClient.get<Blob>(`/functional/integrity-check/${runId}/pdf`, {
+      params: {
+        project_id: projectId,
+        ...(download ? { download: true } : {}),
+      },
+      responseType: 'blob',
+    }),
+
+  emailReport: (runId: string, projectId: string, to: string) =>
+    apiClient.post<{ detail: string }>(
+      `/functional/integrity-check/${runId}/email`,
+      { to },
+      { params: { project_id: projectId } },
+    ),
 }
 
 // User Stories API

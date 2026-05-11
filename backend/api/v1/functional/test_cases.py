@@ -4,12 +4,15 @@ Test Cases Endpoints
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, Form, UploadFile
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.db.database import get_db
 from common.db.models.user import User
 from common.api.deps import get_current_active_user
 from common.api.pagination import PaginationParams, PaginatedResponse
+from common.utils.logger import get_logger
+from features.functional.db.models.test_case import TestCaseStatus
 from features.functional.schemas.test_case import (
     TestCaseCreate,
     TestCaseUpdate,
@@ -20,8 +23,15 @@ from features.functional.schemas.test_case import (
 from features.functional.schemas.test_case_import import TestCaseCsvImportResponse
 from features.functional.services.test_case_service import TestCaseService
 
+logger = get_logger("qastra.test")
 
 router = APIRouter()
+
+
+class BulkStatusRequest(BaseModel):
+    project_id: int
+    case_ids: List[int]
+    status: TestCaseStatus
 
 
 @router.get("/", response_model=PaginatedResponse[TestCaseResponse])
@@ -91,14 +101,63 @@ async def import_test_cases_csv(
 
     await assert_project_access(db, current_user, project_id)
     content = await file.read()
+    filename = getattr(file, "filename", "unknown")
+    logger.info(
+        "[import_csv] request project_id=%s user_id=%s filename=%r size_bytes=%d dry_run=%s mode=%s",
+        project_id, current_user.id, filename, len(content), dry_run, import_mode,
+    )
     service = TestCaseService(db)
-    return await service.import_test_cases_from_csv(
+    result = await service.import_test_cases_from_csv(
         project_id=project_id,
         created_by=current_user.id,
         file_bytes=content,
         dry_run=dry_run,
         import_mode=import_mode or "strict",
     )
+    if result.errors and not result.created_cases:
+        logger.warning(
+            "[import_csv] failed project_id=%s filename=%r error_count=%d",
+            project_id, filename, len(result.errors),
+        )
+    return result
+
+
+@router.patch("/bulk-status", response_model=dict)
+async def bulk_update_test_case_status(
+    body: BulkStatusRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update status for a batch of test cases (scoped to project_id for safety)."""
+    from features.functional.services.analytics.access import assert_project_access
+    from sqlalchemy import update as sa_update
+
+    await assert_project_access(db, current_user, body.project_id)
+    if not body.case_ids:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="case_ids is empty.")
+    if len(body.case_ids) > 1000:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Cannot update more than 1000 cases at once.",
+        )
+
+    from features.functional.db.models.test_case import TestCase as TestCaseModel
+    result = await db.execute(
+        sa_update(TestCaseModel)
+        .where(
+            TestCaseModel.id.in_(body.case_ids),
+            TestCaseModel.project_id == body.project_id,
+        )
+        .values(status=body.status)
+        .execution_options(synchronize_session="fetch")
+    )
+    await db.commit()
+    updated = result.rowcount  # type: ignore[attr-defined]
+    logger.info(
+        "[bulk_status] project_id=%s user_id=%s status=%s requested=%d updated=%d",
+        body.project_id, current_user.id, body.status.value, len(body.case_ids), updated,
+    )
+    return {"updated": updated, "status": body.status.value}
 
 
 @router.post("/", response_model=TestCaseResponse, status_code=status.HTTP_201_CREATED)

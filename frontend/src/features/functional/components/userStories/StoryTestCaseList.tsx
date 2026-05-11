@@ -144,50 +144,47 @@ export const StoryTestCaseList = forwardRef<StoryTestCaseListHandle, StoryTestCa
       if (ids.length === 0) return
       setPromotingIds(new Set(ids))
       try {
-        const { succeeded, failed } = await testCasesApi.bulkUpdateStatus(ids, 'ready')
-        if (succeeded.length > 0) {
-          if (failed.length === 0) {
-            if (withUndo) {
-              toast.custom(
-                (t) => (
-                  <div className="flex items-center gap-3 rounded-lg bg-gray-900 px-4 py-3 text-sm text-white shadow-lg">
-                    <CheckCircleIcon className="h-5 w-5 text-green-400" />
-                    <span>
-                      Moved {succeeded.length} case{succeeded.length === 1 ? '' : 's'} to Functional Testing
-                    </span>
-                    <button
-                      type="button"
-                      className="ml-2 rounded px-2 py-1 text-xs font-semibold uppercase tracking-wide text-primary-300 hover:bg-white/10"
-                      onClick={() => {
-                        toast.dismiss(t.id)
-                        void undoPromotion(succeeded)
-                      }}
-                    >
-                      Undo
-                    </button>
-                  </div>
-                ),
-                { duration: 5000 }
-              )
-            } else {
-              toast.success(
-                `Moved ${succeeded.length} case${succeeded.length === 1 ? '' : 's'} to Functional Testing`
-              )
-            }
+        const res = await testCasesApi.bulkUpdateStatus(projectId, ids, 'ready')
+        const updated = res.data.updated
+        if (updated > 0) {
+          if (withUndo) {
+            toast.custom(
+              (t) => (
+                <div className="flex items-center gap-3 rounded-lg bg-gray-900 px-4 py-3 text-sm text-white shadow-lg">
+                  <CheckCircleIcon className="h-5 w-5 text-green-400" />
+                  <span>
+                    Moved {updated} case{updated === 1 ? '' : 's'} to Functional Testing
+                  </span>
+                  <button
+                    type="button"
+                    className="ml-2 rounded px-2 py-1 text-xs font-semibold uppercase tracking-wide text-primary-300 hover:bg-white/10"
+                    onClick={() => {
+                      toast.dismiss(t.id)
+                      void undoPromotion(ids)
+                    }}
+                  >
+                    Undo
+                  </button>
+                </div>
+              ),
+              { duration: 5000 }
+            )
           } else {
             toast.success(
-              `Promoted ${succeeded.length} of ${ids.length}; ${failed.length} failed`
+              `Moved ${updated} case${updated === 1 ? '' : 's'} to Functional Testing`
             )
           }
-        } else if (failed.length > 0) {
-          toast.error(failed[0].error)
+        } else {
+          toast.error('No cases were updated')
         }
         setSelectedDrafts((prev) => {
           const next = new Set(prev)
-          succeeded.forEach((id) => next.delete(id))
+          ids.forEach((id) => next.delete(id))
           return next
         })
         await loadCases()
+      } catch {
+        toast.error('Failed to promote cases')
       } finally {
         setPromotingIds(new Set())
       }
@@ -195,25 +192,21 @@ export const StoryTestCaseList = forwardRef<StoryTestCaseListHandle, StoryTestCa
     // undoPromotion is defined below but only used inside the toast callback
     // which runs later; referenced via closure below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [loadCases]
+    [loadCases, projectId]
   )
 
   const undoPromotion = useCallback(
     async (ids: number[]) => {
       if (ids.length === 0) return
-      const { succeeded, failed } = await testCasesApi.bulkUpdateStatus(ids, 'draft')
-      if (succeeded.length > 0) {
-        toast.success(
-          failed.length === 0
-            ? 'Promotion undone'
-            : `Reverted ${succeeded.length}; ${failed.length} failed`
-        )
-      } else if (failed.length > 0) {
+      try {
+        const res = await testCasesApi.bulkUpdateStatus(projectId, ids, 'draft')
+        toast.success(res.data.updated > 0 ? 'Promotion undone' : 'Nothing to revert')
+      } catch {
         toast.error('Failed to undo promotion')
       }
       await loadCases()
     },
-    [loadCases]
+    [loadCases, projectId]
   )
 
   const handlePromoteSelected = () => promoteIds(Array.from(selectedDrafts))
@@ -221,10 +214,12 @@ export const StoryTestCaseList = forwardRef<StoryTestCaseListHandle, StoryTestCa
   const handleDemoteOne = async (id: number) => {
     setPromotingIds(new Set([id]))
     try {
-      const { succeeded, failed } = await testCasesApi.bulkUpdateStatus([id], 'draft')
-      if (succeeded.length) toast.success('Moved back to draft')
-      else if (failed.length) toast.error(failed[0].error)
+      const res = await testCasesApi.bulkUpdateStatus(projectId, [id], 'draft')
+      if (res.data.updated) toast.success('Moved back to draft')
+      else toast.error('Update failed')
       await loadCases()
+    } catch {
+      toast.error('Failed to demote case')
     } finally {
       setPromotingIds(new Set())
     }

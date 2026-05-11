@@ -25,6 +25,7 @@ from features.functional.schemas.integrity_check import (
     RunStatusResponse,
 )
 from features.functional.utils.credentials_redaction import redact_known_credentials
+from features.functional.services.integrity_check_pdf import build_integrity_check_pdf
 
 
 def _redact_ic_text(
@@ -350,3 +351,66 @@ class IntegrityCheckService:
             }
             for r in result.scalars().all()
         ]
+
+    async def get_run_record(
+        self, run_id: str, project_id: int
+    ) -> Optional[IntegrityCheckResult]:
+        row_result = await self.db.execute(
+            select(IntegrityCheckResult).where(
+                IntegrityCheckResult.run_id == run_id,
+                IntegrityCheckResult.project_id == project_id,
+            )
+        )
+        return row_result.scalar_one_or_none()
+
+    async def get_pdf_bytes(
+        self, run_id: str, project_id: int
+    ) -> tuple[Optional[bytes], Optional[str]]:
+        """
+        PDF bytes for a finished integrity check run.
+
+        Only ``completed`` or ``error`` rows include a downloadable report;
+        ``pending`` / ``running`` return no PDF.
+        """
+        record = await self.get_run_record(run_id, project_id)
+        if not record:
+            return None, None
+        if record.status not in ("completed", "error"):
+            return None, None
+
+        safe_rid = "".join(
+            c if c.isalnum() or c in "-_" else "_"
+            for c in (record.run_id or "run")
+        ).strip("_") or "run"
+        filename = f"bic-report-{safe_rid[:48]}.pdf"
+
+        try:
+            pdf_bytes = build_integrity_check_pdf(
+                run_id=record.run_id,
+                app_url=record.app_url or "",
+                db_status=record.status,
+                overall_status=record.overall_status,
+                app_reachable=record.app_reachable,
+                steps_total=int(record.steps_total or 0),
+                steps_passed=int(record.steps_passed or 0),
+                steps_failed=int(record.steps_failed or 0),
+                summary=record.summary,
+                error_message=record.error_message,
+                steps_data=record.steps_data if isinstance(record.steps_data, list) else [],
+                screenshots=record.screenshots
+                if isinstance(record.screenshots, list)
+                else [],
+                duration_ms=record.duration_ms,
+                completed_at=record.completed_at,
+            )
+        except Exception:
+            logger.exception(
+                "Integrity check PDF render failed run_id=%s project_id=%s",
+                run_id,
+                project_id,
+            )
+            return None, None
+
+        if not pdf_bytes:
+            return None, None
+        return pdf_bytes, filename

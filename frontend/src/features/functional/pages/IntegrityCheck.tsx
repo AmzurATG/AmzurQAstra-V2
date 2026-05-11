@@ -6,11 +6,12 @@ import { Input } from '@common/components/ui/Input'
 import { useProjectStore } from '@common/store/projectStore'
 import { integrityCheckApi } from '../api'
 import toast from 'react-hot-toast'
-import { ShieldCheckIcon, PlayIcon } from '@heroicons/react/24/outline'
+import { ShieldCheckIcon, PlayIcon, EnvelopeIcon } from '@heroicons/react/24/outline'
 import type { RunStatusResponse, IntegrityCheckPreview } from '../types'
 import IntegrityCheckProgress from './IntegrityCheckProgress'
 import IntegrityCheckResults from './IntegrityCheckResults'
 import IntegrityCheckExecutionPreview from './IntegrityCheckExecutionPreview'
+import EmailReportDialog from '../components/EmailReportDialog'
 
 const POLL_INTERVAL_MS = 2000
 
@@ -28,6 +29,7 @@ export default function IntegrityCheck() {
   const [preview, setPreview] = useState<IntegrityCheckPreview | null>(null)
   const [expandedStories, setExpandedStories] = useState<Set<number>>(new Set())
   const [expandedTcs, setExpandedTcs] = useState<Set<number>>(new Set())
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false)
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -185,7 +187,31 @@ export default function IntegrityCheck() {
       )}
 
       {/* Final result */}
-      {result && !isRunning && <IntegrityCheckResults result={result} />}
+      {result && !isRunning && (
+        <>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {(result.status === 'completed' || result.status === 'error') && projectId && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEmailDialogOpen(true)}
+              >
+                <EnvelopeIcon className="w-4 h-4 mr-2" />
+                Email report
+              </Button>
+            )}
+          </div>
+          <IntegrityCheckResults result={result} />
+          <EmailReportDialog
+            isOpen={emailDialogOpen}
+            onClose={() => setEmailDialogOpen(false)}
+            projectId={projectId ?? ''}
+            runId={result.run_id}
+            kind="bic"
+            reportLabel="build integrity check report"
+          />
+        </>
+      )}
 
       {!isRunning && !result && (
         <IntegrityCheckExecutionPreview
