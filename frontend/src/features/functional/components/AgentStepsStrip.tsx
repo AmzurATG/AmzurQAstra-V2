@@ -135,7 +135,7 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
   testResultId,
   agentLogs,
   primaryScreenshotPath,
-  stepResults,
+  stepResults: _stepResults,
   enabled = true,
 }) => {
   const logs = agentLogs ?? []
