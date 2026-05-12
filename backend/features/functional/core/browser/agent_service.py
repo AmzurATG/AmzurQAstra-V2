@@ -76,6 +76,65 @@ _FAIL_SUBSTRINGS = (
     "this page isn",
     "refused to connect",
     "unexpectedly closed",
+    # Browser / Playwright closure keywords — fired when the user closes the window mid-run
+    "target closed",
+    "target page, context or browser has been closed",
+    "browser has been closed",
+    "browser was closed",
+    "page has been closed",
+    "context has been closed",
+    "browser disconnected",
+    "browser has been disconnected",
+)
+
+# A stricter set used to detect user-initiated browser closure from agent error lists,
+# exceptions, and post-action screenshot failures.  Strings come from real Playwright
+# and browser-use log output captured in production.
+_BROWSER_CLOSED_SIGNALS = (
+    # Playwright CDP / protocol errors when the window is closed externally
+    "target closed",
+    "target page, context or browser has been closed",
+    "browser has been closed",
+    "browser was closed",
+    "browser closed",
+    "page has been closed",
+    "page closed",
+    "context has been closed",
+    "context closed",
+    "browser disconnected",
+    "browser has been disconnected",
+    "connection closed",
+    "session closed",
+    # browser-use internal signals — visible in logs as [Agent] ❌ messages
+    "expected at least one handler to return a non-none result",
+    "stopping due to",
+    "consecutive failures",
+    "on_browserstopevent",
+    "browserstopevent",
+    # Playwright websocket / pipe teardown
+    "websocket",
+    "pipe closed",
+    "connection reset by peer",
+    "eof",
+    "socket hang up",
+)
+
+# Signals that appear specifically when get_browser_state_summary() fails because
+# the user closed the Chrome window between steps.
+_SCREENSHOT_FAIL_SIGNALS = (
+    "expected at least one handler",
+    "non-none result",
+    "browserstop",
+    "consecutive failure",
+    "target closed",
+    "browser has been closed",
+    "browser disconnected",
+    "context has been closed",
+    "page has been closed",
+    "connection closed",
+    "session closed",
+    "websocket",
+    "eof",
 )
 
 LiveProgressWriter = Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]]
@@ -448,6 +507,10 @@ class BrowserAgentService:
         screenshots: List[str] = []
         steps_data: List[Dict] = []
         step_counter = [0]
+        # Mutable flag set by _on_step_end when a post-action screenshot fails
+        # because the browser was closed mid-step.  Using a list so the nested
+        # closure can write to it without a nonlocal declaration.
+        browser_closed_flag = [False]
         has_login_creds = bool(username and password) and not use_google_signin
         ic_prog = _IcUiProgress(manual_login=has_login_creds, google_sso=use_google_signin)
         last_emit_pct = [12]
@@ -514,7 +577,20 @@ class BrowserAgentService:
             try:
                 summary = await session.get_browser_state_summary(include_screenshot=True)
             except Exception as exc:
-                logger.warning(f"[BrowserAgent] Post-action screenshot failed step={step_num}: {exc}")
+                exc_lower = str(exc).lower()
+                # If the screenshot fails because the user closed the browser window,
+                # record that explicitly so we can override the final verdict below.
+                if any(sig in exc_lower for sig in _SCREENSHOT_FAIL_SIGNALS) or any(
+                    sig in exc_lower for sig in _BROWSER_CLOSED_SIGNALS
+                ):
+                    browser_closed_flag[0] = True
+                    logger.warning(
+                        f"[BrowserAgent] Browser closed detected at step={step_num}: {exc}"
+                    )
+                else:
+                    logger.warning(
+                        f"[BrowserAgent] Post-action screenshot failed step={step_num}: {exc}"
+                    )
                 return
             b64 = getattr(summary, "screenshot", None)
             if not b64:
@@ -571,6 +647,108 @@ class BrowserAgentService:
             except Exception:
                 pass
 
+            # Normalise trivial non-values that browser-use emits when the
+            # agent completes without producing a real narrative (e.g. Python's
+            # str(None) → "None", or empty JSON objects).
+            if final_text.strip().lower() in ("none", "null", "n/a", "{}", "[]", ""):
+                final_text = ""
+
+            # ── Detect browser closure by the user ───────────────────────────
+            # Three independent detection channels, any one of which is enough
+            # to conclude the browser was closed before the check finished:
+            #
+            #  1. browser_closed_flag  — set inside _on_step_end when a
+            #     post-action screenshot raises a Playwright/browser-use error.
+            #
+            #  2. Textual signals in final_result() + result.errors() + the
+            #     full action-result history from the agent.
+            #
+            #  3. no_evidence guard  — 0 steps AND 0 screenshots means the
+            #     agent never meaningfully touched the browser.
+
+            # Channel 1: already tracked via _on_step_end callback
+            channel1 = browser_closed_flag[0]
+
+            # Channel 2: scan every text surface the result object exposes
+            agent_error_text = ""
+            agent_history_text = ""
+            try:
+                if hasattr(result, "errors") and callable(result.errors):
+                    agent_error_text = " ".join(str(e) for e in (result.errors() or []))
+                elif hasattr(result, "_errors"):
+                    agent_error_text = " ".join(str(e) for e in (result._errors or []))
+            except Exception:
+                pass
+
+            # Walk the full action-result history for closure strings.
+            # browser-use exposes this via action_results() or model_actions().
+            try:
+                for extractor in ("action_results", "model_actions", "history"):
+                    getter = getattr(result, extractor, None)
+                    if getter and callable(getter):
+                        for item in (getter() or []):
+                            agent_history_text += " " + str(item)
+                        break
+            except Exception:
+                pass
+
+            combined_text = (
+                final_text + " " + agent_error_text + " " + agent_history_text
+            ).lower()
+            channel2 = any(sig in combined_text for sig in _BROWSER_CLOSED_SIGNALS)
+
+            # Channel 3: zero steps + zero screenshots is conclusive regardless
+            # of what the LLM returned as its final answer.
+            channel3 = len(screenshots) == 0 and step_counter[0] == 0
+
+            browser_was_closed = channel1 or channel2 or channel3
+
+            if browser_was_closed:
+                dur = int((datetime.utcnow() - start).total_seconds() * 1000)
+                n = step_counter[0]
+                shot_count = len(screenshots)
+                partial = shot_count > 0 or n > 0
+
+                if partial:
+                    closure_msg = (
+                        f"The browser was closed before the integrity check could finish. "
+                        f"{n} step(s) and {shot_count} screenshot(s) were captured before "
+                        f"the browser was closed — the run is incomplete and cannot be "
+                        f"treated as a pass. Please keep the browser open until the check "
+                        f"completes."
+                    )
+                    steps_done = max(0, n - 1)   # last in-flight step is the one that failed
+                else:
+                    closure_msg = (
+                        "The browser window was closed before the integrity check could "
+                        "complete. No test evidence was recorded. "
+                        "Please keep the browser open until the check finishes."
+                    )
+                    steps_done = 0
+
+                stopped: Dict[str, Any] = {
+                    "status": "completed",
+                    "overall_status": "failed",
+                    "percentage": 100,
+                    "current_step": "Stopped — browser was closed",
+                    "screenshots": list(screenshots),
+                    "steps": list(steps_data),
+                    "steps_total": n,
+                    "steps_passed": steps_done,
+                    "steps_failed": max(1, n - steps_done),
+                    "summary": closure_msg,
+                    "duration_ms": dur,
+                    "error": None,
+                }
+                logger.warning(
+                    f"[BrowserAgent] run_id={run_id} — browser closed "
+                    f"(channel1={channel1} channel2={channel2} channel3={channel3} "
+                    f"steps={n} shots={shot_count})"
+                )
+                await self._emit_progress(run_id, stopped, live_progress_writer)
+                return stopped
+            # ── End browser-closure guard ─────────────────────────────────────
+
             text_fail = _final_text_indicates_failure(final_text)
             success = False
             if hasattr(result, "is_successful"):
@@ -626,6 +804,56 @@ class BrowserAgentService:
             dur = int((datetime.utcnow() - start).total_seconds() * 1000)
             n = step_counter[0]
             exc_s = str(exc)
+
+            # Distinguish user-closed-browser from a genuine internal error so
+            # the UI shows a clear "stopped" message instead of a generic error.
+            exc_lower = exc_s.lower()
+            is_browser_closure = (
+                browser_closed_flag[0]
+                or any(sig in exc_lower for sig in _BROWSER_CLOSED_SIGNALS)
+            )
+
+            if is_browser_closure:
+                shot_count = len(screenshots)
+                partial = shot_count > 0 or n > 0
+                logger.info(
+                    f"[BrowserAgent] run_id={run_id} — browser closed by user "
+                    f"(steps={n} shots={shot_count} partial={partial})"
+                )
+                if partial:
+                    closure_msg = (
+                        f"The browser was closed before the integrity check could finish. "
+                        f"{n} step(s) and {shot_count} screenshot(s) were captured before "
+                        f"the browser was closed — the run is incomplete and cannot be "
+                        f"treated as a pass. Please keep the browser open until the check "
+                        f"completes."
+                    )
+                    steps_done = max(0, n - 1)
+                else:
+                    closure_msg = (
+                        "The browser window was closed before the integrity check could "
+                        "complete. No test evidence was recorded. "
+                        "Please keep the browser open until the check finishes."
+                    )
+                    steps_done = 0
+
+                stopped: Dict[str, Any] = {
+                    "status": "completed",
+                    "overall_status": "failed",
+                    "percentage": 100,
+                    "current_step": "Stopped — browser was closed",
+                    "screenshots": list(screenshots),
+                    "steps": list(steps_data),
+                    "steps_total": n,
+                    "steps_passed": steps_done,
+                    "steps_failed": max(1, n - steps_done),
+                    "summary": closure_msg,
+                    "duration_ms": dur,
+                    "error": None,
+                }
+                await self._emit_progress(run_id, stopped, live_progress_writer)
+                return stopped
+
             run_pct = max(last_emit_pct[0], min(92, ic_prog.running_pct(len(screenshots), n)))
             last_emit_pct[0] = run_pct
             err: Dict[str, Any] = {

@@ -31,6 +31,7 @@ import UserStories from '@features/functional/pages/UserStories'
 import UserStoryDetail from '@features/functional/pages/UserStoryDetail'
 import JiraIntegration from '@features/functional/pages/JiraIntegration'
 import AzureDevOpsIntegration from '@features/functional/pages/AzureDevOpsIntegration'
+import ComingSoon from '@features/functional/pages/ComingSoon'
 import NotFound from '@common/pages/NotFound'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -162,6 +163,7 @@ function App() {
                 element={<AzureDevOpsIntegration />}
               />
               <Route path="settings" element={<ProjectSettings />} />
+              <Route path="coming-soon" element={<ComingSoon />} />
             </Route>
           </Route>
 

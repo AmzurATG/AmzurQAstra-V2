@@ -333,7 +333,16 @@ export const integrityCheckApi = {
     apiClient.get<import('../types').RunStatusResponse>(`/functional/integrity-check/${runId}/status`),
 
   getHistory: (projectId: string, params?: { limit?: number }) =>
-    apiClient.get<Array<{ created_at?: string | null }>>(`/functional/integrity-check/history/${projectId}`, {
+    apiClient.get<Array<{
+      id: number
+      run_id: string
+      status: string
+      app_url: string
+      overall_status: string | null
+      steps_total: number | null
+      duration_ms: number | null
+      created_at: string | null
+    }>>(`/functional/integrity-check/history/${projectId}`, {
       params,
     }),
 

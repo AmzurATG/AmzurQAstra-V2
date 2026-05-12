@@ -12,11 +12,28 @@ def humanize_action_dict(d: dict) -> str:
             continue
         k = key.lower()
         if k in ("click", "click_element"):
-            idx = val.get("index")
-            return f"Clicked item {idx}" if idx is not None else "Clicked an element"
+            # Prefer a human-readable label or placeholder over the raw DOM index
+            label = (
+                val.get("label")
+                or val.get("text")
+                or val.get("placeholder")
+                or val.get("aria_label")
+                or val.get("name")
+                or ""
+            )
+            label = str(label).strip()[:60]
+            return f"Clicked '{label}'" if label else "Clicked an element"
         if k in ("input", "input_text"):
-            idx = val.get("index")
-            return f"Typed into field {idx}" if idx is not None else "Entered text"
+            # Show what field was targeted by name/placeholder, not by DOM index
+            field = (
+                val.get("label")
+                or val.get("placeholder")
+                or val.get("name")
+                or val.get("aria_label")
+                or ""
+            )
+            field = str(field).strip()[:60]
+            return f"Entered text into '{field}'" if field else "Entered text in a field"
         if k in ("navigate", "go_to_url", "goto"):
             url = (val.get("url") or "")[:80]
             return f"Opened: {url}" if url else "Opened a page"

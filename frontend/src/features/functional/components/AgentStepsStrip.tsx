@@ -6,7 +6,6 @@ import {
   ChevronRightIcon,
 } from '@heroicons/react/24/outline'
 import type { AgentLogEntry, TestStepResult } from '../types'
-import { formatStepDisplayValue } from '../utils/formatStepDisplayValue'
 import { fetchScreenshotBlobUrl } from '../utils/screenshotFetch'
 
 function screenshotBasename(path: string): string {
@@ -144,10 +143,6 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
     () => logs.filter((l) => l.screenshot_path),
     [logs]
   )
-  const orderedStepResults = useMemo(() => {
-    if (!stepResults?.length) return []
-    return [...stepResults].sort((a, b) => a.step_number - b.step_number)
-  }, [stepResults])
   const [blobByKey, setBlobByKey] = useState<Record<string, string>>({})
   const [primaryBlobUrl, setPrimaryBlobUrl] = useState<string | null>(null)
   /** Index into `withShots` when viewing agent step gallery; null = closed */
@@ -486,41 +481,13 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
             ) : (
               <div className="p-16 text-gray-500 text-sm">Could not load image.</div>
             )}
-            <div className="p-4 text-sm border-t border-gray-100 max-h-[40vh] overflow-y-auto">
+            <div className="p-4 text-sm border-t border-gray-100">
               <p id="agent-gallery-title" className="font-semibold text-gray-900">
-                Screenshot {(galleryIndex ?? 0) + 1} of {withShots.length}
+                Screenshot{' '}
+                <span className="text-gray-500 font-normal">
+                  {(galleryIndex ?? 0) + 1} / {withShots.length}
+                </span>
               </p>
-              <p className="text-[10px] text-gray-500 mt-1">
-                Each image is from the browser automation trace. The counter is not the same as your
-                test-case step numbers.
-              </p>
-              <div className="mt-3">
-                <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
-                  Browser action
-                </p>
-                <p className="text-gray-700 mt-0.5">{galleryEntry.description}</p>
-              </div>
-              {galleryEntry.adaptation && (
-                <p className="text-xs text-purple-700 mt-2">{galleryEntry.adaptation}</p>
-              )}
-              {orderedStepResults.length > 0 && (
-                <div className="mt-4 pt-3 border-t border-gray-100">
-                  <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                    Test case steps (reference)
-                  </p>
-                  <ol className="list-decimal list-inside space-y-1.5 text-xs text-gray-600">
-                    {orderedStepResults.map((s) => {
-                      const line = formatStepDisplayValue(s.description)
-                      return (
-                        <li key={s.step_number} className="pl-0.5">
-                          <span className="font-medium text-gray-700">Step {s.step_number}: </span>
-                          {line || '—'}
-                        </li>
-                      )
-                    })}
-                  </ol>
-                </div>
-              )}
               <p className="text-[10px] text-gray-400 mt-3">
                 Use the side arrows or ← → keys for the next or previous screenshot. Esc to close.
               </p>

@@ -8,6 +8,7 @@ GET   /preview/{pid}   — preview flagged test cases (unchanged)
 GET   /history/{pid}   — past runs
 """
 import asyncio
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
 
+from config import settings
 from common.db.database import get_db
 from common.db.models.user import User
 from common.db.models.user_story import UserStory
@@ -27,6 +29,7 @@ from common.services.smtp_mailer import (
     is_smtp_configured,
     send_email_with_pdf_attachment,
 )
+from common.utils.logger import logger
 from features.functional.schemas.integrity_check import (
     IntegrityCheckRequest,
     RunStartResponse,
@@ -136,6 +139,25 @@ async def email_integrity_check_pdf(
         app_url=record.app_url,
         run_completed_at=record.completed_at,
     )
+
+    # Collect screenshot bytes from disk (best-effort — skip any that are missing).
+    screenshot_attachments: list[tuple[bytes, str]] = []
+    screenshots_dir = Path(settings.SCREENSHOTS_DIR)
+    for raw_path in (record.screenshots or []):
+        try:
+            # Stored paths look like "/screenshots/<filename>"
+            fname = Path(raw_path).name
+            if not fname:
+                continue
+            file_path = screenshots_dir / fname
+            if file_path.is_file():
+                screenshot_attachments.append((file_path.read_bytes(), fname))
+        except Exception as exc:
+            logger.warning(
+                "[BIC email] Could not read screenshot %s for run %s: %s",
+                raw_path, run_id, exc,
+            )
+
     try:
         await asyncio.to_thread(
             send_email_with_pdf_attachment,
@@ -145,6 +167,7 @@ async def email_integrity_check_pdf(
             html_body=html_body,
             pdf_bytes=data,
             attachment_filename=filename or "bic-report.pdf",
+            screenshot_attachments=screenshot_attachments or None,
         )
     except SmtpSendError as e:
         raise HTTPException(

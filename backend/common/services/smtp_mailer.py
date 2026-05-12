@@ -200,6 +200,18 @@ def _safe_attachment_filename(name: str) -> str:
     return s
 
 
+def _safe_image_filename(name: str) -> str:
+    """Sanitise a screenshot filename for use as a MIME attachment name."""
+    out = []
+    for c in name:
+        if 32 <= ord(c) < 127 and c not in '\\/"*:?<>|':
+            out.append(c)
+        else:
+            out.append("_")
+    s = "".join(out).strip("._") or "screenshot.png"
+    return s
+
+
 def send_email_with_pdf_attachment(
     *,
     to_addr: str,
@@ -208,7 +220,17 @@ def send_email_with_pdf_attachment(
     html_body: str,
     pdf_bytes: bytes,
     attachment_filename: str,
+    screenshot_attachments: list[tuple[bytes, str]] | None = None,
 ) -> None:
+    """
+    Send an email with a PDF report as the primary attachment.
+
+    Args:
+        screenshot_attachments: Optional list of ``(image_bytes, filename)``
+            tuples that will be appended as inline image attachments after
+            the PDF.  Filenames should already be sanitised or will be
+            sanitised internally.
+    """
     if not is_smtp_configured():
         raise SmtpSendError(
             "Email is not configured (set SMTP_HOST and EMAIL_FROM_ADDRESS)."
@@ -235,12 +257,14 @@ def send_email_with_pdf_attachment(
 
     safe_name = _safe_attachment_filename(attachment_filename)
     pdf_part = MIMEApplication(pdf_bytes, _subtype="pdf")
-    pdf_part.add_header(
-        "Content-Disposition",
-        "attachment",
-        filename=safe_name,
-    )
+    pdf_part.add_header("Content-Disposition", "attachment", filename=safe_name)
     msg.attach(pdf_part)
+
+    for img_bytes, img_filename in (screenshot_attachments or []):
+        safe_img = _safe_image_filename(img_filename)
+        img_part = MIMEApplication(img_bytes, _subtype="octet-stream")
+        img_part.add_header("Content-Disposition", "attachment", filename=safe_img)
+        msg.attach(img_part)
 
     timeout = max(5, int(settings.SMTP_TIMEOUT_SECONDS or 30))
     user = (settings.SMTP_USER or "").strip()
