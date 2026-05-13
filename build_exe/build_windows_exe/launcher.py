@@ -3,9 +3,12 @@ QAstra Silent Launcher
 Compiled into QAstra.exe by PyInstaller.
 
 1. Adds backend/ to sys.path so all imports resolve
-2. Runs Alembic migrations in-process
-3. Opens the browser once the server is ready
-4. Starts uvicorn in-process (blocking)
+2. Opens the browser once the server is ready
+3. Starts uvicorn in-process (blocking)
+
+NOTE: Database migrations are NOT run automatically.
+Run the SQL scripts in backend/alembic/sql/ against your database
+before launching QAstra for the first time (or after upgrading).
 
 NOTE: In a frozen PyInstaller exe, sys.executable points to QAstra.exe —
 not a Python interpreter — so subprocess-based approaches (sys.executable -m uvicorn)
@@ -65,25 +68,6 @@ def wait_for_server(url, timeout=60):
     return False
 
 
-def run_migrations_inprocess(backend_dir):
-    """Run Alembic migrations in-process."""
-    original_cwd = os.getcwd()
-    try:
-        os.chdir(backend_dir)
-        from alembic.config import Config
-        from alembic import command
-
-        alembic_cfg = Config(os.path.join(backend_dir, "alembic.ini"))
-        alembic_cfg.set_main_option("script_location", os.path.join(backend_dir, "alembic"))
-        command.upgrade(alembic_cfg, "head")
-        return True
-    except Exception as e:
-        write_error_log("migration_error.log", f"{e}\n\n{traceback.format_exc()}")
-        return False
-    finally:
-        os.chdir(original_cwd)
-
-
 def start_uvicorn_inprocess(backend_dir):
     """Start uvicorn in-process (blocking call)."""
     os.chdir(backend_dir)
@@ -102,23 +86,7 @@ if __name__ == "__main__":
     if backend_dir not in sys.path:
         sys.path.insert(0, backend_dir)
 
-    # 1. Run database migrations in-process
-    try:
-        migration_ok = run_migrations_inprocess(backend_dir)
-    except Exception as e:
-        write_error_log("migration_error.log", f"Unexpected: {e}\n\n{traceback.format_exc()}")
-        migration_ok = False
-
-    if not migration_ok:
-        show_error(
-            "QAstra \u2014 Startup Error",
-            "Database migration failed.\n\n"
-            "Check migration_error.log next to QAstra.exe for details.\n"
-            "Verify your DATABASE_URL in .env is correct and the database is running.",
-        )
-        sys.exit(1)
-
-    # 2. Open browser once server is ready (in background thread)
+    # 1. Open browser once server is ready (in background thread)
     url = "http://127.0.0.1:8000"
 
     def open_browser():
@@ -128,7 +96,7 @@ if __name__ == "__main__":
     t = threading.Thread(target=open_browser, daemon=True)
     t.start()
 
-    # 3. Start uvicorn in-process (blocks until server stops)
+    # 2. Start uvicorn in-process (blocks until server stops)
     try:
         start_uvicorn_inprocess(backend_dir)
     except Exception as e:

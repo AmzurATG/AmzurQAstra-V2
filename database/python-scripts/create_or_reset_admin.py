@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 # Ensure the backend package is importable
-_BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
+_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent / "backend"
 sys.path.insert(0, str(_BACKEND_DIR))
 
 # Enforce .env existence before importing config

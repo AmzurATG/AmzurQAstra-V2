@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 # Load .env from the backend directory — MUST exist
-_ENV_FILE = Path(__file__).resolve().parent.parent / "backend" / ".env"
+_ENV_FILE = Path(__file__).resolve().parent.parent.parent / "backend" / ".env"
 if not _ENV_FILE.is_file():
     print(f"ERROR: Required .env file not found at: {_ENV_FILE}")
     print("Copy backend/.env.example to backend/.env and configure it.")
