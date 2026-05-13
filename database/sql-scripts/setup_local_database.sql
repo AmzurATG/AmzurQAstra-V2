@@ -2,11 +2,16 @@
 -- QAstra Local Database Setup Script
 -- Creates the database, application user, schema, and grants privileges.
 --
--- Run this in DBeaver connected to the 'postgres' database
--- as a PostgreSQL superuser (e.g. 'postgres').
+-- IMPORTANT: This script must be run in TWO parts in DBeaver:
 --
--- After running this, connect to the 'qastra' database
--- and run the migration SQL scripts in backend/alembic/sql/migration/
+-- PART 1 (connected to 'postgres' database as superuser):
+--   Run steps 1-3: Create role, create database, grant privileges
+--   NOTE: CREATE DATABASE cannot run inside a transaction block.
+--         In DBeaver, right-click the SQL editor -> set "Auto-commit" ON,
+--         or run the CREATE DATABASE statement separately.
+--
+-- PART 2 (switch connection to 'qastra' database):
+--   Run step 4: Create schema and grant privileges
 -- ============================================
 
 -- 1. Create application role (if not exists)
@@ -29,9 +34,13 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'qastra');
 GRANT ALL PRIVILEGES ON DATABASE qastra TO qastra;
 
 -- ============================================
--- STOP HERE. Now connect to the 'qastra' database
--- (change your DBeaver connection to 'qastra')
--- and run the section below.
+-- PART 1 ENDS HERE.
+-- STOP: Now switch your DBeaver connection to the 'qastra' database
+-- before running the section below.
+-- ============================================
+
+-- ============================================
+-- PART 2: Run this connected to the 'qastra' database
 -- ============================================
 
 -- 4. Create schema and grant privileges
