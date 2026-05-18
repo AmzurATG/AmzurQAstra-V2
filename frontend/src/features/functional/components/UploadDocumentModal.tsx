@@ -1,4 +1,4 @@
-import { useState, useCallback, Fragment } from 'react'
+import { useState, useCallback, Fragment, useRef } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
 import {
   XMarkIcon,
@@ -32,6 +32,7 @@ export default function UploadDocumentModal({
   projectId,
   onUploadComplete,
 }: UploadDocumentModalProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -108,6 +109,23 @@ export default function UploadDocumentModal({
     if (selectedFile) {
       handleFileSelect(selectedFile)
     }
+  }
+
+  const handleRemoveFile = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setFile(null)
+    setError(null)
+    // Allow selecting the same file again after remove
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const handleChooseDifferentFile = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    fileInputRef.current?.click()
   }
 
   const handleUpload = async () => {
@@ -271,11 +289,16 @@ export default function UploadDocumentModal({
                       `}
                     >
                       <input
+                        ref={fileInputRef}
                         type="file"
                         accept={ALLOWED_EXTENSIONS.join(',')}
                         onChange={handleFileInputChange}
                         disabled={isUploading}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        className={
+                          'absolute inset-0 w-full h-full opacity-0 cursor-pointer ' +
+                          (file ? 'pointer-events-none' : '')
+                        }
+                        tabIndex={file ? -1 : 0}
                       />
 
                       {file ? (
@@ -285,16 +308,23 @@ export default function UploadDocumentModal({
                           <p className="text-xs text-gray-500 mt-1">
                             {formatFileSize(file.size)} ({formatBytes(file.size)} bytes)
                           </p>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setFile(null)
-                            }}
-                            className="mt-2 text-xs text-red-600 hover:text-red-700"
-                          >
-                            Remove file
-                          </button>
+                          <div className="relative z-10 mt-2 flex flex-wrap items-center justify-center gap-3">
+                            <button
+                              type="button"
+                              onClick={handleRemoveFile}
+                              className="text-xs text-red-600 hover:text-red-700"
+                            >
+                              Remove file
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleChooseDifferentFile}
+                              disabled={isUploading}
+                              className="text-xs text-primary-600 hover:text-primary-700 disabled:opacity-50"
+                            >
+                              Choose different file
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         <div className="flex flex-col items-center">

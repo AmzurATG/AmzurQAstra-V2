@@ -12,6 +12,7 @@ from common.api.pagination import PaginatedResponse, PaginationParams
 from common.db.models.user import User
 from common.db.database import get_db
 from common.schemas.report_email import SendReportEmailRequest
+from common.services.report_email_enrichment import rich_parts_for_gap_analysis
 from common.services.smtp_mailer import (
     SmtpSendError,
     build_report_email_envelope,
@@ -158,6 +159,9 @@ async def email_gap_analysis_pdf(
             detail="PDF not available for this run",
         )
     req = run.requirement
+    rich = rich_parts_for_gap_analysis(
+        run.result_json if isinstance(run.result_json, dict) else None
+    )
     subject, text_body, html_body = build_report_email_envelope(
         report_title_phrase="Requirements gap analysis",
         requirement_title=req.title if req else None,
@@ -165,6 +169,7 @@ async def email_gap_analysis_pdf(
         requirement_id=run.requirement_id,
         run_id=run.id,
         run_created_at=run.created_at,
+        rich=rich,
     )
     try:
         await asyncio.to_thread(

@@ -121,7 +121,8 @@ export default function EmailReportDialog({
                 </div>
                 <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
                   <p className="text-sm text-gray-600">
-                    The formal report PDF will be sent as an attachment to the address you enter below.
+                    We will email a professional summary in the message body and attach the full formal PDF
+                    report (the same document you can download in the app).
                   </p>
                   <div>
                     <label htmlFor="report-email-to" className="block text-sm font-medium text-gray-700 mb-1">

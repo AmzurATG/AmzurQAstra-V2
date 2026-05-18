@@ -23,6 +23,7 @@ from common.db.models.user import User
 from common.db.models.user_story import UserStory
 from common.api.deps import get_current_active_user
 from common.schemas.report_email import SendReportEmailRequest
+from common.services.report_email_enrichment import rich_parts_for_integrity_check
 from common.services.smtp_mailer import (
     SmtpSendError,
     build_integrity_check_report_email_envelope,
@@ -133,11 +134,19 @@ async def email_integrity_check_pdf(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="PDF not available for this run",
         )
+    rich = rich_parts_for_integrity_check(
+        summary=record.summary,
+        overall_status=record.overall_status,
+        steps_total=record.steps_total,
+        steps_passed=record.steps_passed,
+        steps_failed=record.steps_failed,
+    )
     subject, text_body, html_body = build_integrity_check_report_email_envelope(
         run_id=record.run_id,
         project_id=project_id,
         app_url=record.app_url,
         run_completed_at=record.completed_at,
+        rich=rich,
     )
 
     # Collect screenshot bytes from disk (best-effort — skip any that are missing).
