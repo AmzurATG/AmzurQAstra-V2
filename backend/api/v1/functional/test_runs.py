@@ -72,7 +72,10 @@ async def create_and_execute_test_run(
 ):
     """Create a test run and immediately start execution in the background."""
     service = TestExecutionService(db)
-    run = await service.create_run(run_data, triggered_by=current_user.id)
+    try:
+        run = await service.create_run(run_data, triggered_by=current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     await service.start_execution(run.id, run_data)
     return TestRunStartResponse(run_id=run.id, status="running")
 

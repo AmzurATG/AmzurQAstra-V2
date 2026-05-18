@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 from common.api.pagination import PaginationParams
 from common.utils.logger import logger
 from common.db.models.project import Project
-from features.functional.db.models.test_case import TestCase
+from features.functional.db.models.test_case import TestCase, TestCaseStatus
 from features.functional.db.models.test_run import TestRun, TestRunStatus
 from features.functional.db.models.test_result import TestResult, TestResultStatus
 from features.functional.schemas.test_run import TestRunCreate
@@ -158,15 +158,32 @@ class TestExecutionService:
                 .where(TestCase.project_id == run_data.project_id)
             )
             by_id = {tc.id: tc for tc in tc_result.scalars().all()}
+            missing = [i for i in run_data.test_case_ids if i not in by_id]
+            if missing:
+                raise ValueError(
+                    "One or more test cases were not found in this project."
+                )
             # Preserve client order (SQL IN does not guarantee order)
-            test_cases = [by_id[i] for i in run_data.test_case_ids if i in by_id]
+            test_cases = [by_id[i] for i in run_data.test_case_ids]
+            not_ready = [tc for tc in test_cases if tc.status != TestCaseStatus.ready]
+            if not_ready:
+                raise ValueError(
+                    "Only test cases with status 'ready' can be executed. "
+                    f"{len(not_ready)} selected case(s) are draft or deprecated."
+                )
         else:
             tc_result = await self.db.execute(
                 select(TestCase)
                 .where(TestCase.project_id == run_data.project_id)
+                .where(TestCase.status == TestCaseStatus.ready)
                 .order_by(TestCase.id)
             )
             test_cases = list(tc_result.scalars().all())
+            if not test_cases:
+                raise ValueError(
+                    "No runnable test cases: mark at least one case as Ready "
+                    "before starting a run."
+                )
 
         run_number = await self._next_run_number(run_data.project_id)
         test_run = TestRun(

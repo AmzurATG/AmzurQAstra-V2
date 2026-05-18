@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowPathIcon, PlayIcon, PlusIcon, DocumentArrowUpIcon, CheckBadgeIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
@@ -252,16 +252,66 @@ export default function CasesTab() {
   const runSingle = (tcId: number) =>
     dispatchRun(buildRequest([tcId]), 'Initializing browser…')
 
-  const runSelected = () => {
+  /** Resolve every selected row (fetch if not on current page) and ensure all are `ready`. */
+  const resolveRunnableSelectedIds = async (): Promise<number[] | null> => {
+    const ids = Array.from(selectedIds)
+    const byId = new Map(testCases.map((tc) => [tc.id, tc]))
+    const missing = ids.filter((id) => !byId.has(id))
+    try {
+      const fetched = await Promise.all(
+        missing.map((id) => testCasesApi.get(id).then((r) => r.data))
+      )
+      for (const tc of fetched) {
+        if (tc.project_id !== pid) {
+          toast.error('Selected test case does not belong to this project')
+          return null
+        }
+        byId.set(tc.id, tc)
+      }
+    } catch {
+      toast.error('Could not verify status for some selected test cases')
+      return null
+    }
+    const blocked: TestCase[] = []
+    for (const id of ids) {
+      const tc = byId.get(id)
+      if (!tc) {
+        toast.error('Some selected test cases were not found')
+        return null
+      }
+      if (tc.status !== 'ready') blocked.push(tc)
+    }
+    if (blocked.length > 0) {
+      const statuses = [...new Set(blocked.map((t) => t.status))].join(', ')
+      toast.error(
+        `Only Ready cases can run. ${blocked.length} selected case(s) are not runnable (status: ${statuses}). Mark them Ready or deselect.`
+      )
+      return null
+    }
+    return ids
+  }
+
+  const runSelected = async () => {
     if (selectedIds.size === 0) {
       toast.error('Select cases first')
       return
     }
+    const runnableIds = await resolveRunnableSelectedIds()
+    if (!runnableIds) return
     dispatchRun(
-      buildRequest(Array.from(selectedIds)),
-      `Starting ${selectedIds.size} tests…`
+      buildRequest(runnableIds),
+      `Starting ${runnableIds.length} test${runnableIds.length !== 1 ? 's' : ''}…`
     )
   }
+
+  /** True when any selected row visible on this page is not `ready` (instant toolbar feedback). */
+  const selectionIncludesNonReadyOnPage = useMemo(() => {
+    const idSet = new Set(selectedIds)
+    for (const tc of testCases) {
+      if (idSet.has(tc.id) && tc.status !== 'ready') return true
+    }
+    return false
+  }, [selectedIds, testCases])
 
   const handleBulkStatus = async (newStatus: 'ready' | 'draft' | 'deprecated') => {
     if (!projectId || selectedIds.size === 0) {
@@ -382,8 +432,17 @@ export default function CasesTab() {
             <>
               <Button
                 variant="outline"
-                onClick={runSelected}
-                disabled={activeRun.isCreating || activeRun.isRunning}
+                onClick={() => void runSelected()}
+                disabled={
+                  activeRun.isCreating ||
+                  activeRun.isRunning ||
+                  selectionIncludesNonReadyOnPage
+                }
+                title={
+                  selectionIncludesNonReadyOnPage
+                    ? 'Deselect draft or deprecated cases, or mark them Ready before running'
+                    : undefined
+                }
               >
                 <PlayIcon className="w-4 h-4 mr-1" /> Run ({selectedIds.size})
               </Button>
