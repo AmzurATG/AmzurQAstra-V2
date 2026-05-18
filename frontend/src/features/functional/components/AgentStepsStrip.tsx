@@ -135,6 +135,7 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
   testResultId,
   agentLogs,
   primaryScreenshotPath,
+  // stepResults retained in props for API compatibility but not rendered in the lightbox
   stepResults: _stepResults,
   enabled = true,
 }) => {
