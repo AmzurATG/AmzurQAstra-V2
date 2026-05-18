@@ -32,15 +32,31 @@ function detailSource(tc: TestCase): 'manual' | 'ai' | 'csv' {
   return tc.is_generated ? 'ai' : 'manual'
 }
 
+/** Client-only sentinel; backend assigns real id on create. */
+function createEmptyStep(testCaseId: number): TestStep {
+  return {
+    id: 0,
+    test_case_id: testCaseId,
+    step_number: 0,
+    action: 'click',
+    description: '',
+    target: '',
+    value: '',
+    expected_result: '',
+    created_at: '',
+    updated_at: '',
+  }
+}
+
 export default function TestCaseDetail() {
   const { projectId, testCaseId } = useParams<{ projectId: string; testCaseId: string }>()
   const [testCase, setTestCase] = useState<TestCase | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   
-  // Edit modal state
+  // Add / edit step modal
   const [editingStep, setEditingStep] = useState<TestStep | null>(null)
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [isStepModalOpen, setIsStepModalOpen] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   
   // Delete state
@@ -74,29 +90,58 @@ export default function TestCaseDetail() {
     }
   }
 
+  const closeStepModal = () => {
+    setIsStepModalOpen(false)
+    setEditingStep(null)
+  }
+
+  const handleAddStep = () => {
+    if (!testCaseId) return
+    setEditingStep(createEmptyStep(Number(testCaseId)))
+    setIsStepModalOpen(true)
+  }
+
   const handleEditStep = (step: TestStep) => {
     setEditingStep({ ...step })
-    setIsEditModalOpen(true)
+    setIsStepModalOpen(true)
   }
 
   const handleSaveStep = async () => {
-    if (!editingStep) return
-    
+    if (!editingStep || !testCaseId) return
+
     setIsSaving(true)
     try {
-      await testStepsApi.update(editingStep.id, {
-        action: editingStep.action,
-        target: editingStep.target,
-        value: editingStep.value,
-        description: editingStep.description,
-        expected_result: editingStep.expected_result,
-      })
-      toast.success('Step updated successfully')
-      setIsEditModalOpen(false)
-      setEditingStep(null)
+      if (editingStep.id === 0) {
+        await testStepsApi.create({
+          test_case_id: Number(testCaseId),
+          action: editingStep.action,
+          target: editingStep.target?.trim() || undefined,
+          value: editingStep.value?.trim() || undefined,
+          description: editingStep.description?.trim() || undefined,
+          expected_result: editingStep.expected_result?.trim() || undefined,
+        })
+        toast.success('Step added successfully')
+      } else {
+        await testStepsApi.update(editingStep.id, {
+          action: editingStep.action,
+          target: editingStep.target,
+          value: editingStep.value,
+          description: editingStep.description,
+          expected_result: editingStep.expected_result,
+        })
+        toast.success('Step updated successfully')
+      }
+      closeStepModal()
       loadTestCase()
     } catch (err: any) {
-      const message = err.response?.data?.detail || err.message || 'Failed to update step'
+      const raw = err.response?.data?.detail
+      const message =
+        typeof raw === 'string'
+          ? raw
+          : Array.isArray(raw)
+            ? raw.map((x: { msg?: string }) => x.msg).filter(Boolean).join(' ')
+          : err.message ||
+            (editingStep.id === 0 ? 'Failed to add step' : 'Failed to update step')
       toast.error(message)
     } finally {
       setIsSaving(false)
@@ -375,7 +420,7 @@ export default function TestCaseDetail() {
       <Card>
         <div className="flex items-center justify-between mb-4">
           <CardTitle>Test Steps ({testCase.steps?.length || 0})</CardTitle>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" type="button" onClick={handleAddStep}>
             <PlusIcon className="w-4 h-4 mr-2" />
             Add Step
           </Button>
@@ -438,7 +483,7 @@ export default function TestCaseDetail() {
         ) : (
           <div className="text-center py-8 text-gray-500">
             <p>No test steps defined yet.</p>
-            <Button variant="outline" className="mt-4">
+            <Button variant="outline" className="mt-4" type="button" onClick={handleAddStep}>
               <PlusIcon className="w-4 h-4 mr-2" />
               Add First Step
             </Button>
@@ -447,8 +492,8 @@ export default function TestCaseDetail() {
       </Card>
 
       {/* Edit Step Modal */}
-      <Transition appear show={isEditModalOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={() => setIsEditModalOpen(false)}>
+      <Transition appear show={isStepModalOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={closeStepModal}>
           <Transition.Child
             as={Fragment}
             enter="ease-out duration-300"
@@ -476,10 +521,11 @@ export default function TestCaseDetail() {
                   {/* Header */}
                   <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
                     <Dialog.Title className="text-lg font-semibold text-gray-900">
-                      Edit Step {editingStep?.step_number}
+                      {editingStep?.id === 0 ? 'Add test step' : `Edit step ${editingStep?.step_number}`}
                     </Dialog.Title>
                     <button
-                      onClick={() => setIsEditModalOpen(false)}
+                      type="button"
+                      onClick={closeStepModal}
                       className="text-gray-400 hover:text-gray-600 transition-colors"
                     >
                       <XMarkIcon className="w-5 h-5" />
@@ -566,18 +612,16 @@ export default function TestCaseDetail() {
 
                   {/* Footer */}
                   <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
-                    <Button
-                      variant="outline"
-                      onClick={() => setIsEditModalOpen(false)}
-                    >
+                    <Button variant="outline" type="button" onClick={closeStepModal}>
                       Cancel
                     </Button>
                     <Button
+                      type="button"
                       onClick={handleSaveStep}
                       disabled={isSaving}
                       isLoading={isSaving}
                     >
-                      Save Changes
+                      {editingStep?.id === 0 ? 'Add step' : 'Save changes'}
                     </Button>
                   </div>
                 </Dialog.Panel>
