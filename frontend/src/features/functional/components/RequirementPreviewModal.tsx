@@ -16,6 +16,7 @@ import {
   isWordRequirement,
 } from '../utils/requirementPreview'
 import toast from 'react-hot-toast'
+import { DOWNLOAD_FAILED_MESSAGE, DOWNLOAD_SUCCESS_MESSAGE } from '@common/constants/toastMessages'
 
 interface RequirementPreviewModalProps {
   isOpen: boolean
@@ -113,9 +114,9 @@ export default function RequirementPreviewModal({
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
-      toast.success('Download started')
+      toast.success(DOWNLOAD_SUCCESS_MESSAGE)
     } catch {
-      toast.error('Download failed')
+      toast.error(DOWNLOAD_FAILED_MESSAGE)
     }
   }
 

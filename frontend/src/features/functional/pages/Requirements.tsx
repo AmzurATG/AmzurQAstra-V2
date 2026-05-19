@@ -28,6 +28,7 @@ import {
   requirementStatusConfig,
 } from '../constants/requirementUi'
 import toast from 'react-hot-toast'
+import { DOWNLOAD_FAILED_MESSAGE, DOWNLOAD_SUCCESS_MESSAGE } from '@common/constants/toastMessages'
 
 function formatApiError(err: unknown): string {
   const e = err as { response?: { data?: { detail?: unknown } } }
@@ -189,10 +190,10 @@ export default function Requirements() {
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
-      toast.success('Download started')
+      toast.success(DOWNLOAD_SUCCESS_MESSAGE)
     } catch (e) {
       console.error(e)
-      toast.error(formatApiError(e) || 'Download failed')
+      toast.error(formatApiError(e) || DOWNLOAD_FAILED_MESSAGE)
     }
   }
 
@@ -209,10 +210,10 @@ export default function Requirements() {
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
-      toast.success('Download started')
+      toast.success(DOWNLOAD_SUCCESS_MESSAGE)
     } catch (e) {
       console.error(e)
-      toast.error(formatApiError(e) || 'Download failed')
+      toast.error(formatApiError(e) || DOWNLOAD_FAILED_MESSAGE)
     }
   }
 

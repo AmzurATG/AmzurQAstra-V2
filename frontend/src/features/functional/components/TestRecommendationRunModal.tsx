@@ -25,6 +25,7 @@ import {
 } from '../hooks/useAcceptRecommendation'
 import EmailReportDialog from './EmailReportDialog'
 import toast from 'react-hot-toast'
+import { DOWNLOAD_FAILED_MESSAGE, DOWNLOAD_SUCCESS_MESSAGE } from '@common/constants/toastMessages'
 import { testCasePriorityLabel } from '../constants/testCaseUi'
 import { GAP_ANALYSIS_LABEL } from '../constants/requirementUi'
 
@@ -684,10 +685,10 @@ export default function TestRecommendationRunModal({
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
-      toast.success('Download started')
+      toast.success(DOWNLOAD_SUCCESS_MESSAGE)
     } catch (e) {
       console.error(e)
-      toast.error('Download failed')
+      toast.error(DOWNLOAD_FAILED_MESSAGE)
     }
   }
 
@@ -875,7 +876,7 @@ export default function TestRecommendationRunModal({
                         type="button"
                         onClick={() => {
                           downloadRunJson(run)
-                          toast.success('Download started')
+                          toast.success(DOWNLOAD_SUCCESS_MESSAGE)
                         }}
                       >
                         <ArrowDownTrayIcon className="w-4 h-4 mr-1" />
