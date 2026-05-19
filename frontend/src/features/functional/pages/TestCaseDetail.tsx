@@ -19,6 +19,11 @@ import {
 import { testCasesApi, testStepsApi } from '../api'
 import type { TestCase, TestStep, TestStepAction } from '../types'
 import { userStoryDisplayKey } from '../constants/userStoryUi'
+import {
+  testCaseCategoryLabel,
+  testCasePriorityLabel,
+  testCaseStatusLabel,
+} from '../constants/testCaseUi'
 import toast from 'react-hot-toast'
 
 const ACTION_OPTIONS: TestStepAction[] = [
@@ -351,19 +356,19 @@ export default function TestCaseDetail() {
               <dt className="text-xs text-gray-500">Priority</dt>
               <dd>
                 <span className={`px-2 py-0.5 text-xs rounded font-medium ${priorityColors[testCase.priority] || 'bg-gray-100'}`}>
-                  {testCase.priority}
+                  {testCasePriorityLabel(testCase.priority)}
                 </span>
               </dd>
             </div>
             <div>
               <dt className="text-xs text-gray-500">Category</dt>
-              <dd className="text-sm font-medium capitalize">{testCase.category}</dd>
+              <dd className="text-sm font-medium">{testCaseCategoryLabel(testCase.category)}</dd>
             </div>
             <div>
               <dt className="text-xs text-gray-500">Status</dt>
               <dd>
                 <span className={`px-2 py-0.5 text-xs rounded font-medium ${statusColors[testCase.status] || 'bg-gray-100'}`}>
-                  {testCase.status}
+                  {testCaseStatusLabel(testCase.status)}
                 </span>
               </dd>
             </div>

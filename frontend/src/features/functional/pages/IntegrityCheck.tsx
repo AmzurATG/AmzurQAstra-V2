@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { Card, CardTitle } from '@common/components/ui/Card'
+import { formatDisplayLabel } from '@common/utils/formatDisplayLabel'
 import { Button } from '@common/components/ui/Button'
 import { Input } from '@common/components/ui/Input'
 import { useProjectStore } from '@common/store/projectStore'
@@ -66,7 +67,7 @@ function OverallStatusBadge({ status }: { status: string | null }) {
     )
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
-      <ClockIcon className="w-3.5 h-3.5" /> {status ?? '—'}
+      <ClockIcon className="w-3.5 h-3.5" /> {formatDisplayLabel(status)}
     </span>
   )
 }

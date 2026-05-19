@@ -26,6 +26,7 @@ import { Card, CardTitle } from '@common/components/ui/Card'
 import { testCasesApi } from '../../api'
 import { TestCaseEditModal } from '../TestCaseEditModal'
 import type { TestCase, TestCasePriority } from '../../types'
+import { testCasePriorityLabel } from '../../constants/testCaseUi'
 
 export interface StoryTestCaseListHandle {
   reload: () => void
@@ -402,7 +403,7 @@ export const StoryTestCaseList = forwardRef<StoryTestCaseListHandle, StoryTestCa
                       <span
                         className={`rounded px-2 py-0.5 text-xs font-medium ${PRIORITY_PILL[tc.priority]}`}
                       >
-                        {tc.priority}
+                        {testCasePriorityLabel(tc.priority)}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-gray-600">{tc.steps_count}</td>
@@ -487,7 +488,7 @@ export const StoryTestCaseList = forwardRef<StoryTestCaseListHandle, StoryTestCa
                       <span
                         className={`rounded px-2 py-0.5 text-xs font-medium ${PRIORITY_PILL[tc.priority]}`}
                       >
-                        {tc.priority}
+                        {testCasePriorityLabel(tc.priority)}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-gray-600">{tc.steps_count}</td>

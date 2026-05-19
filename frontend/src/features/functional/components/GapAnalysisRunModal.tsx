@@ -11,6 +11,7 @@ import { Button } from '@common/components/ui/Button'
 import { Loader } from '@common/components/ui/Loader'
 import { gapAnalysisApi } from '../api'
 import type { GapAnalysisRun } from '../types'
+import { GAP_ANALYSIS_LABEL } from '../constants/requirementUi'
 import {
   getAcceptedIndicesForRun,
   recordAcceptedSuggestion,
@@ -125,7 +126,7 @@ export default function GapAnalysisRunModal({
         if (!cancelled) {
           console.error(e)
           setPdfError('Could not load the PDF.')
-          toast.error('Could not load gap analysis PDF')
+          toast.error(`Could not load ${GAP_ANALYSIS_LABEL} PDF`)
         }
       } finally {
         if (!cancelled) setPdfLoading(false)
@@ -196,7 +197,7 @@ export default function GapAnalysisRunModal({
   const title =
     run?.requirement_title ||
     run?.requirement_file_name ||
-    (run ? `Requirement #${run.requirement_id}` : 'Gap analysis')
+    (run ? `Requirement #${run.requirement_id}` : GAP_ANALYSIS_LABEL)
 
   return (
     <Transition appear show={isOpen} as={Fragment}>
@@ -465,7 +466,7 @@ export default function GapAnalysisRunModal({
                         )}
                         {!pdfLoading && !pdfError && pdfUrl && (
                           <iframe
-                            title="Gap analysis PDF"
+                            title={`${GAP_ANALYSIS_LABEL} PDF`}
                             src={pdfUrl}
                             className="w-full h-[70vh] border-0 bg-white"
                           />
@@ -484,7 +485,7 @@ export default function GapAnalysisRunModal({
           projectId={projectId}
           runId={runId}
           kind="gap"
-          reportLabel="gap analysis report"
+          reportLabel={`${GAP_ANALYSIS_LABEL} report`}
         />
       </Dialog>
     </Transition>

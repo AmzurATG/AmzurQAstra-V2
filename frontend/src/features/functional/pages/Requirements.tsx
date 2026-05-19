@@ -21,6 +21,12 @@ import {
   TestRecommendationRunModal,
 } from '../components'
 import type { Requirement, GapAnalysisRun, TestRecommendationRun } from '../types'
+import {
+  analysisRunStatusConfig,
+  GAP_ANALYSIS_LABEL,
+  requirementSourceConfig,
+  requirementStatusConfig,
+} from '../constants/requirementUi'
 import toast from 'react-hot-toast'
 
 function formatApiError(err: unknown): string {
@@ -136,15 +142,15 @@ export default function Requirements() {
     try {
       const res = await gapAnalysisApi.createRun(Number(projectId), Number(requirement.id))
       if (res.data.status === 'failed') {
-        toast.error(res.data.error_message || 'Gap analysis failed')
+        toast.error(res.data.error_message || `${GAP_ANALYSIS_LABEL} failed`)
       } else {
-        toast.success('Gap analysis completed')
+        toast.success(`${GAP_ANALYSIS_LABEL} completed`)
       }
       await fetchGapRuns()
       setGapModal({ runId: res.data.id, tab: 'summary' })
     } catch (err: unknown) {
       console.error('Gap analysis failed:', err)
-      toast.error(formatApiError(err) || 'Gap analysis failed')
+      toast.error(formatApiError(err) || `${GAP_ANALYSIS_LABEL} failed`)
     } finally {
       setGapAnalyzingId(null)
     }
@@ -214,7 +220,7 @@ export default function Requirements() {
     if (!projectId) return
     if (
       !confirm(
-        `Delete gap analysis run #${run.id}? The stored PDF will be removed. This cannot be undone.`
+        `Delete ${GAP_ANALYSIS_LABEL} run #${run.id}? The stored PDF will be removed. This cannot be undone.`
       )
     ) {
       return
@@ -289,19 +295,6 @@ export default function Requirements() {
     })
   }
 
-  const getSourceBadgeColor = (source: string) => {
-    switch (source) {
-      case 'jira':
-        return 'bg-blue-100 text-blue-700'
-      case 'azure_devops':
-        return 'bg-purple-100 text-purple-700'
-      case 'upload':
-        return 'bg-green-100 text-green-700'
-      default:
-        return 'bg-gray-100 text-gray-700'
-    }
-  }
-
   const rowActionBusy = gapAnalyzingId !== null || deletingId !== null || testRecRunningId !== null
 
   const requirementHasParsedContent = (req: Requirement) =>
@@ -333,7 +326,9 @@ export default function Requirements() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Requirements</h1>
-          <p className="text-gray-600">Manage requirement documents — run gap analysis first, then testing recommendations.</p>
+          <p className="text-gray-600">
+            Manage requirement documents — run {GAP_ANALYSIS_LABEL} first, then testing recommendations.
+          </p>
         </div>
         <Button onClick={() => setIsUploadModalOpen(true)}>
           <ArrowUpTrayIcon className="w-4 h-4 mr-2" />
@@ -365,7 +360,7 @@ export default function Requirements() {
           <DocumentTextIcon className="w-12 h-12 mx-auto text-gray-400 mb-3" />
           <h3 className="text-lg font-medium text-gray-900 mb-1">No requirements yet</h3>
           <p className="text-gray-500 mb-4">
-            Upload a requirement document to get started with gap analysis and test generation.
+            Upload a requirement document to get started with {GAP_ANALYSIS_LABEL} and test generation.
           </p>
           <Button onClick={() => setIsUploadModalOpen(true)}>
             <ArrowUpTrayIcon className="w-4 h-4 mr-2" />
@@ -405,23 +400,27 @@ export default function Requirements() {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs rounded ${getSourceBadgeColor(req.source)}`}>
-                      {req.source}
-                    </span>
+                    {(() => {
+                      const sourceCfg =
+                        requirementSourceConfig[req.source] ?? requirementSourceConfig.manual
+                      return (
+                        <span className={`px-2 py-1 text-xs rounded ${sourceCfg.color}`}>
+                          {sourceCfg.label}
+                        </span>
+                      )
+                    })()}
                   </td>
                   <td className="px-6 py-4 text-gray-600">{req.test_cases_count} cases</td>
                   <td className="px-6 py-4">
-                    <span
-                      className={`px-2 py-1 text-xs rounded ${
-                        req.status === 'processed'
-                          ? 'bg-green-100 text-green-700'
-                          : req.status === 'error'
-                            ? 'bg-red-100 text-red-700'
-                            : 'bg-yellow-100 text-yellow-700'
-                      }`}
-                    >
-                      {req.status}
-                    </span>
+                    {(() => {
+                      const statusCfg =
+                        requirementStatusConfig[req.status] ?? requirementStatusConfig.pending
+                      return (
+                        <span className={`px-2 py-1 text-xs rounded ${statusCfg.color}`}>
+                          {statusCfg.label}
+                        </span>
+                      )
+                    })()}
                   </td>
                   <td className="px-6 py-4 text-gray-600 text-sm">{formatDate(req.created_at)}</td>
                   <td className="px-6 py-4">
@@ -446,12 +445,12 @@ export default function Requirements() {
                           !requirementHasParsedContent(req)
                             ? 'Upload and process a document first'
                             : userStoryTotal === 0
-                              ? 'Import or create user stories before running gap analysis'
-                              : 'Run gap analysis (BRD vs user stories)'
+                              ? `Import or create user stories before running ${GAP_ANALYSIS_LABEL}`
+                              : `Run ${GAP_ANALYSIS_LABEL} (BRD vs user stories)`
                         }
                       >
                         <DocumentMagnifyingGlassIcon className="w-4 h-4 mr-1" />
-                        Gap analysis
+                        {GAP_ANALYSIS_LABEL}
                       </Button>
                       <Button
                         variant="ghost"
@@ -465,7 +464,7 @@ export default function Requirements() {
                             : userStoryTotal === 0
                               ? 'Import or create user stories first'
                               : !requirementHasCompletedGap(req)
-                                ? 'Run gap analysis for this requirement first — test recommendations build on that report'
+                                ? `Run ${GAP_ANALYSIS_LABEL} for this requirement first — test recommendations build on that report`
                                 : 'Test recommendations (playbook + gap context)'
                         }
                       >
@@ -496,7 +495,7 @@ export default function Requirements() {
         <Card>
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Gap analysis reports</h2>
+              <h2 className="text-lg font-semibold text-gray-900">{GAP_ANALYSIS_LABEL} Reports</h2>
               <p className="text-sm text-gray-500">
                 Compare requirement documents with user stories. Preview the PDF or accept suggested
                 stories into User Stories.
@@ -509,7 +508,7 @@ export default function Requirements() {
             </div>
           ) : gapRuns.length === 0 ? (
             <p className="text-sm text-gray-500 text-center py-6">
-              No gap analysis runs yet. Use <strong>Gap analysis</strong> on a requirement row above.
+              No {GAP_ANALYSIS_LABEL} runs yet. Use <strong>{GAP_ANALYSIS_LABEL}</strong> on a requirement row above.
             </p>
           ) : (
             <div className="overflow-x-auto -mx-6 px-6">
@@ -551,17 +550,15 @@ export default function Requirements() {
                         {formatDateTime(run.created_at)}
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`px-2 py-0.5 text-xs rounded ${
-                            run.status === 'completed'
-                              ? 'bg-green-100 text-green-800'
-                              : run.status === 'failed'
-                                ? 'bg-red-100 text-red-800'
-                                : 'bg-yellow-100 text-yellow-800'
-                          }`}
-                        >
-                          {run.status}
-                        </span>
+                        {(() => {
+                          const statusCfg =
+                            analysisRunStatusConfig[run.status] ?? analysisRunStatusConfig.pending
+                          return (
+                            <span className={`px-2 py-0.5 text-xs rounded ${statusCfg.color}`}>
+                              {statusCfg.label}
+                            </span>
+                          )
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1 flex-wrap">
@@ -617,7 +614,7 @@ export default function Requirements() {
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Test recommendation runs</h2>
               <p className="text-sm text-gray-500">
-                Available after a completed <strong>gap analysis</strong> for the same requirement. Combines the YAML
+                Available after a completed <strong>{GAP_ANALYSIS_LABEL}</strong> for the same requirement. Combines the YAML
                 playbook (general + industry domain), gap context, and tailored narrative.
               </p>
             </div>
@@ -628,7 +625,8 @@ export default function Requirements() {
             </div>
           ) : testRecRuns.length === 0 ? (
             <p className="text-sm text-gray-500 text-center py-6">
-              No runs yet. Complete <strong>gap analysis</strong> on a requirement, then use <strong>Recommendations</strong>{' '}
+              No runs yet. Complete <strong>{GAP_ANALYSIS_LABEL}</strong> on a requirement, then use{' '}
+              <strong>Recommendations</strong>{' '}
               on that row.
             </p>
           ) : (
@@ -673,17 +671,15 @@ export default function Requirements() {
                         {formatDateTime(run.created_at)}
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`px-2 py-0.5 text-xs rounded ${
-                            run.status === 'completed'
-                              ? 'bg-green-100 text-green-800'
-                              : run.status === 'failed'
-                                ? 'bg-red-100 text-red-800'
-                                : 'bg-yellow-100 text-yellow-800'
-                          }`}
-                        >
-                          {run.status}
-                        </span>
+                        {(() => {
+                          const statusCfg =
+                            analysisRunStatusConfig[run.status] ?? analysisRunStatusConfig.pending
+                          return (
+                            <span className={`px-2 py-0.5 text-xs rounded ${statusCfg.color}`}>
+                              {statusCfg.label}
+                            </span>
+                          )
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1 flex-wrap">

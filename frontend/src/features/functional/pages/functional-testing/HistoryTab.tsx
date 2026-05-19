@@ -14,6 +14,7 @@ import { Button } from '@common/components/ui/Button'
 import { Card } from '@common/components/ui/Card'
 import { PaginationBar } from '@common/components/ui/PaginationBar'
 import { formatDateTimeIST } from '@common/utils/dateTime'
+import { formatDisplayLabel } from '@common/utils/formatDisplayLabel'
 
 import { useTestRunsList } from '../../hooks/useTestRunsList'
 import type { TestRun } from '../../types'
@@ -201,7 +202,7 @@ export default function HistoryTab() {
                             <span
                               className={`text-[10px] font-bold uppercase ${cfg.color}`}
                             >
-                              {run.status}
+                              {formatDisplayLabel(run.status)}
                             </span>
                           </div>
                         </td>

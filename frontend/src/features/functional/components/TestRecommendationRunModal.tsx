@@ -25,6 +25,8 @@ import {
 } from '../hooks/useAcceptRecommendation'
 import EmailReportDialog from './EmailReportDialog'
 import toast from 'react-hot-toast'
+import { testCasePriorityLabel } from '../constants/testCaseUi'
+import { GAP_ANALYSIS_LABEL } from '../constants/requirementUi'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -123,8 +125,8 @@ function PriorityBadge({ priority }: { priority?: string }) {
           ? 'bg-yellow-100 text-yellow-800'
           : 'bg-gray-100 text-gray-600'
   return (
-    <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium capitalize ${cls}`}>
-      {priority || '—'}
+    <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${cls}`}>
+      {testCasePriorityLabel(priority || '')}
     </span>
   )
 }
@@ -1055,7 +1057,7 @@ export default function TestRecommendationRunModal({
 
                         {result.gap_analysis_snapshot && (
                           <div className="rounded-lg border border-gray-200 p-4 text-sm space-y-2 bg-white">
-                            <h4 className="font-semibold text-gray-900">Gap analysis context</h4>
+                            <h4 className="font-semibold text-gray-900">{GAP_ANALYSIS_LABEL} Context</h4>
                             <p className="text-xs text-gray-500">
                               Run #{result.gap_analysis_snapshot.gap_analysis_run_id ?? '—'} ·
                               Coverage:{' '}

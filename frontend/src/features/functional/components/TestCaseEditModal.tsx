@@ -3,6 +3,11 @@ import { Dialog, Transition } from '@headlessui/react'
 import { XMarkIcon, SparklesIcon, DocumentArrowUpIcon } from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
 import type { TestCase, TestCasePriority, TestCaseCategory, TestCaseStatus } from '../types'
+import {
+  testCaseCategoryLabel,
+  testCasePriorityLabel,
+  testCaseStatusLabel,
+} from '../constants/testCaseUi'
 
 interface TestCaseEditModalProps {
   isOpen: boolean
@@ -97,7 +102,9 @@ export const TestCaseEditModal: React.FC<TestCaseEditModalProps> = ({
                         className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-primary-500 outline-none"
                       >
                         {PRIORITY_OPTIONS.map((p) => (
-                          <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
+                          <option key={p} value={p}>
+                            {testCasePriorityLabel(p)}
+                          </option>
                         ))}
                       </select>
                     </div>
@@ -109,7 +116,9 @@ export const TestCaseEditModal: React.FC<TestCaseEditModalProps> = ({
                         className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-primary-500 outline-none"
                       >
                         {CATEGORY_OPTIONS.map((c) => (
-                          <option key={c} value={c}>{c.toUpperCase()}</option>
+                          <option key={c} value={c}>
+                            {testCaseCategoryLabel(c)}
+                          </option>
                         ))}
                       </select>
                     </div>
@@ -123,7 +132,9 @@ export const TestCaseEditModal: React.FC<TestCaseEditModalProps> = ({
                       className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-primary-500 outline-none"
                     >
                       {STATUS_OPTIONS.map((s) => (
-                        <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                        <option key={s} value={s}>
+                          {testCaseStatusLabel(s)}
+                        </option>
                       ))}
                     </select>
                   </div>

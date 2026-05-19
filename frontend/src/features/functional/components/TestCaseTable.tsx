@@ -17,6 +17,7 @@ import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import type { TestCase, TestStep, LiveProgressResponse } from '../types'
 import { userStoryDisplayKey } from '../constants/userStoryUi'
+import { testCaseCategoryLabel, testCasePriorityLabel } from '../constants/testCaseUi'
 
 interface TestCaseTableProps {
   projectId: string | undefined
@@ -271,12 +272,12 @@ export const TestCaseTable: React.FC<TestCaseTableProps> = ({
               </td>
               <td className="px-4 py-4">
                 <span className={`px-2 py-1 text-xs rounded font-medium ${priorityColors[tc.priority as keyof typeof priorityColors]}`}>
-                  {tc.priority}
+                  {testCasePriorityLabel(tc.priority)}
                 </span>
               </td>
               <td className="px-4 py-4">
                 <span className={`px-2 py-1 text-xs rounded ${categoryColors[tc.category as keyof typeof categoryColors] || 'bg-gray-100 text-gray-600'}`}>
-                  {tc.category}
+                  {testCaseCategoryLabel(tc.category)}
                 </span>
               </td>
               <td className="px-4 py-4">
