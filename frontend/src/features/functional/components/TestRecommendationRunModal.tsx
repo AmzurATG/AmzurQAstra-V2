@@ -1202,7 +1202,7 @@ export default function TestRecommendationRunModal({
           projectId={projectId}
           runId={runId}
           kind="testRec"
-          reportLabel="testing recommendations report"
+          reportLabel="Test recommendations report"
         />
       </Dialog>
     </Transition>

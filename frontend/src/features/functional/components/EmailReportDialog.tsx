@@ -4,6 +4,10 @@ import { EnvelopeIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
 import { gapAnalysisApi, testRecommendationsApi, integrityCheckApi } from '../api'
 import toast from 'react-hot-toast'
+import {
+  REPORT_EMAIL_FAILED_MESSAGE,
+  REPORT_EMAIL_SUCCESS_MESSAGE,
+} from '@common/constants/toastMessages'
 
 export type ReportEmailKind = 'gap' | 'testRec' | 'bic'
 
@@ -65,11 +69,11 @@ export default function EmailReportDialog({
       } else {
         await integrityCheckApi.emailReport(String(runId), projectId, trimmed)
       }
-      toast.success('Report emailed successfully')
+      toast.success(REPORT_EMAIL_SUCCESS_MESSAGE)
       onClose()
     } catch (err) {
       console.error(err)
-      toast.error(formatDetail(err))
+      toast.error(formatDetail(err) || REPORT_EMAIL_FAILED_MESSAGE)
     } finally {
       setSending(false)
     }
