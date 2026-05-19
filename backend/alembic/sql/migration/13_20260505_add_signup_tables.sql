@@ -52,3 +52,5 @@ CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_t
 
 -- Stamp alembic version
 UPDATE alembic_version SET version_num = 's1g2n3u4p5v1';
+
+COMMIT;

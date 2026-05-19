@@ -9,3 +9,5 @@ ALTER TABLE requirements ALTER COLUMN file_type TYPE VARCHAR(255);
 
 -- Stamp alembic version
 UPDATE alembic_version SET version_num = 'f8e9a1b2c3d4';
+
+COMMIT;

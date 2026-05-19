@@ -8,59 +8,27 @@ SET search_path TO qastraschema;
 
 -- ==========================================================
 -- ENUM TYPES
+-- (If type already exists, the statement will error — safe to ignore)
 -- ==========================================================
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'userrole') THEN
-        CREATE TYPE userrole AS ENUM ('admin', 'manager', 'tester', 'viewer');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'requirementsourcetype') THEN
-        CREATE TYPE requirementsourcetype AS ENUM ('upload', 'jira', 'azure_devops', 'confluence', 'manual');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'testcasepriority') THEN
-        CREATE TYPE testcasepriority AS ENUM ('critical', 'high', 'medium', 'low');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'testcasecategory') THEN
-        CREATE TYPE testcasecategory AS ENUM ('smoke', 'regression', 'e2e', 'integration', 'sanity');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'testcasestatus') THEN
-        CREATE TYPE testcasestatus AS ENUM ('draft', 'ready', 'deprecated');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'teststepaction') THEN
-        CREATE TYPE teststepaction AS ENUM (
-            'navigate', 'click', 'type', 'fill', 'select', 'check', 'uncheck',
-            'hover', 'screenshot', 'wait', 'assert_text', 'assert_visible',
-            'assert_url', 'assert_title', 'custom'
-        );
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'testrunstatus') THEN
-        CREATE TYPE testrunstatus AS ENUM ('pending', 'running', 'passed', 'failed', 'cancelled', 'error');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'testresultstatus') THEN
-        CREATE TYPE testresultstatus AS ENUM ('passed', 'failed', 'skipped', 'error');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'integrationtype') THEN
-        CREATE TYPE integrationtype AS ENUM ('jira', 'redmine', 'azure_devops', 'slack', 'confluence', 'github', 'gitlab', 'teams');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'integrationcategory') THEN
-        CREATE TYPE integrationcategory AS ENUM ('project_management', 'communication', 'documentation', 'version_control');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'syncstatus') THEN
-        CREATE TYPE syncstatus AS ENUM ('idle', 'syncing', 'success', 'failed');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'userstorystatus') THEN
-        CREATE TYPE userstorystatus AS ENUM ('open', 'in_progress', 'done', 'blocked', 'closed');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'userstorypriority') THEN
-        CREATE TYPE userstorypriority AS ENUM ('low', 'medium', 'high', 'critical');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'userstorysource') THEN
-        CREATE TYPE userstorysource AS ENUM ('jira', 'redmine', 'azure_devops', 'manual');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = current_schema() AND t.typname = 'userstoryitemtype') THEN
-        CREATE TYPE userstoryitemtype AS ENUM ('epic', 'story', 'bug', 'task', 'subtask', 'feature', 'requirement', 'other');
-    END IF;
-END$$;
+CREATE TYPE userrole AS ENUM ('admin', 'manager', 'tester', 'viewer');
+CREATE TYPE requirementsourcetype AS ENUM ('upload', 'jira', 'azure_devops', 'confluence', 'manual');
+CREATE TYPE testcasepriority AS ENUM ('critical', 'high', 'medium', 'low');
+CREATE TYPE testcasecategory AS ENUM ('smoke', 'regression', 'e2e', 'integration', 'sanity');
+CREATE TYPE testcasestatus AS ENUM ('draft', 'ready', 'deprecated');
+CREATE TYPE teststepaction AS ENUM (
+    'navigate', 'click', 'type', 'fill', 'select', 'check', 'uncheck',
+    'hover', 'screenshot', 'wait', 'assert_text', 'assert_visible',
+    'assert_url', 'assert_title', 'custom'
+);
+CREATE TYPE testrunstatus AS ENUM ('pending', 'running', 'passed', 'failed', 'cancelled', 'error');
+CREATE TYPE testresultstatus AS ENUM ('passed', 'failed', 'skipped', 'error');
+CREATE TYPE integrationtype AS ENUM ('jira', 'redmine', 'azure_devops', 'slack', 'confluence', 'github', 'gitlab', 'teams');
+CREATE TYPE integrationcategory AS ENUM ('project_management', 'communication', 'documentation', 'version_control');
+CREATE TYPE syncstatus AS ENUM ('idle', 'syncing', 'success', 'failed');
+CREATE TYPE userstorystatus AS ENUM ('open', 'in_progress', 'done', 'blocked', 'closed');
+CREATE TYPE userstorypriority AS ENUM ('low', 'medium', 'high', 'critical');
+CREATE TYPE userstorysource AS ENUM ('jira', 'redmine', 'azure_devops', 'manual');
+CREATE TYPE userstoryitemtype AS ENUM ('epic', 'story', 'bug', 'task', 'subtask', 'feature', 'requirement', 'other');
 
 -- ==========================================================
 -- TABLES
@@ -289,20 +257,38 @@ END;
 $$ language 'plpgsql';
 
 -- Apply updated_at triggers to all tables
-DO $$
-DECLARE
-    tbl TEXT;
-BEGIN
-    FOR tbl IN SELECT unnest(ARRAY[
-        'organizations', 'users', 'projects', 'requirements',
-        'test_cases', 'test_steps', 'test_runs', 'test_results',
-        'audit_logs', 'project_integrations', 'user_stories'
-    ])
-    LOOP
-        EXECUTE format('DROP TRIGGER IF EXISTS update_%s_updated_at ON %I', tbl, tbl);
-        EXECUTE format('CREATE TRIGGER update_%s_updated_at BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()', tbl, tbl);
-    END LOOP;
-END$$;
+DROP TRIGGER IF EXISTS update_organizations_updated_at ON organizations;
+CREATE TRIGGER update_organizations_updated_at BEFORE UPDATE ON organizations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_projects_updated_at ON projects;
+CREATE TRIGGER update_projects_updated_at BEFORE UPDATE ON projects FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_requirements_updated_at ON requirements;
+CREATE TRIGGER update_requirements_updated_at BEFORE UPDATE ON requirements FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_test_cases_updated_at ON test_cases;
+CREATE TRIGGER update_test_cases_updated_at BEFORE UPDATE ON test_cases FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_test_steps_updated_at ON test_steps;
+CREATE TRIGGER update_test_steps_updated_at BEFORE UPDATE ON test_steps FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_test_runs_updated_at ON test_runs;
+CREATE TRIGGER update_test_runs_updated_at BEFORE UPDATE ON test_runs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_test_results_updated_at ON test_results;
+CREATE TRIGGER update_test_results_updated_at BEFORE UPDATE ON test_results FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_audit_logs_updated_at ON audit_logs;
+CREATE TRIGGER update_audit_logs_updated_at BEFORE UPDATE ON audit_logs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_project_integrations_updated_at ON project_integrations;
+CREATE TRIGGER update_project_integrations_updated_at BEFORE UPDATE ON project_integrations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_user_stories_updated_at ON user_stories;
+CREATE TRIGGER update_user_stories_updated_at BEFORE UPDATE ON user_stories FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ==========================================================
 -- SEED ADMIN USER
@@ -324,3 +310,5 @@ ON CONFLICT (email) DO NOTHING;
 -- Stamp alembic version
 DELETE FROM alembic_version;
 INSERT INTO alembic_version (version_num) VALUES ('0001');
+
+COMMIT;

@@ -23,3 +23,5 @@ CREATE INDEX IF NOT EXISTS ix_test_recommendation_runs_created_by ON test_recomm
 
 -- Stamp alembic version
 UPDATE alembic_version SET version_num = 'k5m6n7o8p9q0';
+
+COMMIT;

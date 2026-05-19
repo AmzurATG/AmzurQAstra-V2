@@ -9,3 +9,5 @@ ALTER TABLE test_results ADD COLUMN IF NOT EXISTS adapted_steps JSONB;
 
 -- Stamp alembic version
 UPDATE alembic_version SET version_num = '2bd17a756caa';
+
+COMMIT;

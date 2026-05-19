@@ -9,3 +9,5 @@ ALTER TABLE test_recommendation_runs ADD COLUMN IF NOT EXISTS pdf_path VARCHAR(5
 
 -- Stamp alembic version
 UPDATE alembic_version SET version_num = 'l6n7o8p9q0r1';
+
+COMMIT;

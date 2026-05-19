@@ -12,3 +12,5 @@ UPDATE test_cases SET source = 'ai' WHERE is_generated = true;
 
 -- Stamp alembic version
 UPDATE alembic_version SET version_num = 'n8o9p0q1r2s3';
+
+COMMIT;

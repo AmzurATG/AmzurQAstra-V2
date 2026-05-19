@@ -9,3 +9,5 @@ SET search_path TO qastraschema;
 -- Stamp alembic version to the final merged head
 DELETE FROM alembic_version;
 INSERT INTO alembic_version (version_num) VALUES ('m3r4g5e6s7g8n9');
+
+COMMIT;

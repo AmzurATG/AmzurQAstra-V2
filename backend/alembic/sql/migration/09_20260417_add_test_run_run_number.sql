@@ -19,16 +19,12 @@ WHERE t.id = s.id;
 
 ALTER TABLE test_runs ALTER COLUMN run_number SET NOT NULL;
 
--- Add unique constraint (idempotent — drop first if exists)
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'uq_test_runs_project_run_number'
-    ) THEN
-        ALTER TABLE test_runs ADD CONSTRAINT uq_test_runs_project_run_number
-            UNIQUE (project_id, run_number);
-    END IF;
-END$$;
+-- Add unique constraint
+ALTER TABLE test_runs DROP CONSTRAINT IF EXISTS uq_test_runs_project_run_number;
+ALTER TABLE test_runs ADD CONSTRAINT uq_test_runs_project_run_number
+    UNIQUE (project_id, run_number);
 
 -- Stamp alembic version
 UPDATE alembic_version SET version_num = 'j3k4l5m6n7o8';
+
+COMMIT;

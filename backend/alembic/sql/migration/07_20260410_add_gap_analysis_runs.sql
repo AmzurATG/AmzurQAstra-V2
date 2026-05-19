@@ -24,3 +24,5 @@ CREATE INDEX IF NOT EXISTS ix_gap_analysis_runs_created_by ON gap_analysis_runs(
 
 -- Stamp alembic version
 UPDATE alembic_version SET version_num = 'g9a0b1c2d3e4';
+
+COMMIT;

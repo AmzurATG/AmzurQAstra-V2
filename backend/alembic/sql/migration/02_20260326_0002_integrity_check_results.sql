@@ -39,3 +39,5 @@ CREATE INDEX IF NOT EXISTS ix_integrity_check_results_run_id
 
 -- Stamp alembic version
 UPDATE alembic_version SET version_num = '0002';
+
+COMMIT;
