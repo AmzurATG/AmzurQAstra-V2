@@ -3,9 +3,16 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '@common/components/ui/Button'
 import { Input } from '@common/components/ui/Input'
 import { passwordResetApi, SecurityQuestion } from '@common/api/passwordReset'
+import { parseApiValidationErrors, validatePassword } from '@common/utils/passwordValidation'
 import toast from 'react-hot-toast'
 
 type Step = 'email' | 'security' | 'reset'
+
+interface ResetFormErrors {
+  resetToken?: string
+  newPassword?: string
+  confirmPassword?: string
+}
 
 export default function ForgotPassword() {
   const navigate = useNavigate()
@@ -24,6 +31,7 @@ export default function ForgotPassword() {
   const [resetToken, setResetToken] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [resetErrors, setResetErrors] = useState<ResetFormErrors>({})
 
   // --- Step 1: Submit email ---
   const handleEmailSubmit = async (e: React.FormEvent) => {
@@ -93,22 +101,36 @@ export default function ForgotPassword() {
     }
   }
 
+  const validateResetForm = (): boolean => {
+    const errors: ResetFormErrors = {}
+    if (!resetToken.trim()) {
+      errors.resetToken = 'Please enter the reset token from your email'
+    }
+    const passwordError = validatePassword(newPassword)
+    if (!newPassword.trim()) {
+      errors.newPassword = 'Please enter a new password'
+    } else if (passwordError) {
+      errors.newPassword = passwordError
+    }
+    if (!confirmPassword) {
+      errors.confirmPassword = 'Please confirm your password'
+    } else if (newPassword !== confirmPassword) {
+      errors.confirmPassword = 'Passwords do not match'
+    }
+    setResetErrors(errors)
+    return Object.keys(errors).length === 0
+  }
+
+  const clearResetError = (field: keyof ResetFormErrors) => {
+    if (resetErrors[field]) {
+      setResetErrors((prev) => ({ ...prev, [field]: undefined }))
+    }
+  }
+
   // --- Step 3: Submit new password ---
   const handleResetSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
-    if (!resetToken.trim()) {
-      toast.error('Please enter the reset token from your email')
-      return
-    }
-    if (!newPassword) {
-      toast.error('Please enter a new password')
-      return
-    }
-    if (newPassword !== confirmPassword) {
-      toast.error('Passwords do not match')
-      return
-    }
+    if (!validateResetForm()) return
 
     setLoading(true)
     try {
@@ -116,18 +138,19 @@ export default function ForgotPassword() {
       toast.success('Password reset successfully! You can now login.')
       navigate('/login')
     } catch (err: any) {
-      const detail = err?.response?.data?.detail
-      if (err?.response?.status === 422) {
-        const errors = err?.response?.data?.details?.errors
-        if (Array.isArray(errors) && errors.length > 0) {
-          toast.error(errors[0].msg || 'Validation error')
-        } else {
-          toast.error('Validation error')
+      const response = err?.response
+      if (response?.status === 422 && Array.isArray(response?.data?.details?.errors)) {
+        const { fieldErrors, message } = parseApiValidationErrors(response.data.details.errors)
+        if (Object.keys(fieldErrors).length > 0) {
+          setResetErrors((prev) => ({ ...prev, ...fieldErrors }))
         }
-      } else if (typeof detail === 'string') {
-        toast.error(detail)
+        toast.error(message)
       } else {
-        toast.error('Failed to reset password')
+        const message =
+          response?.data?.message ||
+          (typeof response?.data?.detail === 'string' ? response.data.detail : null) ||
+          'Failed to reset password'
+        toast.error(message)
       }
     } finally {
       setLoading(false)
@@ -239,28 +262,40 @@ export default function ForgotPassword() {
               label="Reset Token"
               type="text"
               value={resetToken}
-              onChange={(e) => setResetToken(e.target.value.toUpperCase())}
+              onChange={(e) => {
+                setResetToken(e.target.value.toUpperCase())
+                clearResetError('resetToken')
+              }}
               placeholder="Enter 6-character token from email"
               maxLength={6}
               autoComplete="off"
+              error={resetErrors.resetToken}
               required
             />
             <Input
               label="New Password"
               type="password"
               value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
+              onChange={(e) => {
+                setNewPassword(e.target.value)
+                clearResetError('newPassword')
+              }}
               placeholder="Enter new password"
               autoComplete="new-password"
+              error={resetErrors.newPassword}
               required
             />
             <Input
               label="Confirm Password"
               type="password"
               value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
+              onChange={(e) => {
+                setConfirmPassword(e.target.value)
+                clearResetError('confirmPassword')
+              }}
               placeholder="Confirm new password"
               autoComplete="new-password"
+              error={resetErrors.confirmPassword}
               required
             />
             <Button type="submit" className="w-full" disabled={loading}>

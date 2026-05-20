@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '@common/components/ui/Button'
 import { Input } from '@common/components/ui/Input'
 import { signupApi } from '@common/api/signup'
+import { validatePassword } from '@common/utils/passwordValidation'
 import toast from 'react-hot-toast'
 
 const FREE_EMAIL_PROVIDERS = [
@@ -62,19 +63,6 @@ export default function Signup() {
     if (!emailRegex.test(email)) return 'Please enter a valid email address'
     const domain = email.split('@')[1].toLowerCase()
     if (FREE_EMAIL_PROVIDERS.includes(domain)) return 'Please use a business email address (you@company.com)'
-    return undefined
-  }
-
-  const validatePassword = (password: string): string | undefined => {
-    const missing: string[] = []
-    if (password.length < 8) missing.push('at least 8 characters')
-    if (password.length > 64) missing.push('no more than 64 characters')
-    if (!/[A-Z]/.test(password)) missing.push('one uppercase letter')
-    if (!/[a-z]/.test(password)) missing.push('one lowercase letter')
-    if (!/[0-9]/.test(password)) missing.push('one number')
-    if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)) missing.push('one special character')
-    if (/\s/.test(password)) missing.push('no whitespace')
-    if (missing.length > 0) return `Password must contain: ${missing.join(', ')}`
     return undefined
   }
 
