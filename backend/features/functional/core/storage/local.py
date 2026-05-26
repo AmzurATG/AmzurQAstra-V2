@@ -53,6 +53,7 @@ class LocalStorageAdapter(StorageAdapter):
         filename: str,
         content_type: str,
         subdirectory: Optional[str] = None,
+        preserve_filename: bool = False,
     ) -> StorageFile:
         """Save file to local filesystem."""
         # Build target directory
@@ -62,8 +63,8 @@ class LocalStorageAdapter(StorageAdapter):
         target_dir.mkdir(parents=True, exist_ok=True)
         
         # Generate unique filename
-        unique_filename = self._generate_unique_filename(filename)
-        file_path = target_dir / unique_filename
+        stored_filename = filename if preserve_filename else self._generate_unique_filename(filename)
+        file_path = target_dir / stored_filename
         
         # Write file
         async with aiofiles.open(file_path, "wb") as f:

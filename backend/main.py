@@ -87,7 +87,27 @@ def create_application() -> FastAPI:
     # Mount static files for screenshots
     screenshots_path = Path(settings.SCREENSHOTS_DIR)
     screenshots_path.mkdir(parents=True, exist_ok=True)
-    app.mount("/screenshots", StaticFiles(directory=str(screenshots_path)), name="screenshots")
+    if settings.STORAGE_TYPE == "local":
+        app.mount("/screenshots", StaticFiles(directory=str(screenshots_path)), name="screenshots")
+    else:
+        # Serve screenshots from remote storage (Supabase / S3) via a proxy route.
+        from fastapi import Response
+
+        @app.get("/screenshots/{filename:path}")
+        async def _serve_screenshot(filename: str):
+            # Try local first (backward compat with pre-migration files)
+            local = screenshots_path / filename
+            if local.is_file():
+                return FileResponse(local)
+            # Fetch from remote storage
+            from features.functional.core.storage import get_storage_adapter
+            storage = get_storage_adapter()
+            data = await storage.get(f"screenshots/{filename}")
+            if data is None:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404, detail="Screenshot not found")
+            media = "image/png" if filename.lower().endswith(".png") else "image/jpeg"
+            return Response(content=data, media_type=media)
 
     # Register global exception handlers
     register_exception_handlers(app)

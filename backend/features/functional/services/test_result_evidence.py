@@ -1,8 +1,8 @@
-"""Screenshot path resolution for test results (local files under SCREENSHOTS_DIR)."""
+"""Screenshot path resolution for test results (local files or remote storage)."""
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,9 +31,38 @@ def _resolve_screenshot_file(filename: str) -> Optional[Path]:
     return target
 
 
+def _validate_screenshot_filename(filename: str) -> bool:
+    """Validate filename without requiring local existence."""
+    if not filename or "/" in filename or "\\" in filename or ".." in filename:
+        return False
+    if Path(filename).name != filename:
+        return False
+    lower = filename.lower()
+    return lower.endswith((".png", ".jpg", ".jpeg", ".webp"))
+
+
+async def _resolve_screenshot(filename: str) -> Union[Path, bytes, None]:
+    """Resolve a screenshot: local Path if it exists, otherwise bytes from remote storage."""
+    # Try local first
+    local = _resolve_screenshot_file(filename)
+    if local is not None:
+        return local
+    # Validate filename before remote lookup
+    if not _validate_screenshot_filename(filename):
+        return None
+    # Try remote storage (Supabase / S3)
+    if settings.STORAGE_TYPE != "local":
+        from features.functional.core.storage import get_storage_adapter
+        storage = get_storage_adapter()
+        data = await storage.get(f"screenshots/{filename}")
+        if data is not None:
+            return data
+    return None
+
+
 async def get_primary_screenshot_file(
     db: AsyncSession, run_id: int, result_id: int
-) -> Optional[Path]:
+) -> Union[Path, bytes, None]:
     """Primary failure/summary screenshot for a result (validates test_run_id)."""
     row = await db.execute(
         select(TestResult).where(
@@ -44,12 +73,12 @@ async def get_primary_screenshot_file(
     tr = row.scalar_one_or_none()
     if not tr or not tr.screenshot_path:
         return None
-    return _resolve_screenshot_file(Path(tr.screenshot_path).name)
+    return await _resolve_screenshot(Path(tr.screenshot_path).name)
 
 
 async def get_authorized_screenshot_file(
     db: AsyncSession, run_id: int, result_id: int, filename: str
-) -> Optional[Path]:
+) -> Union[Path, bytes, None]:
     row = await db.execute(
         select(TestResult).where(
             TestResult.id == result_id,
@@ -74,4 +103,4 @@ async def get_authorized_screenshot_file(
     if filename not in allowed:
         return None
 
-    return _resolve_screenshot_file(filename)
+    return await _resolve_screenshot(filename)

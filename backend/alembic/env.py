@@ -4,6 +4,7 @@ Alembic Environment Configuration for QAstra
 Reads the database URL from the application's Settings and configures
 Alembic to use the SQLAlchemy metadata from all registered models.
 """
+import ssl
 import sys
 from logging.config import fileConfig
 from pathlib import Path
@@ -50,7 +51,8 @@ if "asyncpg" in db_url:
 elif not db_url.startswith("postgresql://"):
     db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
 
-config.set_main_option("sqlalchemy.url", db_url)
+# Escape '%' for configparser interpolation (e.g. URL-encoded passwords)
+config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:
@@ -70,10 +72,22 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations against a live database connection."""
+    engine_config = config.get_section(config.config_ini_section, {})
+
+    # Supabase / cloud Postgres requires SSL
+    _is_cloud = "supabase.com" in db_url or "supabase.co" in db_url
+    connect_args = {}
+    if _is_cloud:
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        connect_args["sslmode"] = "require"
+
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        engine_config,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
     with connectable.connect() as connection:
         # Create the target schema if it doesn't exist

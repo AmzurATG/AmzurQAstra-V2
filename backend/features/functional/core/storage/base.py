@@ -46,6 +46,7 @@ class StorageAdapter(ABC):
         filename: str,
         content_type: str,
         subdirectory: Optional[str] = None,
+        preserve_filename: bool = False,
     ) -> StorageFile:
         """
         Save a file to storage.
@@ -55,6 +56,7 @@ class StorageAdapter(ABC):
             filename: Original filename
             content_type: MIME type of the file
             subdirectory: Optional subdirectory/prefix for organizing files
+            preserve_filename: If True, keep the original filename instead of generating a UUID
             
         Returns:
             StorageFile with metadata about the saved file

@@ -233,12 +233,15 @@ async def get_test_result_screenshot(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from fastapi.responses import FileResponse
+    from pathlib import Path
+    from fastapi.responses import FileResponse, Response
     service = TestExecutionService(db)
-    file_path = await service.get_primary_screenshot_file(run_id, result_id)
-    if not file_path:
+    result = await service.get_primary_screenshot_file(run_id, result_id)
+    if not result:
         raise HTTPException(status_code=404, detail="Screenshot not found")
-    return FileResponse(file_path)
+    if isinstance(result, Path):
+        return FileResponse(result)
+    return Response(content=result, media_type="image/png")
 
 
 @router.get("/{run_id}/results/{result_id}/screenshots/{filename}")
@@ -250,10 +253,14 @@ async def get_test_result_screenshot_file(
     db: AsyncSession = Depends(get_db),
 ):
     """Serve a screenshot file listed on agent_logs or screenshot_path (JWT required)."""
-    from fastapi.responses import FileResponse
+    from pathlib import Path
+    from fastapi.responses import FileResponse, Response
 
     service = TestExecutionService(db)
-    file_path = await service.get_authorized_screenshot_file(run_id, result_id, filename)
-    if not file_path:
+    result = await service.get_authorized_screenshot_file(run_id, result_id, filename)
+    if not result:
         raise HTTPException(status_code=404, detail="Screenshot not found")
-    return FileResponse(file_path)
+    if isinstance(result, Path):
+        return FileResponse(result)
+    media = "image/png" if filename.lower().endswith(".png") else "image/jpeg"
+    return Response(content=result, media_type=media)

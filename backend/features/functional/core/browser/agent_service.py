@@ -342,15 +342,9 @@ class BrowserAgentService:
             auth_rules=auth_rules,
         )
 
-    def _save_screenshot(self, b64: str, run_id: str, step: int) -> Optional[str]:
-        try:
-            ts = datetime.utcnow().strftime("%H%M%S%f")
-            fname = f"ic_{run_id[:8]}_s{step:02d}_{ts}.png"
-            (self._screenshots_dir / fname).write_bytes(base64.b64decode(b64))
-            return f"/screenshots/{fname}"
-        except Exception as exc:
-            logger.warning(f"[BrowserAgent] Screenshot save failed step {step}: {exc}")
-            return None
+    async def _save_screenshot(self, b64: str, run_id: str, step: int) -> Optional[str]:
+        from features.functional.core.browser.screenshot_file_store import save_screenshot_b64
+        return await save_screenshot_b64(b64, run_id, tc_id=0, step=step)
 
     def _action_kinds_from_output(self, output: Any) -> List[str]:
         kinds: List[str] = []
@@ -445,7 +439,6 @@ class BrowserAgentService:
         live_progress_writer: LiveProgressWriter,
     ) -> Dict[str, Any]:
         """Run the async agent on a fresh Proactor loop (required for subprocess/Chrome on Windows)."""
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
         return asyncio.run(
             self._run_impl(
                 run_id,
@@ -454,7 +447,8 @@ class BrowserAgentService:
                 password,
                 use_google_signin,
                 live_progress_writer,
-            )
+            ),
+            loop_factory=asyncio.ProactorEventLoop,
         )
 
     async def run(
@@ -595,7 +589,7 @@ class BrowserAgentService:
             b64 = getattr(summary, "screenshot", None)
             if not b64:
                 return
-            path = self._save_screenshot(b64, run_id, step_num)
+            path = await self._save_screenshot(b64, run_id, step_num)
             if not path:
                 return
             last["screenshot_path"] = path

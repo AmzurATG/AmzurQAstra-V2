@@ -2,22 +2,43 @@
 Supabase Storage Adapter
 
 Stores files in Supabase Storage buckets.
+Uses urllib (stdlib) for HTTP calls via asyncio.to_thread to avoid
+httpx async/sync transport detection issues.
 """
+import asyncio
+import json as json_mod
+import logging
 import uuid
-import httpx
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
 from .base import StorageAdapter, StorageFile
 
+logger = logging.getLogger(__name__)
+
+
+def _urllib_request(
+    url: str,
+    *,
+    method: str = "GET",
+    headers: dict | None = None,
+    data: bytes | None = None,
+    timeout: float = 60.0,
+) -> tuple[int, bytes]:
+    """Perform an HTTP request using urllib (stdlib). Returns (status, body)."""
+    req = urllib.request.Request(url, data=data, headers=headers or {}, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read()
+
 
 class SupabaseStorageAdapter(StorageAdapter):
-    """
-    Supabase Storage adapter.
-    
-    Uses Supabase Storage API to store files in buckets.
-    """
+    """Supabase Storage adapter."""
     
     def __init__(
         self,
@@ -26,15 +47,6 @@ class SupabaseStorageAdapter(StorageAdapter):
         bucket_name: str,
         prefix: str = "",
     ):
-        """
-        Initialize Supabase storage adapter.
-        
-        Args:
-            url: Supabase project URL
-            key: Supabase service role key or anon key
-            bucket_name: Storage bucket name
-            prefix: Optional prefix for all stored files
-        """
         self.url = url.rstrip("/")
         self.key = key
         self.bucket_name = bucket_name
@@ -47,48 +59,50 @@ class SupabaseStorageAdapter(StorageAdapter):
         }
     
     def _get_full_path(self, path: str) -> str:
-        """Get full storage path from relative path."""
         if self.prefix:
             return f"{self.prefix}/{path}"
         return path
     
     def _generate_unique_filename(self, original_filename: str) -> str:
-        """Generate a unique filename while preserving extension."""
         ext = Path(original_filename).suffix
         return f"{uuid.uuid4()}{ext}"
-    
+
     async def save(
         self,
         file_content: bytes,
         filename: str,
         content_type: str,
         subdirectory: Optional[str] = None,
+        preserve_filename: bool = False,
     ) -> StorageFile:
         """Save file to Supabase Storage."""
-        # Build path
-        unique_filename = self._generate_unique_filename(filename)
-        relative_path = unique_filename
+        stored_filename = filename if preserve_filename else self._generate_unique_filename(filename)
+        relative_path = stored_filename
         if subdirectory:
-            relative_path = f"{subdirectory}/{unique_filename}"
+            relative_path = f"{subdirectory}/{stored_filename}"
         
         full_path = self._get_full_path(relative_path)
-        
-        # Upload to Supabase Storage
         upload_url = f"{self.storage_url}/object/{self.bucket_name}/{full_path}"
         
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                upload_url,
-                headers={
-                    **self._headers,
-                    "Content-Type": content_type,
-                    "x-upsert": "true",  # Overwrite if exists
-                },
-                content=file_content,
+        headers = {
+            **self._headers,
+            "Content-Type": content_type,
+            "x-upsert": "true",
+        }
+
+        status, body = await asyncio.to_thread(
+            _urllib_request, upload_url,
+            method="POST", headers=headers, data=bytes(file_content),
+        )
+        if status >= 400:
+            logger.error(
+                "Supabase Storage upload failed: %s %s — %s",
+                status, upload_url, body.decode(errors="replace"),
             )
-            response.raise_for_status()
+            raise RuntimeError(
+                f"Supabase upload failed ({status}): {body.decode(errors='replace')[:500]}"
+            )
         
-        # Build public URL
         storage_url = f"{self.storage_url}/object/public/{self.bucket_name}/{full_path}"
         
         return StorageFile(
@@ -104,15 +118,15 @@ class SupabaseStorageAdapter(StorageAdapter):
         """Delete file from Supabase Storage."""
         full_path = self._get_full_path(path)
         delete_url = f"{self.storage_url}/object/{self.bucket_name}"
+        payload = json_mod.dumps({"prefixes": [full_path]}).encode()
+        headers = {**self._headers, "Content-Type": "application/json"}
         
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.delete(
-                    delete_url,
-                    headers=self._headers,
-                    json={"prefixes": [full_path]},
-                )
-                return response.status_code in (200, 204)
+            status, _ = await asyncio.to_thread(
+                _urllib_request, delete_url,
+                method="DELETE", headers=headers, data=payload,
+            )
+            return status in (200, 204)
         except Exception:
             return False
     
@@ -122,43 +136,35 @@ class SupabaseStorageAdapter(StorageAdapter):
         download_url = f"{self.storage_url}/object/{self.bucket_name}/{full_path}"
         
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    download_url,
-                    headers=self._headers,
-                )
-                if response.status_code == 200:
-                    return response.content
-                return None
+            status, body = await asyncio.to_thread(
+                _urllib_request, download_url,
+                method="GET", headers=self._headers,
+            )
+            return body if status == 200 else None
         except Exception:
             return None
     
     async def exists(self, path: str) -> bool:
         """Check if file exists in Supabase Storage."""
         full_path = self._get_full_path(path)
-        # Use list to check existence
         list_url = f"{self.storage_url}/object/list/{self.bucket_name}"
         
         try:
-            # Parse path to get folder and filename
             path_parts = full_path.rsplit("/", 1)
             prefix = path_parts[0] if len(path_parts) > 1 else ""
             filename = path_parts[-1]
             
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    list_url,
-                    headers=self._headers,
-                    json={
-                        "prefix": prefix,
-                        "search": filename,
-                        "limit": 1,
-                    },
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    return len(data) > 0
-                return False
+            payload = json_mod.dumps(
+                {"prefix": prefix, "search": filename, "limit": 1}
+            ).encode()
+            headers = {**self._headers, "Content-Type": "application/json"}
+            status, body = await asyncio.to_thread(
+                _urllib_request, list_url,
+                method="POST", headers=headers, data=payload,
+            )
+            if status == 200:
+                return len(json_mod.loads(body)) > 0
+            return False
         except Exception:
             return False
     
@@ -168,18 +174,18 @@ class SupabaseStorageAdapter(StorageAdapter):
         sign_url = f"{self.storage_url}/object/sign/{self.bucket_name}/{full_path}"
         
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    sign_url,
-                    headers=self._headers,
-                    json={"expiresIn": expires_in},
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    signed_url = data.get("signedURL")
-                    if signed_url:
-                        return f"{self.url}{signed_url}"
-                return None
+            payload = json_mod.dumps({"expiresIn": expires_in}).encode()
+            headers = {**self._headers, "Content-Type": "application/json"}
+            status, body = await asyncio.to_thread(
+                _urllib_request, sign_url,
+                method="POST", headers=headers, data=payload,
+            )
+            if status == 200:
+                data = json_mod.loads(body)
+                signed_url = data.get("signedURL")
+                if signed_url:
+                    return f"{self.url}{signed_url}"
+            return None
         except Exception:
             return None
     
@@ -194,42 +200,40 @@ class SupabaseStorageAdapter(StorageAdapter):
             search_prefix = f"{self.prefix}/{prefix}" if self.prefix else prefix
         
         list_url = f"{self.storage_url}/object/list/{self.bucket_name}"
-        
         files: list[StorageFile] = []
         
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    list_url,
-                    headers=self._headers,
-                    json={
-                        "prefix": search_prefix,
-                        "limit": limit,
-                    },
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    for item in data:
-                        if item.get("id"):  # It's a file, not a folder
-                            name = item.get("name", "")
-                            relative_path = name
-                            if search_prefix:
-                                relative_path = f"{search_prefix}/{name}"
-                            if self.prefix:
-                                relative_path = relative_path[len(self.prefix) + 1:]
-                            
-                            files.append(StorageFile(
-                                path=relative_path,
-                                filename=name,
-                                content_type=item.get("metadata", {}).get(
-                                    "mimetype", "application/octet-stream"
-                                ),
-                                size=item.get("metadata", {}).get("size", 0),
-                                created_at=datetime.fromisoformat(
-                                    item.get("created_at", "").replace("Z", "+00:00")
-                                ) if item.get("created_at") else None,
-                            ))
+            payload = json_mod.dumps(
+                {"prefix": search_prefix, "limit": limit}
+            ).encode()
+            headers = {**self._headers, "Content-Type": "application/json"}
+            status, body = await asyncio.to_thread(
+                _urllib_request, list_url,
+                method="POST", headers=headers, data=payload,
+            )
+            
+            if status == 200:
+                data = json_mod.loads(body)
+                for item in data:
+                    if item.get("id"):  # It's a file, not a folder
+                        name = item.get("name", "")
+                        relative_path = name
+                        if search_prefix:
+                            relative_path = f"{search_prefix}/{name}"
+                        if self.prefix:
+                            relative_path = relative_path[len(self.prefix) + 1:]
+                        
+                        files.append(StorageFile(
+                            path=relative_path,
+                            filename=name,
+                            content_type=item.get("metadata", {}).get(
+                                "mimetype", "application/octet-stream"
+                            ),
+                            size=item.get("metadata", {}).get("size", 0),
+                            created_at=datetime.fromisoformat(
+                                item.get("created_at", "").replace("Z", "+00:00")
+                            ) if item.get("created_at") else None,
+                        ))
         except Exception:
             pass
         

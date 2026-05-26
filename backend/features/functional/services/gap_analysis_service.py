@@ -20,6 +20,7 @@ from common.db.models.user_story import UserStory, UserStorySource
 from common.llm import get_llm_client
 from common.llm.base import Message
 from config import settings
+from features.functional.core.storage import get_storage_adapter
 from features.functional.db.models.gap_analysis_run import GapAnalysisRun
 from features.functional.db.models.requirement import Requirement
 from features.functional.core.llm_prompts.gap_analysis import GAP_ANALYSIS_SYSTEM
@@ -55,51 +56,26 @@ def _truncate(s: Optional[str], n: int) -> str:
 
 
 async def _write_pdf_to_storage(project_id: int, run_id: int, data: bytes) -> str:
-    base = Path(settings.STORAGE_LOCAL_PATH).resolve()
-    subdir = base / "GapAnalysis" / str(project_id)
-    subdir.mkdir(parents=True, exist_ok=True)
+    storage = get_storage_adapter()
     filename = f"{run_id}.pdf"
-    full = subdir / filename
-    async with aiofiles.open(full, "wb") as f:
-        await f.write(data)
-    return f"GapAnalysis/{project_id}/{filename}".replace("\\", "/")
+    subdirectory = f"GapAnalysis/{project_id}"
+    result = await storage.save(data, filename, "application/pdf", subdirectory=subdirectory)
+    return result.path
 
 
 async def _read_pdf_bytes(relative_path: str) -> Optional[bytes]:
-    base = Path(settings.STORAGE_LOCAL_PATH).resolve()
-    norm = relative_path.replace("\\", "/").lstrip("/")
-    full = (base / norm).resolve()
-    try:
-        if not str(full).startswith(str(base)):
-            return None
-    except ValueError:
-        return None
-    try:
-        async with aiofiles.open(full, "rb") as f:
-            return await f.read()
-    except OSError:
-        return None
+    storage = get_storage_adapter()
+    return await storage.get(relative_path)
 
 
 async def _unlink_stored_file(relative_path: Optional[str]) -> None:
     if not relative_path:
         return
-    base = Path(settings.STORAGE_LOCAL_PATH).resolve()
-    norm = relative_path.replace("\\", "/").lstrip("/")
-    full = (base / norm).resolve()
     try:
-        if not str(full).startswith(str(base)):
-            return
-    except ValueError:
-        return
-
-    def _unlink() -> None:
-        try:
-            full.unlink(missing_ok=True)
-        except OSError:
-            pass
-
-    await asyncio.to_thread(_unlink)
+        storage = get_storage_adapter()
+        await storage.delete(relative_path)
+    except Exception:
+        pass
 
 
 class GapAnalysisService:

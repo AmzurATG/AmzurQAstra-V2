@@ -479,7 +479,7 @@ class TestCaseRunner:
             b64 = getattr(summary, "screenshot", None)
             if not b64:
                 return
-            path = save_screenshot_b64(b64, run_id, test_case_id, step_num)
+            path = await save_screenshot_b64(b64, run_id, test_case_id, step_num)
             if not path:
                 return
             last["screenshot_path"] = path

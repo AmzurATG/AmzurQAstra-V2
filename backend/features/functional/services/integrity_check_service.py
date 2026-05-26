@@ -3,6 +3,7 @@ Integrity Check Service
 Orchestrates browser-use agent runs, persists results to DB, serves poll status.
 """
 import asyncio
+import sys
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -157,6 +158,22 @@ class IntegrityCheckService:
         async def flush_live(_rid: str, payload: Dict[str, Any]) -> None:
             await self._persist_live_progress(_rid, payload, username, password)
 
+        # On Windows the agent runs on a separate ProactorEventLoop in a
+        # background thread.  DB writes must be routed back to the main loop
+        # so they don't contaminate the shared connection pool.
+        live_writer = flush_live
+        if sys.platform == "win32":
+            main_loop = asyncio.get_running_loop()
+
+            async def _flush_cross_loop(_rid: str, payload: Dict[str, Any]) -> None:
+                future = asyncio.run_coroutine_threadsafe(
+                    self._persist_live_progress(_rid, payload, username, password),
+                    main_loop,
+                )
+                await asyncio.wrap_future(future)
+
+            live_writer = _flush_cross_loop
+
         reachable, reach_err = await _verify_app_url_reachable(app_url)
         if not reachable:
             result: Dict[str, Any] = {
@@ -203,7 +220,7 @@ class IntegrityCheckService:
                 username,
                 password,
                 use_google_signin,
-                live_progress_writer=flush_live,
+                live_progress_writer=live_writer,
             )
         except Exception as exc:
             logger.error(f"[IntegrityCheck] agent failed run_id={run_id}: {exc}")

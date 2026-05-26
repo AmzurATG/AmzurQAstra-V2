@@ -9,7 +9,7 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -278,15 +278,10 @@ class TestExecutionService:
 
     def _run_background_sync(self, *args: Any, **kwargs: Any) -> None:
         """Synchronous wrapper to run the background task in a new event loop on Windows."""
-        # Ensure we use ProactorEventLoop on Windows for subprocess support
-        policy = asyncio.WindowsProactorEventLoopPolicy()
-        asyncio.set_event_loop_policy(policy)
-        loop = policy.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(self._execute_background(*args, **kwargs))
-        finally:
-            loop.close()
+        asyncio.run(
+            self._execute_background(*args, **kwargs),
+            loop_factory=asyncio.ProactorEventLoop,
+        )
 
     async def _execute_background(
         self,
@@ -297,7 +292,13 @@ class TestExecutionService:
         use_google_signin: bool,
         headless: bool,
     ) -> None:
-        from common.db.database import async_session_maker
+        import sys as _sys
+        if _sys.platform == "win32":
+            from common.db.database import create_background_session_maker
+            _bg_session_maker, _bg_engine = create_background_session_maker()
+        else:
+            from common.db.database import async_session_maker as _bg_session_maker
+            _bg_engine = None
 
         run_uuid = str(uuid.uuid4())[:8]
         logs: List[Dict[str, Any]] = []
@@ -312,7 +313,8 @@ class TestExecutionService:
             logs.append(log_entry)
             self.progress_manager.add_log(run_id, log_entry)
 
-        async with async_session_maker() as db:
+        try:
+          async with _bg_session_maker() as db:
             try:
                 run = (await db.execute(
                     select(TestRun)
@@ -730,6 +732,9 @@ class TestExecutionService:
                     pass
                 self.progress_manager.clear_cancel(run_id)
                 self.progress_manager.schedule_cleanup(run_id, delay_seconds=300)
+        finally:
+            if _bg_engine is not None:
+                await _bg_engine.dispose()
 
     async def cancel_run(self, run_id: int) -> Optional[TestRun]:
         self.progress_manager.request_cancel(run_id)
@@ -854,14 +859,14 @@ class TestExecutionService:
 
     async def get_primary_screenshot_file(
         self, run_id: int, result_id: int
-    ) -> Optional[Path]:
+    ) -> Union[Path, bytes, None]:
         return await test_result_evidence.get_primary_screenshot_file(
             self.db, run_id, result_id
         )
 
     async def get_authorized_screenshot_file(
         self, run_id: int, result_id: int, filename: str
-    ) -> Optional[Path]:
+    ) -> Union[Path, bytes, None]:
         return await test_result_evidence.get_authorized_screenshot_file(
             self.db, run_id, result_id, filename
         )
