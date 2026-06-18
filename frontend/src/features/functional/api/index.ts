@@ -20,6 +20,12 @@ import type {
   AcceptGapSuggestionsResponse,
   TestRecommendationRun,
   ProjectAnalytics,
+  SuggestedStory,
+  GenerateStoriesFromBrdResponse,
+  AcceptBrdStoriesResponse,
+  BulkGenerateResponse,
+  GenerationJobStatusResponse,
+  GenerationProfile,
 } from '../types'
 
 export interface PaginatedResponse<T> {
@@ -229,6 +235,16 @@ export const testCasesApi = {
       { project_id: projectId, case_ids: ids, status }
     ),
 
+  /**
+   * Promote every draft case in the project to ready in one server-side query.
+   * Returns { promoted: number }.
+   */
+  promoteAllDraft: (projectId: number) =>
+    apiClient.patch<{ promoted: number }>(
+      `/functional/test-cases/promote-all-draft`,
+      { project_id: projectId }
+    ),
+
   generate: (requirementId: number) =>
     apiClient.post<TestCase[]>(`/functional/test-cases/generate`, {
       requirement_id: requirementId,
@@ -274,8 +290,8 @@ export const testStepsApi = {
   delete: (stepId: number) =>
     apiClient.delete(`/functional/test-steps/${stepId}`),
 
-  reorder: (data: { step_ids: number[] }) =>
-    apiClient.post(`/functional/test-steps/reorder`, data),
+  reorder: (data: { test_case_id: number; step_ids: number[] }) =>
+    apiClient.post<TestStep[]>(`/functional/test-steps/reorder`, data),
 }
 
 // Test Runs API
@@ -364,6 +380,35 @@ export const integrityCheckApi = {
       { to },
       { params: { project_id: projectId } },
     ),
+
+  /** Start UI discovery run */
+  startDiscovery: (data: {
+    project_id: number
+    app_url: string
+    actor_role?: string
+    credentials?: { username?: string; password?: string }
+    use_google_signin?: boolean
+  }) =>
+    apiClient.post<import('../types').UiDiscoveryStartResponse>(
+      `/functional/integrity-check/discover`,
+      data,
+    ),
+
+  getDiscoveryStatus: (runId: string) =>
+    apiClient.get<import('../types').UiDiscoveryStatusResponse>(
+      `/functional/integrity-check/discover/${runId}/status`,
+    ),
+
+  getLatestDiscovery: (projectId: number) =>
+    apiClient.get<import('../types').UiDiscoveryLatestResponse>(
+      `/functional/integrity-check/discover/project/${projectId}/latest`,
+    ),
+
+  getDiscoveryHistory: (projectId: string, params?: { limit?: number }) =>
+    apiClient.get<import('../types').UiDiscoveryHistoryItem[]>(
+      `/functional/integrity-check/discover/history/${projectId}`,
+      { params },
+    ),
 }
 
 // User Stories API
@@ -409,4 +454,81 @@ export const userStoriesApi = {
 
   generateTests: (projectId: number, storyId: number, data: GenerateTestsRequest = { include_steps: true }) =>
     apiClient.post<GenerateTestsResponse>(`/functional/user-stories/${projectId}/${storyId}/generate-tests`, data),
+
+  /** Start a bulk test-case generation job for multiple stories. */
+  bulkGenerateTests: (
+    projectId: number,
+    storyIds: number[],
+    profile: GenerationProfile = 'standard',
+    includeSteps = true,
+  ) =>
+    apiClient.post<BulkGenerateResponse>(
+      `/functional/user-stories/${projectId}/bulk-generate-tests`,
+      { project_id: projectId, story_ids: storyIds, profile, include_steps: includeSteps },
+    ),
+
+  /** Poll bulk generation job status. */
+  getBulkGenerationStatus: (projectId: number, jobId: number) =>
+    apiClient.get<GenerationJobStatusResponse>(
+      `/functional/user-stories/${projectId}/bulk-generate-tests/${jobId}`,
+    ),
+}
+
+// Test Run Reports API
+export const testRunReportsApi = {
+  /** Kick off background PDF report generation. Returns immediately. */
+  generate: (runId: number, force = true) =>
+    apiClient.post<{ run_id: number; status: string; message: string }>(
+      `/functional/test-runs/${runId}/report/generate`,
+      null,
+      { params: { force } },
+    ),
+
+  /** Poll generation status: not_started | generating | ready | failed | not_found */
+  getStatus: (runId: number) =>
+    apiClient.get<{ run_id: number; status: string; error: string | null }>(
+      `/functional/test-runs/${runId}/report/status`
+    ),
+
+  /** Trigger a browser file download of the generated PDF. */
+  download: (runId: number) =>
+    apiClient.get<Blob>(`/functional/test-runs/${runId}/report/download`, {
+      responseType: 'blob',
+    }),
+
+  /** Email the PDF report to an address. */
+  email: (runId: number, to: string) =>
+    apiClient.post<{ detail: string }>(`/functional/test-runs/${runId}/report/email`, { to }),
+}
+
+// BRD Story Generation API
+export const brdStoriesApi = {
+  /** Run two-pass LLM pipeline: BRD → modules → user stories (preview only). */
+  generateStories: (
+    projectId: number,
+    requirementId: number,
+    maxStories = 20,
+    includeUiContext = true,
+  ) =>
+    apiClient.post<GenerateStoriesFromBrdResponse>(
+      `/functional/requirements/generate-stories`,
+      {
+        project_id: projectId,
+        requirement_id: requirementId,
+        max_stories: maxStories,
+        include_ui_context: includeUiContext,
+      },
+    ),
+
+  /** Persist accepted stories (send full stories array + optional indices). */
+  acceptStories: (
+    projectId: number,
+    requirementId: number,
+    stories: SuggestedStory[],
+    indices?: number[],
+  ) =>
+    apiClient.post<AcceptBrdStoriesResponse>(
+      `/functional/requirements/accept-stories`,
+      { project_id: projectId, requirement_id: requirementId, stories, indices: indices ?? null },
+    ),
 }

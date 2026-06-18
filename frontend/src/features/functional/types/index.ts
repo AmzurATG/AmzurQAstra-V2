@@ -159,6 +159,7 @@ export interface UserStoryBrief {
 }
 
 export type TestCaseSource = 'manual' | 'ai' | 'csv'
+export type TestCaseScenarioType = 'positive' | 'negative' | 'boundary' | 'edge'
 
 export interface TestCase {
   id: number
@@ -419,6 +420,9 @@ export interface TestRunCreateRequest {
   use_google_signin?: boolean
   browser?: string
   headless?: boolean
+  // "sequential" = original isolated one-by-one (default)
+  // "grouped_parallel" = AI groups cases into parallel browser lanes
+  execution_strategy?: 'sequential' | 'grouped_parallel'
 }
 
 // Test Result Types
@@ -443,6 +447,7 @@ export interface TestStepResult {
   actual_result?: string
   description?: string
   adaptation?: string | null
+  screenshot_path?: string | null
 }
 
 export interface AgentLogEntry {
@@ -492,6 +497,22 @@ export interface CompletedCaseResult {
   has_adaptations?: boolean | null
 }
 
+export interface ExecutionPlanGroup {
+  group_id: string
+  label: string
+  session_type: 'shared' | 'isolated'
+  browser_lane: number
+  reset_url: string
+  ordered_cases: { tc_id: number; order: number; reset_before?: string; reason: string }[]
+}
+
+export interface ExecutionPlan {
+  strategy: string
+  parallelism: number
+  total_cases: number
+  groups: ExecutionPlanGroup[]
+}
+
 export interface LiveProgressResponse {
   run_id: number
   run_number?: number | null
@@ -504,6 +525,8 @@ export interface LiveProgressResponse {
   completed_results: CompletedCaseResult[]
   logs: LogEntry[]
   error?: string
+  // Grouped-parallel extras (present only when strategy=grouped_parallel)
+  execution_plan?: ExecutionPlan | null
 }
 
 // Integrity Check Types
@@ -636,7 +659,7 @@ export interface IntegrityCheckPreview {
 
 export type UserStoryStatus = 'open' | 'in_progress' | 'done' | 'blocked' | 'closed'
 export type UserStoryPriority = 'low' | 'medium' | 'high' | 'critical'
-export type UserStorySource = 'jira' | 'redmine' | 'azure_devops' | 'manual'
+export type UserStorySource = 'jira' | 'redmine' | 'azure_devops' | 'manual' | 'brd_generated'
 export type UserStoryItemType = 'epic' | 'story' | 'bug' | 'task' | 'subtask' | 'feature' | 'requirement'
 
 export interface UserStory {
@@ -756,4 +779,145 @@ export interface GenerateTestsResponse {
   error: string | null
   /** e.g. already_exists when duplicate generation was blocked */
   code?: string | null
+}
+
+// =============================================================================
+// BRD Story Generation Types
+// =============================================================================
+
+export interface SuggestedStory {
+  title: string
+  description: string
+  acceptance_criteria: string
+  priority: string
+  module: string
+  rationale: string
+  discovery_source?: string
+}
+
+export interface GenerateStoriesFromBrdResponse {
+  requirement_id: number
+  modules_identified: number
+  stories: SuggestedStory[]
+  total_stories: number
+}
+
+export interface AcceptBrdStoriesResponse {
+  created: number
+  story_ids: number[]
+  errors: string[]
+}
+
+// =============================================================================
+// UI Discovery Types
+// =============================================================================
+
+export interface UiElement {
+  type: string
+  label: string
+  placeholder?: string | null
+  name?: string | null
+}
+
+export interface UiPage {
+  name: string
+  url: string
+  elements: UiElement[]
+  tabs: string[]
+  actions: string[]
+  screenshot_path?: string | null
+}
+
+export interface UiInventory {
+  platform: string
+  actor_role: string
+  app_url: string
+  discovered_at: string
+  pages: UiPage[]
+  navigation: string[]
+  modules_inferred: string[]
+}
+
+export interface UiDiscoveryStartResponse {
+  run_id: string
+  status: string
+}
+
+export interface UiDiscoveryStatusResponse {
+  run_id: string
+  status: string
+  percentage: number
+  current_step?: string | null
+  platform: string
+  actor_role: string
+  app_url: string
+  inventory?: UiInventory | null
+  screenshots: string[]
+  summary?: string | null
+  error_message?: string | null
+  duration_ms?: number | null
+  pages_discovered: number
+  started_at?: string | null
+  completed_at?: string | null
+}
+
+export interface UiDiscoveryLatestResponse {
+  found: boolean
+  run_id?: string | null
+  inventory?: UiInventory | null
+  discovered_at?: string | null
+  is_stale: boolean
+  days_since_discovery?: number | null
+}
+
+export interface UiDiscoveryHistoryItem {
+  id: number
+  run_id: string
+  status: string
+  platform: string
+  actor_role: string
+  app_url: string
+  pages_discovered: number
+  duration_ms?: number | null
+  created_at?: string | null
+  completed_at?: string | null
+}
+
+// =============================================================================
+// Bulk Test Generation Types
+// =============================================================================
+
+export type GenerationJobStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type GenerationProfile = 'light' | 'standard' | 'comprehensive' | 'production_web'
+
+export interface StoryCoverageItem {
+  story_id: number
+  story_title: string
+  cases_created: number
+  coverage_percent: number
+  has_gaps: boolean
+  scenario_counts: Record<string, number>
+  error?: string
+}
+
+export interface BulkGenerateResponse {
+  job_id: number
+  status: GenerationJobStatus
+  total_stories: number
+  message: string
+}
+
+export interface GenerationJobStatusResponse {
+  job_id: number
+  project_id: number
+  status: GenerationJobStatus
+  profile: GenerationProfile
+  total_stories: number
+  completed_stories: number
+  current_story_title: string | null
+  progress_percent: number
+  coverage_report: StoryCoverageItem[] | null
+  error_message: string | null
+  created_at: string
+  updated_at: string
 }

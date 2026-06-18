@@ -71,17 +71,16 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
 
   const pct = progress.percentage ?? 0
   const passedCount = progress.completed_results.filter(r => r.status === 'passed').length
-  const failedCount = progress.completed_results.filter(r => r.status !== 'passed').length
+  const failedCount = progress.completed_results.filter(r => r.status !== 'passed' && r.status !== 'skipped').length
+
+  const statusLabel = isDone
+    ? `Run complete — ${passedCount} passed, ${failedCount} failed`
+    : `Running: ${progress.current_test_case_title || 'Starting…'} (${progress.current_test_case_index + 1}/${progress.total_test_cases})`
 
   return (
     <Card className="border-primary-100 bg-primary-50/30">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-medium text-gray-700">
-          {isDone
-            ? `Run complete — ${passedCount} passed, ${failedCount} failed`
-            : `Running: ${progress.current_test_case_title || 'Starting…'} (${progress.current_test_case_index + 1}/${progress.total_test_cases})`
-          }
-        </span>
+        <span className="text-sm font-medium text-gray-700">{statusLabel}</span>
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-primary-600">{pct}%</span>
           {isRunning && (
@@ -98,7 +97,13 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
       </div>
       <div className="w-full bg-gray-200 rounded-full h-2.5">
         <div
-          className={`h-2.5 rounded-full transition-all duration-500 ${isDone && failedCount > 0 ? 'bg-red-500' : isDone ? 'bg-green-500' : 'bg-primary-500'}`}
+          className={`h-2.5 rounded-full transition-all duration-500 ${
+            isDone && failedCount > 0
+              ? 'bg-red-500'
+              : isDone
+              ? 'bg-green-500'
+              : 'bg-primary-500'
+          }`}
           style={{ width: `${pct}%` }}
         />
       </div>

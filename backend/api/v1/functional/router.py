@@ -8,12 +8,16 @@ from api.v1.functional.test_cases import router as test_cases_router
 from api.v1.functional.test_steps import router as test_steps_router
 from api.v1.functional.test_runs import router as test_runs_router
 from api.v1.functional.integrity_check import router as integrity_check_router
+from api.v1.functional.ui_discovery import router as ui_discovery_router
 from api.v1.functional.integrations import router as integrations_router
 from api.v1.functional.user_stories import router as user_stories_router
 from api.v1.functional.dashboard import router as dashboard_router
 from api.v1.functional.gap_analysis import router as gap_analysis_router
 from api.v1.functional.test_recommendations import router as test_recommendations_router
 from api.v1.functional.analytics import router as analytics_router
+from api.v1.functional.brd_stories import router as brd_stories_router
+from api.v1.functional.bulk_generation import router as bulk_generation_router
+from api.v1.functional.test_run_reports import router as test_run_reports_router
 
 
 router = APIRouter()
@@ -37,6 +41,11 @@ router.include_router(
     test_runs_router,
     prefix="/test-runs",
     tags=["Functional - Test Runs"],
+)
+router.include_router(
+    ui_discovery_router,
+    prefix="/integrity-check",
+    tags=["Functional - UI Discovery"],
 )
 router.include_router(
     integrity_check_router,
@@ -72,4 +81,19 @@ router.include_router(
     analytics_router,
     prefix="/analytics",
     tags=["Functional - Analytics"],
+)
+router.include_router(
+    brd_stories_router,
+    prefix="/requirements",
+    tags=["Functional - BRD Story Generation"],
+)
+router.include_router(
+    bulk_generation_router,
+    prefix="/user-stories",
+    tags=["Functional - Bulk Test Generation"],
+)
+router.include_router(
+    test_run_reports_router,
+    prefix="/test-runs",
+    tags=["Functional - Test Run Reports"],
 )

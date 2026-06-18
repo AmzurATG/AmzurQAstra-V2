@@ -22,8 +22,8 @@ class SignupRequest(BaseModel):
     last_name: str = Field(..., min_length=1, max_length=50)
     company_name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
-    country_code: Optional[str] = Field(None, max_length=10)
-    phone_number: Optional[str] = Field(None, max_length=20)
+    country_code: Optional[str] = Field("+1", max_length=10)
+    phone_number: str = Field(..., min_length=1, max_length=20)
     password: str = Field(..., min_length=8, max_length=64)
     confirm_password: str = Field(..., min_length=8, max_length=64)
     security_questions: List[SecurityQuestionInput] = Field(..., min_length=2, max_length=2)
@@ -57,6 +57,23 @@ class SignupRequest(BaseModel):
         if errors:
             raise ValueError(f"Password must contain: {', '.join(errors)}")
         return v
+
+    @validator("phone_number")
+    def validate_phone_number(cls, v, values):
+        if not v or not str(v).strip():
+            raise ValueError("Phone number is required")
+
+        v_clean = "".join(filter(str.isdigit, str(v)))
+        country_code = values.get("country_code") or ""
+        cc_digits = "".join(filter(str.isdigit, country_code))
+
+        if cc_digits and v_clean.startswith(cc_digits):
+            v_clean = v_clean[len(cc_digits) :]
+
+        if not (7 <= len(v_clean) <= 15):
+            raise ValueError("Phone number must be between 7 and 15 digits")
+
+        return v_clean
 
     @validator("confirm_password")
     def passwords_match(cls, v, values):

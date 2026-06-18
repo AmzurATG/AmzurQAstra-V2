@@ -2,14 +2,14 @@ import { Fragment, useEffect, useState, type FormEvent } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
 import { EnvelopeIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { Button } from '@common/components/ui/Button'
-import { gapAnalysisApi, testRecommendationsApi, integrityCheckApi } from '../api'
+import { gapAnalysisApi, testRecommendationsApi, integrityCheckApi, testRunReportsApi } from '../api'
 import toast from 'react-hot-toast'
 import {
   REPORT_EMAIL_FAILED_MESSAGE,
   REPORT_EMAIL_SUCCESS_MESSAGE,
 } from '@common/constants/toastMessages'
 
-export type ReportEmailKind = 'gap' | 'testRec' | 'bic'
+export type ReportEmailKind = 'gap' | 'testRec' | 'bic' | 'testRun'
 
 function formatDetail(err: unknown): string {
   const e = err as { response?: { data?: { detail?: unknown } } }
@@ -66,8 +66,10 @@ export default function EmailReportDialog({
         await gapAnalysisApi.emailReport(runId as number, projectId, trimmed)
       } else if (kind === 'testRec') {
         await testRecommendationsApi.emailReport(runId as number, projectId, trimmed)
-      } else {
+      } else if (kind === 'bic') {
         await integrityCheckApi.emailReport(String(runId), projectId, trimmed)
+      } else {
+        await testRunReportsApi.email(runId as number, trimmed)
       }
       toast.success(REPORT_EMAIL_SUCCESS_MESSAGE)
       onClose()

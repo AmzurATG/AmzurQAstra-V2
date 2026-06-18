@@ -126,6 +126,8 @@ class Settings(BaseSettings):
     BROWSER_USE_LLM_TEMPERATURE: float = 0.15
     GEMINI_API_KEY: Optional[str] = None  # only when BROWSER_USE_LLM_BACKEND=google
     BROWSER_USE_DEFAULT_EXTENSIONS: bool = True
+    # False = visible Chrome window (default for integrity check / UI discovery).
+    BROWSER_USE_HEADLESS: bool = False
     # Comma-separated extra Chrome flags appended after defaults (see chrome_automation_args).
     BROWSER_CHROME_EXTRA_ARGS: Optional[str] = None
     # Outside backend/ to prevent uvicorn --reload restarts when screenshots are written.

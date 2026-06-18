@@ -7,7 +7,6 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +24,7 @@ from features.functional.schemas.integrity_check import (
     RunStatusResponse,
 )
 from features.functional.utils.credentials_redaction import redact_known_credentials
+from features.functional.utils.app_reachability import verify_app_url_reachable
 from features.functional.services.integrity_check_pdf import build_integrity_check_pdf
 
 
@@ -37,36 +37,6 @@ def _redact_ic_text(
         return ""
     out = redact_known_credentials(text, username=username, password=password)
     return out if out is not None else ""
-
-
-async def _verify_app_url_reachable(url: str) -> tuple[bool, Optional[str]]:
-    """
-    Lightweight HTTP reachability before starting the browser agent.
-    Catches common 'app is down' cases (connection refused, timeouts) that the LLM might mis-label as PASS.
-    """
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(20.0, connect=12.0),
-            follow_redirects=True,
-        ) as client:
-            r = await client.get(
-                url,
-                headers={"User-Agent": "QAstra-IntegrityCheck/1.0"},
-            )
-        if r.status_code >= 500:
-            return False, f"Server returned HTTP {r.status_code} — the application may be down or misconfigured."
-        return True, None
-    except httpx.ConnectError as e:
-        return (
-            False,
-            f"Could not connect to the application ({e!s}). Check that the URL is correct and the server is running.",
-        )
-    except httpx.UnsupportedProtocol:
-        return False, "Invalid URL (unsupported protocol)."
-    except httpx.TimeoutException:
-        return False, "Request timed out — the application did not respond in time."
-    except httpx.HTTPError as e:
-        return False, f"Could not reach the application: {e!s}"
 
 
 class IntegrityCheckService:
@@ -157,7 +127,7 @@ class IntegrityCheckService:
         async def flush_live(_rid: str, payload: Dict[str, Any]) -> None:
             await self._persist_live_progress(_rid, payload, username, password)
 
-        reachable, reach_err = await _verify_app_url_reachable(app_url)
+        reachable, reach_err = await verify_app_url_reachable(app_url)
         if not reachable:
             result: Dict[str, Any] = {
                 "status": "completed",

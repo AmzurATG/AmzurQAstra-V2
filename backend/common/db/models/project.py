@@ -34,6 +34,13 @@ class Project(BaseModel):
     # Integration settings
     jira_project_key = Column(String(50), nullable=True)
     azure_devops_project = Column(String(255), nullable=True)
+
+    # Latest completed UI discovery run for fast generation context lookup
+    latest_ui_discovery_run_id = Column(
+        Integer,
+        ForeignKey("ui_discovery_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     
     def __repr__(self):
         return f"<Project(id={self.id}, name='{self.name}')>"

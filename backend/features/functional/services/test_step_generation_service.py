@@ -11,6 +11,11 @@ from common.llm import get_llm_client
 from features.functional.db.models.test_step import TestStep, TestStepAction
 from features.functional.services.test_case_service import TestCaseService
 from features.functional.core.llm_prompts.test_step_generation import TEST_STEP_GENERATION_PROMPT
+from features.functional.services.ui_context_loader import (
+    format_inventory_for_prompt,
+    get_latest_inventory,
+    match_page_for_test_case,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +62,30 @@ class TestStepGenerationService:
             return {"success": False, "error": "Test case not found"}
         
         try:
-            # Prepare context
+            inventory = await get_latest_inventory(self.db, test_case.project_id)
+            ui_block = ""
+            if inventory:
+                page = match_page_for_test_case(
+                    inventory,
+                    test_case.title or "",
+                    test_case.description or "",
+                )
+                if page:
+                    from features.functional.services.ui_context_loader import _format_page
+                    ui_block = (
+                        f"\n\n=== RELEVANT UI PAGE ===\n{_format_page(page)}\n"
+                        f"\n=== FULL UI INVENTORY (truncated) ===\n"
+                        f"{format_inventory_for_prompt(inventory, max_pages=10)}"
+                    )
+                else:
+                    ui_block = f"\n\n=== UI INVENTORY ===\n{format_inventory_for_prompt(inventory, max_pages=15)}"
+
             context = f"""
 Test Case: {test_case.title}
 Description: {test_case.description or 'N/A'}
 Preconditions: {test_case.preconditions or 'N/A'}
 Category: {test_case.category.value}
+{ui_block}
 """
             
             # Call LLM

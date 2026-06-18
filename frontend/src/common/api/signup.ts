@@ -6,7 +6,7 @@ export interface SignupData {
   company_name: string
   email: string
   country_code?: string
-  phone_number?: string
+  phone_number: string
   password: string
   confirm_password: string
   security_questions: { question: string; answer: string }[]

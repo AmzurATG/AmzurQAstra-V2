@@ -1,4 +1,4 @@
-import { type ComponentType } from 'react'
+import { type ComponentType, useCallback, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowPathIcon,
@@ -6,9 +6,13 @@ import {
   CheckCircleIcon,
   ChevronRightIcon,
   ClockIcon,
+  DocumentArrowDownIcon,
+  DocumentTextIcon,
+  EnvelopeIcon,
   XCircleIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
+import toast from 'react-hot-toast'
 
 import { Button } from '@common/components/ui/Button'
 import { Card } from '@common/components/ui/Card'
@@ -16,8 +20,10 @@ import { PaginationBar } from '@common/components/ui/PaginationBar'
 import { formatDateTimeIST } from '@common/utils/dateTime'
 import { formatDisplayLabel } from '@common/utils/formatDisplayLabel'
 
+import { testRunReportsApi } from '../../api'
 import { useTestRunsList } from '../../hooks/useTestRunsList'
 import type { TestRun } from '../../types'
+import EmailReportDialog from '../../components/EmailReportDialog'
 
 type StatusCfg = {
   icon: ComponentType<{ className?: string }>
@@ -35,6 +41,9 @@ const STATUS_CFG: Record<string, StatusCfg> = {
 }
 
 const FILTER_VALUES = ['all', 'passed', 'failed', 'running', 'cancelled'] as const
+
+/** Per-run report generation state tracked in memory (keyed by run id). */
+type ReportJobState = 'idle' | 'generating' | 'ready' | 'failed'
 
 /**
  * Functional Testing → History tab.
@@ -58,6 +67,83 @@ export default function HistoryTab() {
   }
   const { runs, summary, loading, page, setPage, meta, pageSize, reload } =
     useTestRunsList(projectId, filter)
+
+  // Report generation state
+  const [reportJobs, setReportJobs] = useState<Record<number, ReportJobState>>({})
+  const [emailRunId, setEmailRunId] = useState<number | null>(null)
+  const pollTimers = useRef<Record<number, ReturnType<typeof setInterval>>>({})
+
+  const setJobState = useCallback((runId: number, state: ReportJobState) => {
+    setReportJobs((prev) => ({ ...prev, [runId]: state }))
+  }, [])
+
+  const startPolling = useCallback(
+    (runId: number) => {
+      if (pollTimers.current[runId]) return
+      pollTimers.current[runId] = setInterval(async () => {
+        try {
+          const { data } = await testRunReportsApi.getStatus(runId)
+          if (data.status === 'ready') {
+            clearInterval(pollTimers.current[runId])
+            delete pollTimers.current[runId]
+            setJobState(runId, 'ready')
+            toast.success(`Report for Run #${runId} is ready — click Download.`)
+          } else if (data.status === 'failed') {
+            clearInterval(pollTimers.current[runId])
+            delete pollTimers.current[runId]
+            setJobState(runId, 'failed')
+            toast.error(`Report generation failed: ${data.error || 'unknown error'}`)
+          }
+        } catch {
+          // network hiccup — keep polling
+        }
+      }, 3000)
+    },
+    [setJobState],
+  )
+
+  const handleGenerateReport = useCallback(
+    async (e: React.MouseEvent, runId: number) => {
+      e.stopPropagation()
+      setJobState(runId, 'generating')
+      try {
+        const { data } = await testRunReportsApi.generate(runId)
+        if (data.status === 'ready') {
+          setJobState(runId, 'ready')
+          toast.success('Report is already generated — click Download.')
+        } else if (data.status === 'generating') {
+          startPolling(runId)
+        } else {
+          setJobState(runId, 'failed')
+          toast.error(data.message || 'Failed to start report generation.')
+        }
+      } catch {
+        setJobState(runId, 'failed')
+        toast.error('Failed to start report generation.')
+      }
+    },
+    [setJobState, startPolling],
+  )
+
+  const handleDownload = useCallback(async (e: React.MouseEvent, runId: number) => {
+    e.stopPropagation()
+    try {
+      const { data } = await testRunReportsApi.download(runId)
+      const url = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `QAstra_TestRun_${runId}_Report.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Download failed. Try regenerating the report.')
+    }
+  }, [])
+
+  const handleEmailClick = useCallback((e: React.MouseEvent, runId: number) => {
+    e.stopPropagation()
+    setEmailRunId(runId)
+  }, [])
 
   const base = `/projects/${projectId}/functional-testing`
 
@@ -168,6 +254,7 @@ export default function HistoryTab() {
                     <th className="px-6 py-3">Run Name</th>
                     <th className="px-6 py-3 text-center">Results</th>
                     <th className="px-6 py-3">Started</th>
+                    <th className="px-6 py-3 text-center">Report</th>
                     <th className="px-6 py-3"></th>
                   </tr>
                 </thead>
@@ -176,6 +263,9 @@ export default function HistoryTab() {
                     const cfg = STATUS_CFG[run.status] || STATUS_CFG.pending
                     const Icon = cfg.icon
                     const rowNum = (page - 1) * pageSize + index + 1
+                    const isDone = ['passed', 'failed', 'error', 'cancelled'].includes(run.status)
+                    const jobState: ReportJobState = reportJobs[run.id] ?? 'idle'
+
                     return (
                       <tr
                         key={run.id}
@@ -230,6 +320,55 @@ export default function HistoryTab() {
                         <td className="px-6 py-4 text-xs text-gray-500">
                           {run.started_at ? formatDateTimeIST(run.started_at) : '-'}
                         </td>
+
+                        {/* Report actions column */}
+                        <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                          {!isDone ? (
+                            <span className="text-xs text-gray-400">Run in progress</span>
+                          ) : jobState === 'idle' ? (
+                            <button
+                              type="button"
+                              onClick={(e) => handleGenerateReport(e, run.id)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
+                            >
+                              <DocumentTextIcon className="w-3.5 h-3.5" />
+                              Generate Report
+                            </button>
+                          ) : jobState === 'generating' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-blue-600 font-medium">
+                              <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" />
+                              Generating…
+                            </span>
+                          ) : jobState === 'ready' ? (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={(e) => handleDownload(e, run.id)}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
+                              >
+                                <DocumentArrowDownIcon className="w-3.5 h-3.5" />
+                                Download
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => handleEmailClick(e, run.id)}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors"
+                              >
+                                <EnvelopeIcon className="w-3.5 h-3.5" />
+                                Email
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => handleGenerateReport(e, run.id)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                            >
+                              Retry Report
+                            </button>
+                          )}
+                        </td>
+
                         <td className="px-6 py-4 text-right">
                           <ChevronRightIcon className="w-4 h-4 text-gray-300 group-hover:text-primary-500 transition-colors" />
                         </td>
@@ -249,6 +388,15 @@ export default function HistoryTab() {
           </>
         )}
       </Card>
+
+      <EmailReportDialog
+        isOpen={emailRunId !== null}
+        onClose={() => setEmailRunId(null)}
+        projectId={projectId ?? ''}
+        runId={emailRunId}
+        kind="testRun"
+        reportLabel="Test Run Report"
+      />
     </div>
   )
 }

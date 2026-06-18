@@ -20,6 +20,27 @@ from features.functional.services.test_case_service import TestCaseService
 router = APIRouter()
 
 
+@router.post("/reorder", response_model=List[TestStepResponse])
+async def reorder_test_steps(
+    reorder_data: TestStepReorder,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reorder test steps."""
+    service = TestCaseService(db)
+    try:
+        steps = await service.reorder_steps(
+            test_case_id=reorder_data.test_case_id,
+            step_ids=reorder_data.step_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return steps
+
+
 @router.get("/{test_case_id}", response_model=List[TestStepResponse])
 async def list_test_steps(
     test_case_id: int,
@@ -40,7 +61,13 @@ async def create_test_step(
 ):
     """Create a new test step."""
     service = TestCaseService(db)
-    step = await service.add_step(step_data)
+    try:
+        step = await service.add_step(step_data)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     return step
 
 
@@ -53,14 +80,20 @@ async def update_test_step(
 ):
     """Update a test step."""
     service = TestCaseService(db)
-    step = await service.update_step(step_id, step_data)
-    
+    try:
+        step = await service.update_step(step_id, step_data)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
     if not step:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Test step not found",
         )
-    
+
     return step
 
 
@@ -79,18 +112,3 @@ async def delete_test_step(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Test step not found",
         )
-
-
-@router.post("/reorder", response_model=List[TestStepResponse])
-async def reorder_test_steps(
-    reorder_data: TestStepReorder,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Reorder test steps."""
-    service = TestCaseService(db)
-    steps = await service.reorder_steps(
-        test_case_id=reorder_data.test_case_id,
-        step_ids=reorder_data.step_ids,
-    )
-    return steps

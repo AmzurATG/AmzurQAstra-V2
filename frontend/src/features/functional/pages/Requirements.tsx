@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Card } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
 import { Loader } from '@common/components/ui/Loader'
@@ -12,15 +12,19 @@ import {
   EyeIcon,
   ArrowDownTrayIcon,
   LightBulbIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline'
-import { requirementsApi, gapAnalysisApi, userStoriesApi, testRecommendationsApi } from '../api'
+import { requirementsApi, gapAnalysisApi, userStoriesApi, testRecommendationsApi, integrityCheckApi } from '../api'
 import {
   UploadDocumentModal,
   RequirementPreviewModal,
   GapAnalysisRunModal,
   TestRecommendationRunModal,
 } from '../components'
-import type { Requirement, GapAnalysisRun, TestRecommendationRun } from '../types'
+import { BrdStoryPreviewModal } from '../components/BrdStoryPreviewModal'
+import BrdGenerateOptionsModal from '../components/BrdGenerateOptionsModal'
+import { useBrdStoryGeneration } from '../hooks/useBrdStoryGeneration'
+import type { Requirement, GapAnalysisRun, TestRecommendationRun, UiDiscoveryLatestResponse } from '../types'
 import {
   analysisRunStatusConfig,
   GAP_ANALYSIS_LABEL,
@@ -42,6 +46,7 @@ function formatApiError(err: unknown): string {
 
 export default function Requirements() {
   const { projectId } = useParams<{ projectId: string }>()
+  const navigate = useNavigate()
 
   const [requirements, setRequirements] = useState<Requirement[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -136,6 +141,14 @@ export default function Requirements() {
   useEffect(() => {
     fetchTestRecRuns()
   }, [fetchTestRecRuns])
+
+  useEffect(() => {
+    if (!projectId) return
+    integrityCheckApi
+      .getLatestDiscovery(Number(projectId))
+      .then((res) => setUiDiscoveryLatest(res.data))
+      .catch(() => setUiDiscoveryLatest(null))
+  }, [projectId])
 
   const handleGapAnalysis = async (requirement: Requirement) => {
     if (!projectId) return
@@ -296,7 +309,51 @@ export default function Requirements() {
     })
   }
 
-  const rowActionBusy = gapAnalyzingId !== null || deletingId !== null || testRecRunningId !== null
+  // BRD Story generation state
+  const [brdGeneratingId, setBrdGeneratingId] = useState<string | null>(null)
+  const [brdPreviewReq, setBrdPreviewReq] = useState<Requirement | null>(null)
+  const [brdOptionsReq, setBrdOptionsReq] = useState<Requirement | null>(null)
+  const [uiDiscoveryLatest, setUiDiscoveryLatest] = useState<UiDiscoveryLatestResponse | null>(null)
+  const {
+    phase: brdPhase,
+    stories: brdStories,
+    modulesIdentified,
+    isAccepting: brdAccepting,
+    generateStories,
+    acceptStories,
+    reset: resetBrd,
+  } = useBrdStoryGeneration({
+    onAccepted: async (storyIds) => {
+      setBrdPreviewReq(null)
+      setBrdGeneratingId(null)
+      const bulkProfile = uiDiscoveryLatest?.found ? 'production_web' : 'comprehensive'
+      navigate(`/projects/${projectId}/user-stories`, {
+        state: { openBulkGen: true, storyIds, profile: bulkProfile },
+      })
+    },
+  })
+
+  const handleGenerateStoriesFromBrd = (req: Requirement) => {
+    if (!projectId) return
+    setBrdOptionsReq(req)
+  }
+
+  const handleConfirmBrdGenerate = async (maxStories: number, includeUiContext: boolean) => {
+    if (!projectId || !brdOptionsReq) return
+    const req = brdOptionsReq
+    setBrdGeneratingId(req.id)
+    setBrdPreviewReq(req)
+    setBrdOptionsReq(null)
+    await generateStories(Number(projectId), Number(req.id), maxStories, includeUiContext)
+    setBrdGeneratingId(null)
+  }
+
+  const handleCloseBrdPreview = () => {
+    setBrdPreviewReq(null)
+    resetBrd()
+  }
+
+  const rowActionBusy = gapAnalyzingId !== null || deletingId !== null || testRecRunningId !== null || brdGeneratingId !== null
 
   const requirementHasParsedContent = (req: Requirement) =>
     !!(req.content && req.content.trim().length > 0)
@@ -336,6 +393,27 @@ export default function Requirements() {
           Upload Document
         </Button>
       </div>
+
+      {!uiDiscoveryLatest?.found && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          No UI discovery inventory for this project. Run{' '}
+          <Link to={`/projects/${projectId}/integrity-check`} className="font-medium underline">
+            UI Discovery
+          </Link>{' '}
+          on the Integrity Check page before generating UI-grounded stories and test cases.
+        </div>
+      )}
+
+      {uiDiscoveryLatest?.found && uiDiscoveryLatest.is_stale && (
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-900">
+          UI discovery is {uiDiscoveryLatest.days_since_discovery ?? '7+'} days old. Consider re-running
+          discovery on{' '}
+          <Link to={`/projects/${projectId}/integrity-check`} className="font-medium underline">
+            Integrity Check
+          </Link>{' '}
+          for up-to-date labels.
+        </div>
+      )}
 
       {/* Loading State */}
       {isLoading && (
@@ -435,6 +513,22 @@ export default function Requirements() {
                       >
                         <EyeIcon className="w-4 h-4 mr-1" />
                         Preview
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleGenerateStoriesFromBrd(req)}
+                        isLoading={brdGeneratingId === req.id}
+                        disabled={rowActionBusy || !requirementHasParsedContent(req)}
+                        title={
+                          !requirementHasParsedContent(req)
+                            ? 'Upload and process a document first'
+                            : 'Generate AI user stories from this BRD'
+                        }
+                        className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                      >
+                        <SparklesIcon className="w-4 h-4 mr-1" />
+                        Generate Stories
                       </Button>
                       <Button
                         variant="ghost"
@@ -771,6 +865,26 @@ export default function Requirements() {
         projectId={projectId || ''}
         runId={testRecModal?.runId ?? null}
         initialTab={testRecModal?.tab ?? 'summary'}
+      />
+
+      <BrdGenerateOptionsModal
+        isOpen={brdOptionsReq !== null}
+        onClose={() => setBrdOptionsReq(null)}
+        hasUiDiscovery={!!uiDiscoveryLatest?.found}
+        uiDiscoveryStale={!!uiDiscoveryLatest?.is_stale}
+        isLoading={brdGeneratingId !== null}
+        onConfirm={handleConfirmBrdGenerate}
+      />
+
+      <BrdStoryPreviewModal
+        isOpen={brdPreviewReq !== null && brdPhase === 'preview'}
+        onClose={handleCloseBrdPreview}
+        stories={brdStories}
+        modulesIdentified={modulesIdentified}
+        isAccepting={brdAccepting}
+        onAccept={(indices) =>
+          acceptStories(Number(projectId), Number(brdPreviewReq?.id), indices)
+        }
       />
     </div>
   )

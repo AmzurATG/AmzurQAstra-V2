@@ -13,7 +13,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from config import settings
 from common.utils.logger import logger
-from features.functional.core.browser.chrome_automation_args import default_browser_chrome_args
+from features.functional.core.browser.browser_profile_factory import make_browser_profile
 from features.functional.utils.credentials_redaction import redact_known_credentials
 
 # ─── Task prompt ─────────────────────────────────────────────────────────────
@@ -501,7 +501,7 @@ class BrowserAgentService:
     ) -> Dict[str, Any]:
         """Core agent run (must execute on a loop that supports subprocess — e.g. Proactor on Windows)."""
         # Import here to keep startup fast and avoid errors if not yet installed
-        from browser_use import Agent, BrowserProfile
+        from browser_use import Agent
 
         start = datetime.utcnow()
         screenshots: List[str] = []
@@ -623,13 +623,7 @@ class BrowserAgentService:
             agent = Agent(
                 task=self._build_task(app_url, username, password, use_google_signin),
                 llm=self._llm(),
-                browser_profile=BrowserProfile(
-                    headless=False,
-                    is_local=True,
-                    disable_security=True,
-                    args=default_browser_chrome_args(),
-                    enable_default_extensions=settings.BROWSER_USE_DEFAULT_EXTENSIONS,
-                ),
+                browser_profile=make_browser_profile(),
                 sensitive_data=sensitive_data,
                 register_new_step_callback=_on_step,
                 use_vision=True,

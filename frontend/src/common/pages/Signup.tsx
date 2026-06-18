@@ -4,6 +4,7 @@ import { Button } from '@common/components/ui/Button'
 import { Input } from '@common/components/ui/Input'
 import { signupApi } from '@common/api/signup'
 import { validatePassword } from '@common/utils/passwordValidation'
+import { normalizePhoneDigits, validatePhoneNumber } from '@common/utils/phoneValidation'
 import toast from 'react-hot-toast'
 
 const FREE_EMAIL_PROVIDERS = [
@@ -74,6 +75,10 @@ export default function Signup() {
     else if (formData.companyName.length < 2) newErrors.companyName = 'Company name must be at least 2 characters'
     else if (formData.companyName.length > 100) newErrors.companyName = 'Company name must not exceed 100 characters'
     newErrors.email = validateEmail(formData.email)
+    newErrors.phoneNumber = validatePhoneNumber(
+      formData.phoneNumber,
+      formData.countryCode
+    )
     newErrors.password = validatePassword(formData.password)
     if (!formData.confirmPassword) newErrors.confirmPassword = 'Please confirm your password'
     else if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = 'Passwords do not match'
@@ -115,8 +120,11 @@ export default function Signup() {
             last_name: formData.lastName,
             company_name: formData.companyName,
             email: formData.email,
-            country_code: formData.countryCode || undefined,
-            phone_number: formData.phoneNumber || undefined,
+            country_code: formData.countryCode || '+1',
+            phone_number: normalizePhoneDigits(
+              formData.phoneNumber,
+              formData.countryCode
+            ),
             password: formData.password,
             confirm_password: formData.confirmPassword,
           },
@@ -214,11 +222,12 @@ export default function Signup() {
                 <Input
                   id="phoneNumber"
                   name="phoneNumber"
-                  label="Phone (optional)"
+                  label="Phone"
                   value={formData.phoneNumber}
                   onChange={handleChange}
                   placeholder="5551234567"
                   error={errors.phoneNumber}
+                  required
                 />
               </div>
             </div>

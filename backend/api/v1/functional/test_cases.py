@@ -34,6 +34,10 @@ class BulkStatusRequest(BaseModel):
     status: TestCaseStatus
 
 
+class PromoteAllDraftRequest(BaseModel):
+    project_id: int
+
+
 @router.get("/", response_model=PaginatedResponse[TestCaseResponse])
 async def list_test_cases(
     project_id: int,
@@ -120,6 +124,36 @@ async def import_test_cases_csv(
             project_id, filename, len(result.errors),
         )
     return result
+
+
+@router.patch("/promote-all-draft", response_model=dict)
+async def promote_all_draft_to_ready(
+    body: PromoteAllDraftRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Promote every draft test case in a project to ready in a single query."""
+    from features.functional.services.analytics.access import assert_project_access
+    from sqlalchemy import update as sa_update
+    from features.functional.db.models.test_case import TestCase as TestCaseModel
+
+    await assert_project_access(db, current_user, body.project_id)
+    result = await db.execute(
+        sa_update(TestCaseModel)
+        .where(
+            TestCaseModel.project_id == body.project_id,
+            TestCaseModel.status == TestCaseStatus.draft,
+        )
+        .values(status=TestCaseStatus.ready)
+        .execution_options(synchronize_session="fetch")
+    )
+    await db.commit()
+    promoted = result.rowcount  # type: ignore[attr-defined]
+    logger.info(
+        "[promote_all_draft] project_id=%s user_id=%s promoted=%d",
+        body.project_id, current_user.id, promoted,
+    )
+    return {"promoted": promoted}
 
 
 @router.patch("/bulk-status", response_model=dict)

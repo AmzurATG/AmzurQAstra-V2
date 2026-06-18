@@ -6,7 +6,7 @@ import {
   useRef,
   useMemo,
 } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useLocation } from 'react-router-dom'
 import { Card, CardTitle } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
 import { PaginationBar } from '@common/components/ui/PaginationBar'
@@ -22,6 +22,7 @@ import { SyncFromIntegrationModal } from '../components'
 import { UserStoryCreateModal } from '../components/userStories/UserStoryCreateModal'
 import { UserStoryListRow } from '../components/userStories/UserStoryListRow'
 import { TestGenerationInfoDialog } from '../components/userStories/TestGenerationInfoDialog'
+import { BulkGenerationModal } from '../components/BulkGenerationModal'
 import { useUserStoryTestGeneration } from '../hooks/useUserStoryTestGeneration'
 import { usePmQuickSync } from '../hooks/usePmQuickSync'
 import { userStoriesApi } from '../api'
@@ -74,6 +75,7 @@ function loadSelectAllSnapshot(projectId: string | undefined): number[] | null {
 
 export default function UserStories() {
   const { projectId } = useParams<{ projectId: string }>()
+  const location = useLocation()
   const [stories, setStories] = useState<UserStory[]>([])
   const [stats, setStats] = useState<UserStoryStats>({
     total: 0,
@@ -386,26 +388,51 @@ export default function UserStories() {
       selectedIds.size > 0 && !isGlobalEligibleSelection
   }, [selectedIds, isGlobalEligibleSelection])
 
-  const [isBulkGenerating, setIsBulkGenerating] = useState(false)
-
-  const handleBulkGenerateTests = useCallback(async () => {
-    if (selectedIds.size === 0) return
-    const ids = Array.from(selectedIds)
-    setIsBulkGenerating(true)
-    try {
-      for (const id of ids) {
-        await runGenerate(id, false)
-      }
-    } finally {
-      setIsBulkGenerating(false)
-    }
-  }, [selectedIds, runGenerate])
+  const [isBulkGenerating] = useState(false)
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false)
+  const [bulkInitialProfile, setBulkInitialProfile] = useState<'light' | 'standard' | 'comprehensive' | 'production_web'>('standard')
+  /** Story IDs pinned for bulk modal (survives sessionStorage restore on navigate-from-BRD). */
+  const [bulkModalStoryIds, setBulkModalStoryIds] = useState<number[]>([])
 
   useEffect(() => {
+    const navState = location.state as {
+      openBulkGen?: boolean
+      storyIds?: number[]
+      profile?: 'light' | 'standard' | 'comprehensive' | 'production_web'
+    } | null
+
+    if (navState?.openBulkGen && navState.storyIds?.length) {
+      const ids = navState.storyIds
+      setSelectedIds(new Set(ids))
+      setBulkModalStoryIds(ids)
+      if (navState.profile) setBulkInitialProfile(navState.profile)
+      setIsBulkModalOpen(true)
+      if (projectId) {
+        try {
+          sessionStorage.setItem(userStorySelectionKey(projectId), JSON.stringify(ids))
+        } catch {
+          // ignore quota / private mode
+        }
+      }
+      window.history.replaceState({}, document.title)
+      return
+    }
+
     setSelectedIds(loadUserStorySelection(projectId))
     setSelectAllEligibleSnapshot(loadSelectAllSnapshot(projectId))
     prevFilterViewKeyRef.current = filterViewKey
-  }, [projectId])
+  }, [projectId, location.state, filterViewKey])
+
+  const handleBulkGenerateTests = useCallback(() => {
+    if (selectedIds.size === 0) return
+    setBulkModalStoryIds(Array.from(selectedIds))
+    setIsBulkModalOpen(true)
+  }, [selectedIds])
+
+  const handleCloseBulkModal = useCallback(() => {
+    setIsBulkModalOpen(false)
+    setBulkModalStoryIds([])
+  }, [])
 
   useEffect(() => {
     if (!projectId) return
@@ -821,6 +848,21 @@ export default function UserStories() {
         isOpen={infoDialogOpen}
         message={infoMessage}
         onClose={closeInfoDialog}
+      />
+
+      <BulkGenerationModal
+        isOpen={isBulkModalOpen}
+        onClose={handleCloseBulkModal}
+        projectId={Number(projectId)}
+        selectedStoryIds={
+          bulkModalStoryIds.length > 0 ? bulkModalStoryIds : Array.from(selectedIds)
+        }
+        initialProfile={bulkInitialProfile}
+        onComplete={() => {
+          loadStories()
+          loadStats()
+          setBulkModalStoryIds([])
+        }}
       />
     </div>
   )

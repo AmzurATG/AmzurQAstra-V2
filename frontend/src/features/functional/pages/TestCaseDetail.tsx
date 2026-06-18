@@ -25,6 +25,7 @@ import {
   testCaseStatusLabel,
 } from '../constants/testCaseUi'
 import toast from 'react-hot-toast'
+import { validateTestStepFields } from '../utils/validateTestStep'
 
 const ACTION_OPTIONS: TestStepAction[] = [
   'navigate', 'click', 'fill', 'type', 'select', 'check', 'uncheck',
@@ -37,12 +38,12 @@ function detailSource(tc: TestCase): 'manual' | 'ai' | 'csv' {
   return tc.is_generated ? 'ai' : 'manual'
 }
 
-/** Client-only sentinel; backend assigns real id on create. */
-function createEmptyStep(testCaseId: number): TestStep {
+/** Client-only sentinel (id=0); backend assigns real id and persists step_number on create. */
+function createEmptyStep(testCaseId: number, stepNumber: number): TestStep {
   return {
     id: 0,
     test_case_id: testCaseId,
-    step_number: 0,
+    step_number: stepNumber,
     action: 'click',
     description: '',
     target: '',
@@ -100,9 +101,19 @@ export default function TestCaseDetail() {
     setEditingStep(null)
   }
 
+  const nextStepNumber = () => (testCase?.steps?.length ?? 0) + 1
+
   const handleAddStep = () => {
     if (!testCaseId) return
-    setEditingStep(createEmptyStep(Number(testCaseId)))
+    setEditingStep(createEmptyStep(Number(testCaseId), nextStepNumber()))
+    setIsStepModalOpen(true)
+  }
+
+  const handleInsertStepAfter = (afterStep: TestStep) => {
+    if (!testCaseId) return
+    setEditingStep(
+      createEmptyStep(Number(testCaseId), afterStep.step_number + 1)
+    )
     setIsStepModalOpen(true)
   }
 
@@ -114,27 +125,34 @@ export default function TestCaseDetail() {
   const handleSaveStep = async () => {
     if (!editingStep || !testCaseId) return
 
+    const validationErrors = validateTestStepFields(editingStep)
+    if (validationErrors.length > 0) {
+      toast.error(validationErrors.join('. '))
+      return
+    }
+
     setIsSaving(true)
     try {
       if (editingStep.id === 0) {
         await testStepsApi.create({
           test_case_id: Number(testCaseId),
+          step_number: editingStep.step_number,
           action: editingStep.action,
           target: editingStep.target?.trim() || undefined,
           value: editingStep.value?.trim() || undefined,
           description: editingStep.description?.trim() || undefined,
           expected_result: editingStep.expected_result?.trim() || undefined,
         })
-        toast.success('Step added successfully')
+        toast.success(`Step ${editingStep.step_number} added`)
       } else {
         await testStepsApi.update(editingStep.id, {
           action: editingStep.action,
-          target: editingStep.target,
-          value: editingStep.value,
-          description: editingStep.description,
-          expected_result: editingStep.expected_result,
+          target: editingStep.target?.trim() || undefined,
+          value: editingStep.value?.trim() || undefined,
+          description: editingStep.description?.trim() || undefined,
+          expected_result: editingStep.expected_result?.trim() || undefined,
         })
-        toast.success('Step updated successfully')
+        toast.success(`Step ${editingStep.step_number} updated`)
       }
       closeStepModal()
       loadTestCase()
@@ -433,7 +451,9 @@ export default function TestCaseDetail() {
 
         {testCase.steps && testCase.steps.length > 0 ? (
           <div className="space-y-3">
-            {testCase.steps.map((step, index) => (
+            {[...testCase.steps]
+              .sort((a, b) => a.step_number - b.step_number)
+              .map((step, index) => (
               <div key={step.id} className="flex items-start gap-4 p-4 bg-gray-50 rounded-lg">
                 <div className="w-8 h-8 bg-primary-100 text-primary-600 rounded-full flex items-center justify-center font-bold shrink-0">
                   {step.step_number || index + 1}
@@ -459,28 +479,43 @@ export default function TestCaseDetail() {
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-1">
-                  <Button 
-                    variant="ghost" 
-                    size="sm"
-                    onClick={() => handleEditStep(step)}
-                  >
-                    <PencilIcon className="w-4 h-4 mr-1" />
-                    Edit
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="text-red-600 hover:text-red-700"
-                    onClick={() => handleDeleteStep(step.id, step.step_number || index + 1)}
-                    disabled={deletingStepId === step.id}
-                  >
-                    {deletingStepId === step.id ? (
-                      <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <TrashIcon className="w-4 h-4" />
-                    )}
-                  </Button>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      title={`Insert new step after step ${step.step_number}`}
+                      onClick={() => handleInsertStepAfter(step)}
+                    >
+                      <PlusIcon className="w-4 h-4 mr-1" />
+                      Insert below
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      onClick={() => handleEditStep(step)}
+                    >
+                      <PencilIcon className="w-4 h-4 mr-1" />
+                      Edit
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      className="text-red-600 hover:text-red-700"
+                      onClick={() => handleDeleteStep(step.id, step.step_number || index + 1)}
+                      disabled={deletingStepId === step.id}
+                    >
+                      {deletingStepId === step.id ? (
+                        <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <TrashIcon className="w-4 h-4" />
+                      )}
+                    </Button>
+                  </div>
+                  <span className="text-xs text-gray-400">ID {step.id}</span>
                 </div>
               </div>
             ))}
@@ -526,7 +561,9 @@ export default function TestCaseDetail() {
                   {/* Header */}
                   <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
                     <Dialog.Title className="text-lg font-semibold text-gray-900">
-                      {editingStep?.id === 0 ? 'Add test step' : `Edit step ${editingStep?.step_number}`}
+                      {editingStep?.id === 0
+                        ? `Add test step (position ${editingStep.step_number})`
+                        : `Edit step ${editingStep?.step_number}`}
                     </Dialog.Title>
                     <button
                       type="button"
@@ -559,7 +596,7 @@ export default function TestCaseDetail() {
                       {/* Description */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Description
+                          Description <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="text"

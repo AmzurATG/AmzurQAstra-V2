@@ -34,6 +34,7 @@ class UserStorySource(str, enum.Enum):
     redmine = "redmine"
     azure_devops = "azure_devops"
     manual = "manual"
+    brd_generated = "brd_generated"  # AI-generated from a BRD document
 
 
 class UserStoryItemType(str, enum.Enum):

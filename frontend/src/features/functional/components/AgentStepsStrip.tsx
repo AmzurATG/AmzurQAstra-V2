@@ -135,15 +135,30 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
   testResultId,
   agentLogs,
   primaryScreenshotPath,
-  // stepResults retained in props for API compatibility but not rendered in the lightbox
-  stepResults: _stepResults,
+  stepResults,
   enabled = true,
 }) => {
   const logs = agentLogs ?? []
-  const withShots = useMemo(
-    () => logs.filter((l) => l.screenshot_path),
-    [logs]
-  )
+
+  // Build screenshot source list: prefer step_results[].screenshot_path when available
+  // (they are keyed directly to each test step), fall back to agent log screenshots.
+  const stepShots: AgentLogEntry[] = useMemo(() => {
+    if (!stepResults || stepResults.length === 0) return []
+    return stepResults
+      .filter((s) => s.screenshot_path)
+      .map((s, i) => ({
+        timestamp: '',
+        agent_step: s.step_number,
+        description: `Step ${s.step_number}: ${s.description ?? ''}`.trim(),
+        adaptation: s.adaptation ?? null,
+        screenshot_path: s.screenshot_path!,
+      }))
+  }, [stepResults])
+
+  const withShots: AgentLogEntry[] = useMemo(() => {
+    if (stepShots.length > 0) return stepShots
+    return logs.filter((l) => l.screenshot_path)
+  }, [stepShots, logs])
   const [blobByKey, setBlobByKey] = useState<Record<string, string>>({})
   const [primaryBlobUrl, setPrimaryBlobUrl] = useState<string | null>(null)
   /** Index into `withShots` when viewing agent step gallery; null = closed */
@@ -340,7 +355,10 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
       {withShots.length > 0 && (
         <div className="min-w-0 max-w-full">
           <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
-            <PhotoIcon className="w-3.5 h-3.5" /> Screenshots from this run (load as you scroll)
+            <PhotoIcon className="w-3.5 h-3.5" />
+            {stepShots.length > 0
+              ? `Per-step screenshots (${stepShots.length} steps)`
+              : 'Screenshots from this run (load as you scroll)'}
           </p>
           <div className="flex items-center gap-1 min-w-0 max-w-full">
             <button
@@ -382,7 +400,11 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
                         onLoaded={onThumbLoaded}
                         onOpen={onThumbOpen}
                         registerThumb={registerThumb}
-                        captionLabel={`${index + 1} / ${withShots.length}`}
+                        captionLabel={
+                          stepShots.length > 0
+                            ? `Step ${entry.agent_step}`
+                            : `${index + 1} / ${withShots.length}`
+                        }
                       />
                     </div>
                   )

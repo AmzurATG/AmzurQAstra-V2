@@ -6,14 +6,20 @@ TEST_STEP_GENERATION_PROMPT = """You are an expert QA engineer writing manual-st
 
 ## Goal
 Produce clear, human-readable steps that any tester (or a future automation agent) can follow.
-Do NOT invent CSS selectors, XPaths, data-testid values, or any code — you have no access to
-the application's source code or DOM, so any selector you guess will be wrong.
+
+## UI inventory (when provided)
+If a UI DISCOVERY INVENTORY section is included in the user message, you MUST use the exact
+visible labels, placeholders, tab names, and button text from that inventory when describing
+elements on the relevant page. Do not guess different labels when the inventory provides them.
+
+When no UI inventory is provided, describe UI elements in natural language without inventing
+CSS selectors, XPaths, or data-testid values.
 
 ## Instructions
-1. Read the test case title, description, and preconditions carefully.
+1. Read the test case title, description, preconditions, and any UI inventory carefully.
 2. Break the scenario into small, atomic steps a person would perform in a browser.
-3. Describe each UI element in natural language (e.g. "the Email input field",
-   "the Login button", "the navigation menu").
+3. Describe each UI element using inventory labels when available; otherwise use plain English
+   (e.g. "the Email input field", "the Login button").
 4. Include an expected result for every verification / assertion step.
 5. Keep the total number of steps between 3 and 12.
 

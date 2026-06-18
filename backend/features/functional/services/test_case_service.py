@@ -35,6 +35,10 @@ from features.functional.schemas.test_case_import import (
 )
 from features.functional.schemas.test_step import TestStepCreate, TestStepUpdate
 from features.functional.services.test_case_csv_import import CaseDraft
+from features.functional.services.test_step_validation import (
+    normalize_insert_step_number,
+    validate_step_fields,
+)
 
 
 class TestCaseService:
@@ -273,21 +277,32 @@ class TestCaseService:
         return list(result.scalars().all())
     
     async def add_step(self, step_data: TestStepCreate) -> TestStep:
-        """Add a step to a test case."""
-        # Get next step number if not provided
-        if step_data.step_number is None:
-            result = await self.db.execute(
-                select(func.max(TestStep.step_number))
-                .where(TestStep.test_case_id == step_data.test_case_id)
-            )
-            max_step = result.scalar() or 0
-            step_number = max_step + 1
-        else:
-            step_number = step_data.step_number
-        
+        """Add a step; insert at step_number and shift later steps up by one."""
+        test_case = await self.get_by_id(step_data.test_case_id)
+        if not test_case:
+            raise ValueError(f"Test case {step_data.test_case_id} not found")
+
+        field_errors = validate_step_fields(
+            action=step_data.action,
+            description=step_data.description,
+            target=step_data.target,
+            value=step_data.value,
+        )
+        if field_errors:
+            raise ValueError("; ".join(field_errors))
+
+        existing_steps = await self.get_steps(step_data.test_case_id)
+        insert_at = normalize_insert_step_number(
+            step_data.step_number, len(existing_steps)
+        )
+
+        for existing in existing_steps:
+            if existing.step_number >= insert_at:
+                existing.step_number += 1
+
         step = TestStep(
             **step_data.model_dump(exclude={"step_number"}),
-            step_number=step_number,
+            step_number=insert_at,
         )
         self.db.add(step)
         await self.db.flush()
@@ -305,38 +320,79 @@ class TestCaseService:
         if not step:
             return None
         
+        merged_action = step_data.action if step_data.action is not None else step.action
+        merged_description = (
+            step_data.description
+            if step_data.description is not None
+            else step.description
+        )
+        merged_target = (
+            step_data.target if step_data.target is not None else step.target
+        )
+        merged_value = (
+            step_data.value if step_data.value is not None else step.value
+        )
+        field_errors = validate_step_fields(
+            action=merged_action,
+            description=merged_description,
+            target=merged_target,
+            value=merged_value,
+        )
+        if field_errors:
+            raise ValueError("; ".join(field_errors))
+
         update_data = step_data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(step, field, value)
-        
+
         await self.db.flush()
         await self.db.refresh(step)
         return step
-    
+
     async def delete_step(self, step_id: int) -> bool:
-        """Delete a test step."""
+        """Delete a test step and renumber remaining steps to stay contiguous."""
         result = await self.db.execute(
             select(TestStep).where(TestStep.id == step_id)
         )
         step = result.scalar_one_or_none()
         if not step:
             return False
-        
+
+        deleted_number = step.step_number
+        test_case_id = step.test_case_id
+
         await self.db.delete(step)
         await self.db.flush()
+
+        remaining = await self.get_steps(test_case_id)
+        for remaining_step in remaining:
+            if remaining_step.step_number > deleted_number:
+                remaining_step.step_number -= 1
+
+        await self.db.flush()
         return True
-    
+
     async def reorder_steps(
         self, test_case_id: int, step_ids: List[int]
     ) -> List[TestStep]:
-        """Reorder test steps."""
+        """Reorder test steps; step_ids must list every step id for the case."""
+        test_case = await self.get_by_id(test_case_id)
+        if not test_case:
+            raise ValueError(f"Test case {test_case_id} not found")
+
         steps = await self.get_steps(test_case_id)
         step_map = {step.id: step for step in steps}
-        
+
+        if len(step_ids) != len(steps):
+            raise ValueError(
+                f"step_ids must include all {len(steps)} steps for this test case"
+            )
+        if set(step_ids) != set(step_map.keys()):
+            raise ValueError("step_ids must match existing step ids for this test case")
+
         for index, step_id in enumerate(step_ids, start=1):
-            if step_id in step_map:
-                step_map[step_id].step_number = index
-        
+            step_map[step_id].step_number = index
+
         await self.db.flush()
         return await self.get_steps(test_case_id)
 

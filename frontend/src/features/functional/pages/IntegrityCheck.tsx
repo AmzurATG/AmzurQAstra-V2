@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { Card, CardTitle } from '@common/components/ui/Card'
 import { formatDisplayLabel } from '@common/utils/formatDisplayLabel'
 import { Button } from '@common/components/ui/Button'
@@ -16,8 +16,16 @@ import {
   XCircleIcon,
   ArrowPathIcon,
   EyeIcon,
+  MapIcon,
 } from '@heroicons/react/24/outline'
-import type { RunStatusResponse, IntegrityCheckPreview } from '../types'
+import type {
+  RunStatusResponse,
+  IntegrityCheckPreview,
+  UiDiscoveryStatusResponse,
+  UiInventory,
+  UiDiscoveryLatestResponse,
+  RunStatus,
+} from '../types'
 import IntegrityCheckProgress from './IntegrityCheckProgress'
 import IntegrityCheckResults from './IntegrityCheckResults'
 import IntegrityCheckExecutionPreview from './IntegrityCheckExecutionPreview'
@@ -92,7 +100,41 @@ export default function IntegrityCheck() {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [loadingRunId, setLoadingRunId] = useState<string | null>(null)
 
+  const [actorRole, setActorRole] = useState('end_user')
+  const [isDiscoveryRunning, setIsDiscoveryRunning] = useState(false)
+  const [discoveryProgress, setDiscoveryProgress] = useState<UiDiscoveryStatusResponse | null>(null)
+  const [discoveryResult, setDiscoveryResult] = useState<UiDiscoveryStatusResponse | null>(null)
+  const [latestDiscovery, setLatestDiscovery] = useState<UiDiscoveryLatestResponse | null>(null)
+  const [discoveryHistory, setDiscoveryHistory] = useState<Array<{
+    id: number
+    run_id: string
+    status: string
+    pages_discovered: number
+    created_at?: string | null
+  }>>([])
+
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const discoveryPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const loadLatestDiscovery = useCallback(async () => {
+    if (!projectId) return
+    try {
+      const res = await integrityCheckApi.getLatestDiscovery(Number(projectId))
+      setLatestDiscovery(res.data)
+    } catch {
+      setLatestDiscovery(null)
+    }
+  }, [projectId])
+
+  const loadDiscoveryHistory = useCallback(async () => {
+    if (!projectId) return
+    try {
+      const res = await integrityCheckApi.getDiscoveryHistory(projectId, { limit: 10 })
+      setDiscoveryHistory(res.data)
+    } catch {
+      setDiscoveryHistory([])
+    }
+  }, [projectId])
 
   const loadHistory = useCallback(async () => {
     if (!projectId) return
@@ -107,13 +149,23 @@ export default function IntegrityCheck() {
     }
   }, [projectId])
 
+  const loadPreview = useCallback(async () => {
+    if (!projectId) return
+    try {
+      const res = await integrityCheckApi.getPreview(Number(projectId))
+      setPreview(res.data)
+    } catch { /* silent */ }
+  }, [projectId])
+
   useEffect(() => {
     if (projectId) {
       fetchProject(projectId)
       loadPreview()
       loadHistory()
+      loadLatestDiscovery()
+      loadDiscoveryHistory()
     }
-  }, [projectId, loadHistory])
+  }, [projectId, fetchProject, loadPreview, loadHistory, loadLatestDiscovery, loadDiscoveryHistory])
 
   useEffect(() => {
     if (currentProject) {
@@ -123,14 +175,10 @@ export default function IntegrityCheck() {
     }
   }, [currentProject])
 
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
-
-  const loadPreview = async () => {
-    try {
-      const res = await integrityCheckApi.getPreview(Number(projectId))
-      setPreview(res.data)
-    } catch { /* silent */ }
-  }
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    if (discoveryPollRef.current) clearInterval(discoveryPollRef.current)
+  }, [])
 
   const startPolling = (id: string) => {
     pollRef.current = setInterval(async () => {
@@ -158,6 +206,62 @@ export default function IntegrityCheck() {
       }
     }, POLL_INTERVAL_MS)
   }
+
+  const startDiscoveryPolling = (id: string) => {
+    discoveryPollRef.current = setInterval(async () => {
+      try {
+        const res = await integrityCheckApi.getDiscoveryStatus(id)
+        setDiscoveryProgress(res.data)
+        if (res.data.status === 'completed' || res.data.status === 'error') {
+          clearInterval(discoveryPollRef.current!)
+          discoveryPollRef.current = null
+          setDiscoveryResult(res.data)
+          setIsDiscoveryRunning(false)
+          loadLatestDiscovery()
+          loadDiscoveryHistory()
+          if (res.data.status === 'error') {
+            toast.error(res.data.error_message || 'UI discovery failed')
+          } else {
+            toast.success(`UI discovery complete — ${res.data.pages_discovered} pages inventoried.`)
+          }
+        }
+      } catch {
+        clearInterval(discoveryPollRef.current!)
+        discoveryPollRef.current = null
+        setIsDiscoveryRunning(false)
+      }
+    }, POLL_INTERVAL_MS)
+  }
+
+  const handleRunDiscovery = async () => {
+    if (!appUrl) { toast.error('Please enter an application URL'); return }
+    if (!projectId) return
+
+    setIsDiscoveryRunning(true)
+    setDiscoveryResult(null)
+    setDiscoveryProgress(null)
+
+    try {
+      const res = await integrityCheckApi.startDiscovery({
+        project_id: parseInt(projectId),
+        app_url: appUrl,
+        actor_role: actorRole,
+        credentials: username || password ? { username, password } : undefined,
+      })
+      startDiscoveryPolling(res.data.run_id)
+      toast.success('UI discovery started — Chrome browser is opening…')
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined
+      toast.error(msg || 'Failed to start UI discovery')
+      setIsDiscoveryRunning(false)
+    }
+  }
+
+  const displayInventory: UiInventory | null | undefined =
+    discoveryResult?.inventory ?? latestDiscovery?.inventory
 
   const handleRunCheck = async () => {
     if (!appUrl) { toast.error('Please enter an application URL'); return }
@@ -241,11 +345,98 @@ export default function IntegrityCheck() {
             <Input label="Password (optional)" type="password" value={password}
               onChange={e => setPassword(e.target.value)} placeholder="••••••••" disabled={isRunning} />
           </div>
-          <Button onClick={handleRunCheck} isLoading={isRunning} disabled={!appUrl || isRunning}>
+          <Button onClick={handleRunCheck} isLoading={isRunning} disabled={!appUrl || isRunning || isDiscoveryRunning}>
             <PlayIcon className="w-4 h-4 mr-2" />
             {isRunning ? 'Check Running…' : 'Run Integrity Check'}
           </Button>
         </div>
+      </Card>
+
+      {/* UI Discovery */}
+      <Card>
+        <div className="flex items-center gap-2 mb-1">
+          <MapIcon className="w-5 h-5 text-indigo-600" />
+          <CardTitle>UI Discovery</CardTitle>
+        </div>
+        <p className="text-sm text-gray-600 mb-4">
+          Explore the live app and capture page inventory for story and test case generation.
+        </p>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Actor role</label>
+            <select
+              value={actorRole}
+              onChange={(e) => setActorRole(e.target.value)}
+              disabled={isDiscoveryRunning || isRunning}
+              className="block w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm"
+            >
+              <option value="end_user">End User</option>
+              <option value="support_admin">Admin (Support)</option>
+            </select>
+          </div>
+          <Button
+            onClick={handleRunDiscovery}
+            isLoading={isDiscoveryRunning}
+            disabled={!appUrl || isDiscoveryRunning || isRunning}
+            variant="outline"
+          >
+            <MapIcon className="w-4 h-4 mr-2" />
+            {isDiscoveryRunning ? 'Discovery Running…' : 'Run UI Discovery'}
+          </Button>
+        </div>
+
+        {isDiscoveryRunning && discoveryProgress && (
+          <div className="mt-4">
+            <IntegrityCheckProgress
+              percentage={discoveryProgress.percentage}
+              currentStep={discoveryProgress.current_step || 'Exploring…'}
+              status={(discoveryProgress.status === 'completed' || discoveryProgress.status === 'error'
+                ? discoveryProgress.status
+                : discoveryProgress.status === 'running'
+                  ? 'running'
+                  : 'pending') as RunStatus}
+              screenshots={discoveryProgress.screenshots}
+            />
+          </div>
+        )}
+
+        {displayInventory && displayInventory.pages.length > 0 && (
+          <div className="mt-6 border-t border-gray-100 pt-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-900">Page Inventory</h3>
+              {projectId && (
+                <Link
+                  to={`/projects/${projectId}/requirements`}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                >
+                  Generate stories from BRD + UI →
+                </Link>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              {displayInventory.pages.length} pages · Nav: {displayInventory.navigation.join(', ') || '—'}
+            </p>
+            <div className="grid gap-2 max-h-64 overflow-y-auto">
+              {displayInventory.pages.map((page) => (
+                <div key={`${page.name}-${page.url}`} className="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                  <div className="font-medium text-gray-900">{page.name}</div>
+                  <div className="text-xs text-gray-500">{page.url || '—'}</div>
+                  <div className="text-xs text-gray-600 mt-1">
+                    {page.elements.length} elements
+                    {page.tabs.length > 0 && ` · Tabs: ${page.tabs.join(', ')}`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {discoveryHistory.length > 0 && (
+          <div className="mt-4 text-xs text-gray-500">
+            Last {discoveryHistory.length} discovery run(s) — latest:{' '}
+            {discoveryHistory[0]?.pages_discovered ?? 0} pages ({discoveryHistory[0]?.status})
+          </div>
+        )}
       </Card>
 
       {/* Live progress */}

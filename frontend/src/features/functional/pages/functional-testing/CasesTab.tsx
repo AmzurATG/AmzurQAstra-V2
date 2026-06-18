@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowPathIcon, PlayIcon, PlusIcon, DocumentArrowUpIcon, CheckBadgeIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, PlayIcon, PlusIcon, DocumentArrowUpIcon, CheckBadgeIcon, Squares2X2Icon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 
 import { Button } from '@common/components/ui/Button'
@@ -82,11 +82,14 @@ export default function CasesTab() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingTestCase, setEditingTestCase] = useState<TestCase | null>(null)
+  const [isCreatingNew, setIsCreatingNew] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
   const [showCreds, setShowCreds] = useState(false)
   const [overrideUser, setOverrideUser] = useState('')
   const [overridePass, setOverridePass] = useState('')
+  const [isRunningAll, setIsRunningAll] = useState(false)
+  const [isSelectingAll, setIsSelectingAll] = useState(false)
 
   // Pre-populate credentials from project settings
   useEffect(() => {
@@ -195,16 +198,35 @@ export default function CasesTab() {
     }
   }
 
+  const closeEditModal = () => {
+    setIsEditModalOpen(false)
+    setIsCreatingNew(false)
+    setEditingTestCase(null)
+  }
+
   const handleSave = async () => {
     if (!editingTestCase) return
     setIsSaving(true)
     try {
-      await testCasesApi.update(editingTestCase.id, editingTestCase)
-      toast.success('Updated')
-      setIsEditModalOpen(false)
+      if (isCreatingNew) {
+        await testCasesApi.create({
+          project_id: editingTestCase.project_id,
+          title: editingTestCase.title,
+          description: editingTestCase.description,
+          priority: editingTestCase.priority,
+          category: editingTestCase.category,
+          status: editingTestCase.status,
+          is_generated: false,
+        })
+        toast.success('Manual case created')
+      } else {
+        await testCasesApi.update(editingTestCase.id, editingTestCase)
+        toast.success('Updated')
+      }
+      closeEditModal()
       loadTestCases()
     } catch {
-      toast.error('Update failed')
+      toast.error(isCreatingNew ? 'Failed to create case' : 'Update failed')
     } finally {
       setIsSaving(false)
     }
@@ -217,6 +239,7 @@ export default function CasesTab() {
       project_id: pid,
       app_url: cp?.app_url || undefined,
       test_case_ids: tcIds,
+      execution_strategy: 'sequential',
       credentials:
         overrideUser || overridePass
           ? {
@@ -250,7 +273,7 @@ export default function CasesTab() {
   }
 
   const runSingle = (tcId: number) =>
-    dispatchRun(buildRequest([tcId]), 'Initializing browser…')
+    dispatchRun(buildRequest([tcId]), 'Starting test…')
 
   /** Resolve every selected row (fetch if not on current page) and ensure all are `ready`. */
   const resolveRunnableSelectedIds = async (): Promise<number[] | null> => {
@@ -298,10 +321,68 @@ export default function CasesTab() {
     }
     const runnableIds = await resolveRunnableSelectedIds()
     if (!runnableIds) return
-    dispatchRun(
-      buildRequest(runnableIds),
-      `Starting ${runnableIds.length} test${runnableIds.length !== 1 ? 's' : ''}…`
-    )
+    dispatchRun(buildRequest(runnableIds), `Starting ${runnableIds.length} selected test${runnableIds.length !== 1 ? 's' : ''}…`)
+  }
+
+  /**
+   * Promote every draft case to ready first, then kick off a run over all ready cases.
+   * Deprecated cases are skipped by the backend automatically.
+   */
+  const runAll = async () => {
+    if (activeRun.isCreating || activeRun.isRunning || isRunningAll) return
+    if (!(await activeRun.ensureProjectHasAppUrl())) {
+      toast.error('Set App URL first')
+      return
+    }
+    setIsRunningAll(true)
+    try {
+      const promoteRes = await testCasesApi.promoteAllDraft(pid)
+      const promoted = promoteRes.data.promoted
+      if (promoted > 0) {
+        toast.success(`${promoted} draft case${promoted !== 1 ? 's' : ''} promoted to Ready`)
+        // Refresh the list so the UI reflects the new statuses
+        loadTestCases()
+      }
+
+      const runPromise = activeRun.startRun(buildRequest(undefined)).then((runId) => {
+        if (runId) navigate(`/projects/${projectId}/functional-testing/live`)
+        return runId
+      })
+      toast.promise(runPromise, {
+        loading: 'Starting test run…',
+        success: (id) => (id ? 'Execution started' : 'Could not start run'),
+        error: (err) => `Failed: ${(err as Error).message || err}`,
+      })
+    } catch (err) {
+      toast.error(`Failed to start run: ${(err as Error).message || err}`)
+    } finally {
+      setIsRunningAll(false)
+    }
+  }
+
+  /**
+   * Fetch every non-deprecated test case ID across all pages and add to selection.
+   * Uses a large page_size so a single request covers even big projects.
+   */
+  const handleSelectAll = async () => {
+    if (isSelectingAll) return
+    setIsSelectingAll(true)
+    try {
+      const res = await testCasesApi.list(pid, { page_size: 2000, page: 1 })
+      const allIds = res.data.items
+        .filter((tc) => tc.status !== 'deprecated')
+        .map((tc) => tc.id)
+      if (allIds.length === 0) {
+        toast('No selectable test cases found')
+        return
+      }
+      setSelectedIds(new Set(allIds))
+      toast.success(`${allIds.length} case${allIds.length !== 1 ? 's' : ''} selected`)
+    } catch {
+      toast.error('Could not fetch all test cases')
+    } finally {
+      setIsSelectingAll(false)
+    }
   }
 
   /** True when any selected row visible on this page is not `ready` (instant toolbar feedback). */
@@ -331,9 +412,6 @@ export default function CasesTab() {
     }
   }
 
-  const runAll = () =>
-    dispatchRun(buildRequest(), 'Preparing full test run…')
-
   const saveCredentialsToProject = async () => {
     if (!pid || !overrideUser || !overridePass) return
     try {
@@ -351,28 +429,28 @@ export default function CasesTab() {
     }
   }
 
-  const handleCreateManualCase = async () => {
+  const handleCreateManualCase = () => {
     if (!pid) return
-    try {
-      // Inside Functional Testing, manual cases skip promotion: they're born
-      // "ready". Contrast with authoring inside a User Story, which lands as
-      // draft. Rationale: users here are already in the execution workspace.
-      const res = await testCasesApi.create({
-        project_id: pid,
-        title: 'Untitled manual case',
-        description: '',
-        priority: 'medium',
-        category: 'regression',
-        status: 'ready',
-        is_generated: false,
-      })
-      toast.success('Manual case created')
-      setEditingTestCase(res.data)
-      setIsEditModalOpen(true)
-      loadTestCases()
-    } catch {
-      toast.error('Failed to create case')
-    }
+    // Open the form first; persist only when the user clicks Save Changes.
+    // Manual cases in Functional Testing default to "ready" (execution workspace).
+    setEditingTestCase({
+      id: 0,
+      case_number: 0,
+      project_id: pid,
+      title: '',
+      description: '',
+      priority: 'medium',
+      category: 'regression',
+      status: 'ready',
+      is_generated: false,
+      is_automated: false,
+      integrity_check: false,
+      steps_count: 0,
+      created_at: '',
+      updated_at: '',
+    })
+    setIsCreatingNew(true)
+    setIsEditModalOpen(true)
   }
 
   const handleToggleAll = useCallback(() => {
@@ -406,10 +484,8 @@ export default function CasesTab() {
     [stepsCache]
   )
 
-  const runAllLabel =
-    statusFilter === 'ready' ? 'Run All Ready' : 'Run All (filtered)'
-  const runDisabled =
-    activeRun.isCreating || activeRun.isRunning || testCases.length === 0
+  const runAllDisabled =
+    activeRun.isCreating || activeRun.isRunning || isRunningAll
 
   return (
     <div className="space-y-6">
@@ -428,10 +504,24 @@ export default function CasesTab() {
             />{' '}
             Refresh
           </Button>
+
+          {/* Select All — picks every non-deprecated case across all pages */}
+          <Button
+            variant="outline"
+            onClick={() => void handleSelectAll()}
+            disabled={isSelectingAll}
+            title="Select every non-deprecated test case across all pages"
+          >
+            {isSelectingAll
+              ? <ArrowPathIcon className="w-4 h-4 mr-2 animate-spin" />
+              : <Squares2X2Icon className="w-4 h-4 mr-2" />
+            }
+            Select All
+          </Button>
+
           {selectedIds.size > 0 && (
             <>
               <Button
-                variant="outline"
                 onClick={() => void runSelected()}
                 disabled={
                   activeRun.isCreating ||
@@ -440,11 +530,11 @@ export default function CasesTab() {
                 }
                 title={
                   selectionIncludesNonReadyOnPage
-                    ? 'Deselect draft or deprecated cases, or mark them Ready before running'
-                    : undefined
+                    ? 'Some selected cases are not Ready — mark them Ready or deselect first'
+                    : 'Run selected test cases one by one'
                 }
               >
-                <PlayIcon className="w-4 h-4 mr-1" /> Run ({selectedIds.size})
+                <PlayIcon className="w-4 h-4 mr-1" /> Run Selected ({selectedIds.size})
               </Button>
               <Button
                 variant="outline"
@@ -463,9 +553,20 @@ export default function CasesTab() {
               </Button>
             </>
           )}
-          <Button onClick={runAll} disabled={runDisabled}>
-            <PlayIcon className="w-4 h-4 mr-2" /> {runAllLabel}
+
+          {/* Run All — auto-promotes drafts to ready, then runs everything */}
+          <Button
+            onClick={() => void runAll()}
+            disabled={runAllDisabled}
+            title="Promote any draft cases to Ready, then run all test cases"
+          >
+            {isRunningAll
+              ? <ArrowPathIcon className="w-4 h-4 mr-2 animate-spin" />
+              : <PlayIcon className="w-4 h-4 mr-2" />
+            }
+            Run All
           </Button>
+
           <Button variant="outline" onClick={() => setIsImportModalOpen(true)}>
             <DocumentArrowUpIcon className="w-4 h-4 mr-2" /> Import CSV
           </Button>
@@ -485,6 +586,16 @@ export default function CasesTab() {
         setOverridePass={setOverridePass}
         onSaveToProject={saveCredentialsToProject}
       />
+
+      {/* Inline hint when viewing draft cases */}
+      {statusFilter === 'draft' && testCases.length > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
+          <PlayIcon className="w-4 h-4 text-amber-500 shrink-0" />
+          <span>
+            {testCases.length} draft case{testCases.length !== 1 ? 's' : ''} visible — click <strong>Run All</strong> to auto-promote them to Ready and run everything.
+          </span>
+        </div>
+      )}
 
       <Card>
         <div className="flex flex-col md:flex-row gap-4 mb-4">
@@ -551,6 +662,7 @@ export default function CasesTab() {
             stepsCache={stepsCache}
             onEdit={(tc) => {
               setEditingTestCase(tc)
+              setIsCreatingNew(false)
               setIsEditModalOpen(true)
             }}
             onDelete={handleDelete}
@@ -592,11 +704,12 @@ export default function CasesTab() {
 
       <TestCaseEditModal
         isOpen={isEditModalOpen}
-        onClose={() => setIsEditModalOpen(false)}
+        onClose={closeEditModal}
         testCase={editingTestCase}
         setTestCase={setEditingTestCase}
         onSave={handleSave}
         isSaving={isSaving}
+        title={isCreatingNew ? 'New Manual Test Case' : 'Edit Test Case'}
       />
     </div>
   )

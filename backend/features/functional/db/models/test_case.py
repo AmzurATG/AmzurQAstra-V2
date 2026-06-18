@@ -40,6 +40,15 @@ class TestCaseSource(str, enum.Enum):
     csv = "csv"
 
 
+class TestCaseScenarioType(str, enum.Enum):
+    """Scenario type for structured test coverage."""
+
+    positive = "positive"
+    negative = "negative"
+    boundary = "boundary"
+    edge = "edge"
+
+
 class TestCase(BaseModel):
     """Test case model."""
     
@@ -78,6 +87,15 @@ class TestCase(BaseModel):
         default=TestCaseSource.manual,
         nullable=False,
     )
+    #: Scenario type for structured coverage (positive/negative/boundary/edge)
+    scenario_type = Column(String(16), default=TestCaseScenarioType.positive.value, nullable=True)
+    #: Acceptance criteria reference, e.g. "AC-1" — links case to AC condition
+    ac_ref = Column(String(20), nullable=True)
+
+    #: UI discovery metadata (nullable — backward compatible)
+    platform = Column(String(16), nullable=True)
+    actor_role = Column(String(32), nullable=True)
+    ui_page_ref = Column(String(120), nullable=True)
     
     # Created by
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)

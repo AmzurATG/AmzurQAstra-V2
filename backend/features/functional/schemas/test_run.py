@@ -27,6 +27,9 @@ class TestRunCreate(BaseModel):
     browser: str = "chromium"
     headless: bool = False
     config: Optional[Dict[str, Any]] = None
+    # "sequential" = original one-by-one isolated execution (default, safe)
+    # "grouped_parallel" = AI groups cases into browser lanes and runs in parallel
+    execution_strategy: str = "sequential"
 
 
 class TestRunStartResponse(BaseModel):
@@ -133,3 +136,5 @@ class LiveProgressResponse(BaseModel):
     completed_results: List[CompletedCaseResult] = []
     logs: List[LogEntry] = []
     error: Optional[str] = None
+    # Grouped-parallel execution extras (None when sequential)
+    execution_plan: Optional[Dict[str, Any]] = None

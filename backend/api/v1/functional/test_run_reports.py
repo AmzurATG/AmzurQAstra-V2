@@ -1,0 +1,173 @@
+"""
+Test Run Report Endpoints
+
+POST   /functional/test-runs/{run_id}/report/generate   — kick off background PDF generation
+GET    /functional/test-runs/{run_id}/report/status     — poll generation progress
+GET    /functional/test-runs/{run_id}/report/download   — stream the generated PDF
+POST   /functional/test-runs/{run_id}/report/email      — email the PDF to a recipient
+"""
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, EmailStr
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from common.api.deps import get_current_active_user
+from common.db.database import get_db
+from common.db.models.user import User
+from common.services.smtp_mailer import SmtpSendError, is_smtp_configured
+from features.functional.services.test_run_report_service import TestRunReportService
+
+router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Schemas
+# ---------------------------------------------------------------------------
+
+class ReportGenerateResponse(BaseModel):
+    run_id: int
+    status: str
+    message: str
+
+
+class ReportStatusResponse(BaseModel):
+    run_id: int
+    status: str          # not_started | generating | ready | failed | not_found
+    error: str | None = None
+
+
+class ReportEmailRequest(BaseModel):
+    to: EmailStr
+
+
+class ReportEmailResponse(BaseModel):
+    detail: str
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/{run_id}/report/generate",
+    response_model=ReportGenerateResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Kick off background PDF report generation for a test run",
+)
+async def generate_report(
+    run_id: int,
+    force: bool = False,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReportGenerateResponse:
+    """
+    Start asynchronous PDF report generation for ``run_id``.
+
+    Returns immediately (202) with a status of ``generating`` or ``ready``
+    (if the report was previously generated). Poll ``/report/status`` to
+    know when the PDF is available.
+    """
+    svc = TestRunReportService(db)
+    result = await svc.generate(run_id, force=force)
+    return ReportGenerateResponse(**result)
+
+
+@router.get(
+    "/{run_id}/report/status",
+    response_model=ReportStatusResponse,
+    summary="Poll background report generation status",
+)
+async def report_status(
+    run_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReportStatusResponse:
+    """
+    Returns ``status``:
+    - ``not_started`` — never triggered
+    - ``generating``  — background task running
+    - ``ready``       — PDF available for download
+    - ``failed``      — generation error (see ``error`` field)
+    - ``not_found``   — run id does not exist
+    """
+    svc = TestRunReportService(db)
+    info = await svc.get_status(run_id)
+    return ReportStatusResponse(
+        run_id=run_id,
+        status=info["status"],
+        error=info.get("error"),
+    )
+
+
+@router.get(
+    "/{run_id}/report/download",
+    summary="Download the generated PDF report",
+)
+async def download_report(
+    run_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Stream the generated PDF as a file download.
+
+    Returns 404 if the report has not been generated yet (generate it first
+    via ``POST /report/generate``).
+    """
+    svc = TestRunReportService(db)
+    pdf_path = await svc.get_pdf_path(run_id)
+    if not pdf_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not ready. Call POST /report/generate first and wait for status 'ready'.",
+        )
+    filename = f"QAstra_TestRun_{run_id}_Report.pdf"
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post(
+    "/{run_id}/report/email",
+    response_model=ReportEmailResponse,
+    summary="Email the generated PDF report to a recipient",
+)
+async def email_report(
+    run_id: int,
+    body: ReportEmailRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReportEmailResponse:
+    """
+    Send the generated PDF as an email attachment to ``to``.
+
+    SMTP must be configured via environment variables. Returns 400 if the
+    report is not ready or 503 if SMTP is not configured.
+    """
+    if not is_smtp_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Email delivery is not configured on this server. Set SMTP_HOST and EMAIL_FROM_ADDRESS.",
+        )
+
+    svc = TestRunReportService(db)
+
+    # Verify report is ready before attempting email
+    info = await svc.get_status(run_id)
+    if info["status"] != "ready":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Report is not ready (status: {info['status']}). Generate it first.",
+        )
+
+    try:
+        await svc.send_email(run_id, body.to)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except SmtpSendError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message)
+
+    return ReportEmailResponse(detail=f"Report emailed successfully to {body.to}")
