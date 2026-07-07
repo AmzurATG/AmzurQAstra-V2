@@ -27,8 +27,7 @@ backend/static/
 
 # Logs
 *.log
-logs/*
-!logs/.gitkeep
+logs/
 
 # OS
 .DS_Store
