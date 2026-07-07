@@ -2,7 +2,7 @@ import React from 'react'
 import { Card } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
 import { StopIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
-import type { LiveProgressResponse } from '../types'
+import type { LiveProgressResponse, ExecutionPlanGroup } from '../types'
 
 interface ExecutionPanelProps {
   progress: LiveProgressResponse | null
@@ -12,6 +12,17 @@ interface ExecutionPanelProps {
   isDone: boolean
   onCancel: () => void
   onViewDetails: () => void
+}
+
+/** Groups ExecutionPlanGroup entries by browser_lane number. */
+function groupByLane(groups: ExecutionPlanGroup[]): Map<number, ExecutionPlanGroup[]> {
+  const map = new Map<number, ExecutionPlanGroup[]>()
+  for (const g of groups) {
+    const lane = g.browser_lane
+    if (!map.has(lane)) map.set(lane, [])
+    map.get(lane)!.push(g)
+  }
+  return map
 }
 
 export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
@@ -69,6 +80,25 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
 
   if (!progress) return null
 
+  // Planning phase — AI is building the execution plan
+  if (status === 'planning') {
+    return (
+      <Card className="border-blue-100 bg-blue-50/40">
+        <div className="flex items-center gap-3">
+          <ArrowPathIcon className="w-5 h-5 animate-spin text-blue-500" />
+          <div>
+            <p className="text-sm font-medium text-gray-700">
+              {progress.current_test_case_title || 'AI is building execution plan…'}
+            </p>
+            {progress.current_step_info && (
+              <p className="text-xs text-gray-500 mt-0.5">{progress.current_step_info}</p>
+            )}
+          </div>
+        </div>
+      </Card>
+    )
+  }
+
   const pct = progress.percentage ?? 0
   const passedCount = progress.completed_results.filter(r => r.status === 'passed').length
   const failedCount = progress.completed_results.filter(r => r.status !== 'passed' && r.status !== 'skipped').length
@@ -76,6 +106,9 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
   const statusLabel = isDone
     ? `Run complete — ${passedCount} passed, ${failedCount} failed`
     : `Running: ${progress.current_test_case_title || 'Starting…'} (${progress.current_test_case_index + 1}/${progress.total_test_cases})`
+
+  const planGroups = progress.execution_plan?.groups
+  const laneMap = planGroups ? groupByLane(planGroups) : null
 
   return (
     <Card className="border-primary-100 bg-primary-50/30">
@@ -95,7 +128,7 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
           )}
         </div>
       </div>
-      <div className="w-full bg-gray-200 rounded-full h-2.5">
+      <div className="w-full bg-gray-200 rounded-full h-2.5 mb-3">
         <div
           className={`h-2.5 rounded-full transition-all duration-500 ${
             isDone && failedCount > 0
@@ -107,6 +140,35 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
           style={{ width: `${pct}%` }}
         />
       </div>
+
+      {/* Lane grid — shown when a grouped_parallel plan is active */}
+      {laneMap && laneMap.size > 0 && (
+        <div className="mt-1 flex flex-wrap gap-2">
+          {Array.from(laneMap.entries()).map(([lane, groups]) => (
+            <div
+              key={lane}
+              className="flex flex-col gap-1 rounded border border-primary-100 bg-white px-3 py-2 text-xs min-w-[140px]"
+            >
+              <span className="font-semibold text-primary-700">Lane {lane}</span>
+              {groups.map(g => (
+                <div key={g.group_id} className="flex items-center gap-1.5">
+                  <span
+                    className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      g.session_type === 'shared'
+                        ? 'bg-indigo-100 text-indigo-700'
+                        : 'bg-gray-100 text-gray-600'
+                    }`}
+                  >
+                    {g.session_type}
+                  </span>
+                  <span className="text-gray-600 truncate max-w-[110px]">{g.label}</span>
+                  <span className="text-gray-400 ml-auto whitespace-nowrap">{g.ordered_cases.length}tc</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   )
 }

@@ -34,7 +34,7 @@ litellm>=1.30.0
 tiktoken==0.12.0
 
 # Browser Automation (browser-use; default QAstra path uses ChatLiteLLM + litellm to your proxy)
-browser-use==0.12.5
+browser-use==0.13.1
 playwright>=1.40.0
 
 # HuggingFace

@@ -1,6 +1,10 @@
 """
 Test Execution Service — orchestrates test run lifecycle.
-Runs test cases sequentially, one at a time, using TestCaseRunner.
+
+Execution strategies:
+  sequential      — default; runs each test case one-by-one via TestCaseRunner.
+  grouped_parallel — delegates to ParallelExecutionOrchestrator which plans, groups,
+                    and runs test cases across up to 4 browser lanes concurrently.
 """
 import asyncio
 import re
@@ -14,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
+from config import settings
 from common.api.pagination import PaginationParams
 from common.utils.logger import logger
 from common.db.models.project import Project
@@ -182,7 +187,9 @@ class TestExecutionService:
                     password = creds.get("password")
         
         final_creds = {"username": username, "password": password}
-        execution_strategy = (run_data.execution_strategy or "sequential").strip().lower()
+        execution_strategy = (
+            run_data.execution_strategy or settings.DEFAULT_EXECUTION_STRATEGY or "sequential"
+        ).strip().lower()
 
         # Persist resolved app URL + strategy on the run
         run_row = (await self.db.execute(select(TestRun).where(TestRun.id == run_id))).scalar_one_or_none()
@@ -349,13 +356,43 @@ class TestExecutionService:
                 _log(f"Starting test run with {total} test case(s)")
                 _log(f"🔗 Application URL: {app_url}")
 
-                from features.functional.core.browser.test_case_runner import TestCaseRunner
+                # ── Parallel path ───────────────────────────────────────────
+                if execution_strategy == "grouped_parallel":
+                    from features.functional.services.parallel_execution_orchestrator import (
+                        ParallelExecutionOrchestrator,
+                    )
+                    orchestrator = ParallelExecutionOrchestrator(db, self.progress_manager)
+                    await orchestrator.execute(
+                        run_id=run_id,
+                        run=run,
+                        ordered_results=ordered_results,
+                        tc_map=tc_map,
+                        app_url=app_url,
+                        username=username,
+                        password=password,
+                        use_google_signin=use_google_signin,
+                        headless=headless,
+                        log_fn=_log,
+                    )
+                    self.progress_manager.clear_cancel(run_id)
+                    self.progress_manager.schedule_cleanup(run_id, delay_seconds=300)
+                    return
+
+                # ── Sequential path (default) ─────────────────────────────
+                # "playwright" strategy uses raw Playwright (no AI/LLM) for
+                # deterministic, fast execution of structured action steps.
                 from features.functional.utils.credentials_redaction import (
                     redact_agent_logs_list,
                     redact_step_dict,
                 )
 
-                runner = TestCaseRunner()
+                if execution_strategy == "playwright":
+                    from features.functional.core.browser.playwright_runner import PlaywrightRunner
+                    runner: Any = PlaywrightRunner()
+                    _log("⚡ Playwright fast-execution mode active (no AI)")
+                else:
+                    from features.functional.core.browser.test_case_runner import TestCaseRunner
+                    runner = TestCaseRunner()
                 completed_results: List[Dict[str, Any]] = []
                 passed_count = 0
                 failed_count = 0
@@ -374,7 +411,9 @@ class TestExecutionService:
                     _log(f"▶ [{idx + 1}/{total}]: {tc_title}", tc.id)
 
                     pct_start = int((idx / total) * 100) if total > 0 else 0
-                    self.progress_manager.set(run_id, {
+                    # Use update() (not set()) so any logs already in the dict
+                    # from the previous case's _on_tc_step calls are preserved.
+                    self.progress_manager.update(run_id, {
                         "status": "running",
                         "percentage": pct_start,
                         "current_test_case_index": idx,
@@ -401,6 +440,28 @@ class TestExecutionService:
                     result.started_at = datetime.utcnow()
                     await db.commit()
 
+                    def _on_tc_step(step_num: int, desc: str, log_entry: Optional[Dict[str, Any]]) -> None:
+                        """Forward live agent step info to run-level progress so the
+                        frontend shows activity while a test case is executing.
+
+                        Builds a LogEntry-compatible dict (requires 'message' + 'level')
+                        so the /live API can serialise it without a schema error.
+                        Appends to the local `logs` list so subsequent set() calls
+                        preserve these entries automatically.
+                        """
+                        step_msg = f"[{tc_title}] Step {step_num}: {(desc or '')[:120]}"
+                        self.progress_manager.update(run_id, {
+                            "current_step_info": step_msg,
+                        })
+                        step_log: Dict[str, Any] = {
+                            "timestamp": (log_entry or {}).get("timestamp") or datetime.utcnow().isoformat(),
+                            "level": "info",
+                            "message": step_msg,
+                            "test_case_id": tc.id,
+                        }
+                        logs.append(step_log)
+                        self.progress_manager.add_log(run_id, step_log)
+
                     tc_outcome = await runner.run(
                         run_id=str(run_id),
                         test_case_id=tc.id,
@@ -414,6 +475,7 @@ class TestExecutionService:
                         use_google_signin=use_google_signin,
                         headless=headless,
                         execution_run_id=run_id,
+                        on_step_callback=_on_tc_step,
                     )
 
                     if tc_outcome.get("status") == "cancelled":
@@ -480,7 +542,7 @@ class TestExecutionService:
                     ))
 
                     pct_done = int(((idx + 1) / total) * 100) if total > 0 else 100
-                    self.progress_manager.set(run_id, {
+                    self.progress_manager.update(run_id, {
                         "status": "running",
                         "percentage": pct_done,
                         "current_test_case_index": idx + 1,

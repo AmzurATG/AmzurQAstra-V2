@@ -133,6 +133,73 @@ class Settings(BaseSettings):
     # Outside backend/ to prevent uvicorn --reload restarts when screenshots are written.
     SCREENSHOTS_DIR: str = str(_APP_ROOT / "screenshots")
 
+    # Browser engine selection
+    # "chrome" (default) — local Chrome via browser-use.
+    # "steel"            — Steel.dev cloud browser; browser-use connects via CDP websocket.
+    BROWSER_ENGINE: str = "chrome"
+    STEEL_API_KEY: Optional[str] = None
+    STEEL_BASE_URL: str = "https://api.steel.dev"
+
+    # ── Execution performance tuning ──────────────────────────────────────
+    # Default strategy when a run request does not specify one.
+    #   "sequential"      — one isolated browser per case, run one-by-one (slow, safe)
+    #   "grouped_parallel"— AI groups cases into lanes and runs lanes in parallel (fast)
+    #   "playwright"      — deterministic Playwright, no per-step LLM (fastest)
+    DEFAULT_EXECUTION_STRATEGY: str = "grouped_parallel"
+    # Max browser sessions open at once across all lanes in grouped_parallel.
+    # IMPORTANT: cannot exceed your Steel plan's concurrent-session quota or Steel
+    # rejects the extra sessions and the run errors out. Steel concurrent limits:
+    #   Hobby/FREE = 5  | Starter($29) = 10 | Developer($99) = 20 | Pro($499) = 100
+    # Free tier = 5 concurrent sessions total; using 4 leaves a 1-session margin so a
+    # lane opening a new group's session while the previous one is still releasing
+    # doesn't momentarily exceed the quota (→ 429). Raise on Pro (100).
+    MAX_CONCURRENT_BROWSERS: int = 4
+    # Planner batching: max test cases sent to the grouping LLM in a single call.
+    # Sending hundreds of cases at once overflows the model's OUTPUT token limit,
+    # so later cases silently fall back to one-by-one. Batching keeps each call
+    # bounded and lets the planner scale to thousands of cases.
+    PLANNER_BATCH_SIZE: int = 20
+    # Max planner LLM calls to run concurrently when batching (6000 cases = many batches).
+    PLANNER_MAX_CONCURRENCY: int = 8
+    # Per-call timeout (seconds) for planner LLM calls. A flaky/slow proxy call fails
+    # fast and retries instead of blocking for minutes and falling back to no-merging.
+    PLANNER_LLM_TIMEOUT: float = 90.0
+    # Below this many cases, skip the LLM planner entirely: nothing meaningful to
+    # merge, and planning costs more than it saves. Cases run directly (each isolated,
+    # still parallel across lanes, still per-step screenshots + detailed steps).
+    GROUPING_MIN_CASES: int = 6
+    # Cap cases per SHARED group. Large groups become one monster agent with a huge
+    # step budget and ever-growing context (slow + unreliable). Smaller groups also
+    # spread better across lanes. The planner is told this; the value bounds it.
+    MAX_CASES_PER_SHARED_GROUP: int = 8
+
+    # ── Shared-session execution mode ─────────────────────────────────────
+    # "segmented" (default) — run ONE merged step at a time on a kept-alive browser
+    #   session (Agent.add_new_task), capturing a ground-truth screenshot per step.
+    #   Fixes per-step screenshot/log mapping AND bounds per-call context → faster.
+    # "monolithic" — legacy: one agent.run over the whole merged script (fallback if
+    #   the segmented path misbehaves on your environment).
+    SHARED_EXECUTION_MODE: str = "segmented"
+    # Per-merged-step agent budget in segmented mode (small = fast, focused).
+    SEGMENT_MAX_STEPS: int = 8
+    # Login/auth steps need a few more actions (2FA, redirects).
+    SEGMENT_LOGIN_MAX_STEPS: int = 12
+
+    # ── Plan caching ──────────────────────────────────────────────────────
+    # Reuse a previously-built grouping plan when the exact same set of test cases
+    # (ids + step contents + app_url) is run again — skips the multi-minute planner.
+    PLAN_CACHE_ENABLED: bool = True
+    PLAN_CACHE_DIR: str = str(_APP_ROOT / "storage" / "plan_cache")
+    # Send a screenshot to the LLM on every agent step.
+    # KEEP TRUE for JS-heavy SPAs: without vision the agent can't navigate, burns
+    # its entire step budget flailing, and fails — slower AND broken. Only set
+    # False for simple, DOM-stable apps you've verified work without screenshots.
+    BROWSER_USE_VISION: bool = True
+    # Hard cap on agent reasoning steps per case/group. 80 is a runaway ceiling,
+    # but too low (≈20) starves the agent before it emits its final VERDICT_JSON
+    # → "Could not parse agent output". 40 leaves headroom while still bounding cost.
+    BROWSER_USE_MAX_STEPS: int = 40
+
     # MCP (optional)
     MCP_SERVER_URL: str = "http://localhost:3001"
 

@@ -422,7 +422,8 @@ export interface TestRunCreateRequest {
   headless?: boolean
   // "sequential" = original isolated one-by-one (default)
   // "grouped_parallel" = AI groups cases into parallel browser lanes
-  execution_strategy?: 'sequential' | 'grouped_parallel'
+  // "playwright" = deterministic fast execution (no LLM, no Steel overhead)
+  execution_strategy?: 'sequential' | 'grouped_parallel' | 'playwright'
 }
 
 // Test Result Types

@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom'
-import { PlayIcon, ClockIcon } from '@heroicons/react/24/outline'
+import { PlayIcon, ClockIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 
 import { Button } from '@common/components/ui/Button'
 import { Card } from '@common/components/ui/Card'
@@ -54,6 +54,25 @@ export default function LiveTab() {
     return (
       <Card className="py-12 text-center">
         <p className="text-sm text-gray-500">Starting test run…</p>
+      </Card>
+    )
+  }
+
+  if (progress.status === 'planning') {
+    return (
+      <Card className="py-10 text-center border-blue-100 bg-blue-50/40">
+        <div className="flex flex-col items-center gap-3">
+          <ArrowPathIcon className="h-8 w-8 animate-spin text-blue-500" />
+          <p className="text-base font-medium text-gray-700">
+            {progress.current_test_case_title || 'AI is building execution plan…'}
+          </p>
+          {progress.current_step_info && (
+            <p className="text-sm text-gray-500">{progress.current_step_info}</p>
+          )}
+          <p className="text-xs text-gray-400 mt-1">
+            The planner is analysing test cases, merging duplicate steps, and assigning browser lanes.
+          </p>
+        </div>
       </Card>
     )
   }

@@ -724,3 +724,295 @@ class TestCaseService:
             warnings=warnings,
             message=f"Imported {case_total} case(s) and {created_steps} step(s).",
         )
+
+    async def _persist_case_groups(
+        self,
+        *,
+        groups: Dict[str, CaseDraft],
+        project_id: int,
+        created_by: int,
+        dry_run: bool,
+        mode: str,
+        errors: List[CsvImportErrorItem],
+        warnings: List[CsvImportErrorItem],
+        source: TestCaseSource,
+    ) -> TestCaseCsvImportResponse:
+        """Shared DB insert logic for both CSV and Excel import.
+
+        Validates duplicate keys and foreign keys, then bulk-inserts eligible
+        CaseDraft groups into the database.
+
+        Args:
+            groups:      {case_key: CaseDraft} from the parse step.
+            project_id:  Target project.
+            created_by:  User id for audit trail.
+            dry_run:     If True, validate only — no rows written.
+            mode:        "strict" | "permissive"
+            errors:      Pre-existing parse errors (may be extended in-place).
+            warnings:    Pre-existing parse warnings (may be extended in-place).
+            source:      TestCaseSource enum value (csv or excel).
+
+        Returns:
+            TestCaseCsvImportResponse with import results.
+        """
+        from features.functional.services.test_case_csv_import import (
+            collect_case_constraint_violations,
+        )
+
+        constraint_hits = collect_case_constraint_violations(groups)
+        skip_keys: set[str] = set()
+
+        if mode == "strict":
+            if constraint_hits:
+                errors.extend(item for _, item in constraint_hits)
+            if errors:
+                return TestCaseCsvImportResponse(
+                    dry_run=dry_run,
+                    import_mode=mode,
+                    errors=errors,
+                    warnings=warnings,
+                    message="Import aborted (strict mode): fix validation errors and try again.",
+                )
+        else:
+            for ck, item in constraint_hits:
+                warnings.append(item)
+                skip_keys.add(ck)
+
+        existing_ext = await self._existing_case_external_keys(project_id)
+        dup_hits: List[Tuple[str, CsvImportErrorItem]] = []
+        for ck, g in groups.items():
+            if ck in existing_ext:
+                row = min(g.source_rows) if g.source_rows else 0
+                dup_hits.append((
+                    ck,
+                    CsvImportErrorItem(
+                        row=row,
+                        column="case_key",
+                        message=f"case_key {ck!r} already exists in this project.",
+                    ),
+                ))
+
+        fk_hits = await self._csv_import_foreign_key_issues(project_id, groups)
+
+        if mode == "strict":
+            if dup_hits:
+                errors.extend(item for _, item in dup_hits)
+            if fk_hits:
+                errors.extend(item for _, item in fk_hits)
+            if errors:
+                return TestCaseCsvImportResponse(
+                    dry_run=dry_run,
+                    import_mode=mode,
+                    errors=errors,
+                    warnings=warnings,
+                    message="Import aborted (strict mode): fix validation errors and try again.",
+                )
+        else:
+            for ck, item in dup_hits:
+                warnings.append(item)
+                skip_keys.add(ck)
+            for ck, item in fk_hits:
+                warnings.append(item)
+                skip_keys.add(ck)
+
+        eligible = {k: g for k, g in groups.items() if k not in skip_keys}
+        skipped = len(groups) - len(eligible)
+        step_total = sum(len(g.steps) for g in eligible.values())
+        case_total = len(eligible)
+
+        if case_total == 0:
+            return TestCaseCsvImportResponse(
+                dry_run=dry_run,
+                import_mode=mode,
+                created_cases=0,
+                created_steps=0,
+                skipped_case_groups=skipped,
+                errors=errors,
+                warnings=warnings,
+                message="No test cases to import (all skipped or file empty).",
+            )
+
+        if dry_run:
+            return TestCaseCsvImportResponse(
+                dry_run=True,
+                import_mode=mode,
+                created_cases=case_total,
+                created_steps=step_total,
+                skipped_case_groups=skipped,
+                errors=errors,
+                warnings=warnings,
+                message=f"Dry run: would create {case_total} case(s) and {step_total} step(s).",
+            )
+
+        t_start = time.monotonic()
+        sorted_keys = sorted(eligible.keys())
+        numbers = await self.allocate_case_numbers(project_id, len(sorted_keys))
+
+        CASE_CHUNK = 200
+        STEP_CHUNK = 400
+        key_to_orm: Dict[str, TestCase] = {}
+        created_steps_count = 0
+
+        for chunk_start in range(0, len(sorted_keys), CASE_CHUNK):
+            chunk_keys = sorted_keys[chunk_start: chunk_start + CASE_CHUNK]
+            chunk_cases: List[TestCase] = []
+            for i, ck in enumerate(chunk_keys):
+                g = eligible[ck]
+                tc = TestCase(
+                    project_id=project_id,
+                    case_number=numbers[chunk_start + i],
+                    title=(g.title or ck).strip()[:500],
+                    description=g.description or None,
+                    preconditions=g.preconditions or None,
+                    priority=g.priority,
+                    category=g.category,
+                    status=g.status,
+                    tags=(g.tags.strip() if g.tags else None) or None,
+                    requirement_id=g.requirement_id,
+                    user_story_id=g.user_story_id,
+                    jira_key=ck[:50],
+                    is_automated=True,
+                    is_generated=False,
+                    source=source,
+                    created_by=created_by,
+                )
+                chunk_cases.append(tc)
+                key_to_orm[ck] = tc
+            self.db.add_all(chunk_cases)
+            await self.db.flush()
+
+        step_batch: List[TestStep] = []
+        for ck in sorted_keys:
+            g = eligible[ck]
+            tc = key_to_orm[ck]
+            for st in g.steps:
+                step_batch.append(TestStep(
+                    test_case_id=tc.id,
+                    step_number=st.step_number,
+                    action=st.action,
+                    target=(st.target[:500] if st.target else None),
+                    value=st.value,
+                    description=st.description,
+                    expected_result=st.expected_result,
+                ))
+                if len(step_batch) >= STEP_CHUNK:
+                    self.db.add_all(step_batch)
+                    await self.db.flush()
+                    created_steps_count += len(step_batch)
+                    step_batch = []
+
+        if step_batch:
+            self.db.add_all(step_batch)
+            await self.db.flush()
+            created_steps_count += len(step_batch)
+
+        duration_ms = round((time.monotonic() - t_start) * 1000)
+        logger.info(
+            "[import] done project_id=%s source=%s mode=%s created_cases=%d created_steps=%d"
+            " skipped=%d duration_ms=%d user_id=%s",
+            project_id, source.value if hasattr(source, "value") else source,
+            mode, case_total, created_steps_count, skipped, duration_ms, created_by,
+        )
+
+        return TestCaseCsvImportResponse(
+            dry_run=False,
+            import_mode=mode,
+            created_cases=case_total,
+            created_steps=created_steps_count,
+            skipped_case_groups=skipped,
+            errors=errors,
+            warnings=warnings,
+            message=f"Imported {case_total} case(s) and {created_steps_count} step(s).",
+        )
+
+    async def import_test_cases_from_excel(
+        self,
+        *,
+        project_id: int,
+        created_by: int,
+        file_bytes: bytes,
+        dry_run: bool = False,
+        import_mode: str = "strict",
+        sprint_prefix: str = "",
+    ) -> TestCaseCsvImportResponse:
+        """Import test cases from an Excel workbook (.xlsx / .xls).
+
+        Maps Excel sheet names to project user_stories via fuzzy title matching,
+        then creates one CaseDraft per detail row and bulk-inserts into the DB.
+
+        Args:
+            project_id:    Target project.
+            created_by:    User id for audit trail.
+            file_bytes:    Raw file bytes from the uploaded workbook.
+            dry_run:       Validate only — no rows written.
+            import_mode:   "strict" | "permissive"
+            sprint_prefix: String prepended to case_key (e.g. "S1-") to avoid
+                           cross-sprint key collisions.
+
+        Returns:
+            TestCaseCsvImportResponse with created/skipped/error counts.
+        """
+        from features.functional.services.test_case_excel_import import (
+            decode_excel_bytes,
+            parse_workbook_to_groups,
+        )
+        from features.functional.services.excel_story_mapper import build_story_id_map
+
+        mode = (import_mode or "strict").strip().lower()
+        if mode not in ("strict", "permissive"):
+            return TestCaseCsvImportResponse(
+                dry_run=dry_run,
+                import_mode=import_mode,
+                message="import_mode must be 'strict' or 'permissive'.",
+                errors=[CsvImportErrorItem(
+                    row=0,
+                    message="Invalid import_mode (use strict or permissive).",
+                )],
+            )
+
+        logger.info(
+            "[excel_import] start project_id=%s user_id=%s mode=%s dry_run=%s "
+            "sprint_prefix=%r file_bytes=%d",
+            project_id, created_by, mode, dry_run, sprint_prefix, len(file_bytes),
+        )
+
+        xl, decode_errors = decode_excel_bytes(file_bytes)
+        if decode_errors and xl is None:
+            return TestCaseCsvImportResponse(
+                dry_run=dry_run,
+                import_mode=mode,
+                errors=decode_errors,
+                message="Cannot open workbook.",
+            )
+
+        # Collect story names from all non-summary sheets
+        sheet_names = [s for s in xl.sheet_names if s.lower() != "summary"]
+        story_id_map = await build_story_id_map(db=self.db, project_id=project_id, excel_story_names=sheet_names)
+
+        errors: List[CsvImportErrorItem] = list(decode_errors)
+        groups, parse_errors = parse_workbook_to_groups(
+            xl,
+            story_id_map=story_id_map,
+            sprint_prefix=sprint_prefix,
+            import_mode=mode,
+        )
+        errors.extend(parse_errors)
+
+        if not groups and errors:
+            return TestCaseCsvImportResponse(
+                dry_run=dry_run,
+                import_mode=mode,
+                errors=errors,
+                message="No cases could be parsed from the workbook.",
+            )
+
+        return await self._persist_case_groups(
+            groups=groups,
+            project_id=project_id,
+            created_by=created_by,
+            dry_run=dry_run,
+            mode=mode,
+            errors=errors,
+            warnings=[],
+            source=TestCaseSource.csv,
+        )

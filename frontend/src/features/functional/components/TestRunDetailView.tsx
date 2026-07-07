@@ -1,10 +1,10 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Card, CardTitle } from '@common/components/ui/Card'
 import toast from 'react-hot-toast'
 
 import { testRunsApi } from '../api'
 import { isTerminalStatus } from '../live/progressSource'
-import type { LiveProgressResponse } from '../types'
+import type { LiveProgressResponse, LogEntry } from '../types'
 import { TestRunCaseAccordion } from './TestRunCaseAccordion'
 
 export interface TestRunDetailViewProps {
@@ -28,6 +28,64 @@ export interface TestRunDetailViewProps {
  * chrome. Keeps the same UI rendering in both "watching live" and "reviewing
  * history" states so they never visually drift.
  */
+/** Scrollable console that auto-scrolls to the newest log entry. */
+function LiveLogConsole({ logs }: { logs: LogEntry[] }) {
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [isAtBottom, setIsAtBottom] = useState(true)
+
+  useEffect(() => {
+    if (isAtBottom && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [logs, isAtBottom])
+
+  const handleScroll = () => {
+    const el = containerRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    setIsAtBottom(atBottom)
+  }
+
+  const levelColor = (level: string) => {
+    if (level === 'error') return 'text-red-400'
+    if (level === 'warn' || level === 'warning') return 'text-yellow-400'
+    return 'text-green-400'
+  }
+
+  const levelPrefix = (level: string) => {
+    if (level === 'error') return '✗'
+    if (level === 'warn' || level === 'warning') return '⚠'
+    return '›'
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      onScroll={handleScroll}
+      className="h-52 overflow-y-auto rounded-lg bg-gray-950 p-3 font-mono text-xs leading-5 space-y-0.5"
+    >
+      {logs.length === 0 ? (
+        <p className="text-gray-500 italic">Waiting for agent activity…</p>
+      ) : (
+        logs.map((log, i) => {
+          const ts = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : ''
+          return (
+            <div key={i} className="flex gap-2">
+              <span className="shrink-0 text-gray-600">{ts}</span>
+              <span className={`shrink-0 w-3 ${levelColor(log.level)}`}>
+                {levelPrefix(log.level)}
+              </span>
+              <span className="text-gray-200 break-all">{log.message}</span>
+            </div>
+          )
+        })
+      )}
+      <div ref={bottomRef} />
+    </div>
+  )
+}
+
 export function TestRunDetailView({ progress, runId }: TestRunDetailViewProps) {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({})
   const [syncing, setSyncing] = useState<Record<string, boolean>>({})
@@ -123,6 +181,19 @@ export function TestRunDetailView({ progress, runId }: TestRunDetailViewProps) {
           </p>
         </Card>
       </div>
+
+      {/* Live activity log — shown during execution and when logs are present */}
+      {(progress.logs.length > 0 || !isDone) && (
+        <Card>
+          <div className="flex items-center justify-between mb-2">
+            <CardTitle>Live Activity</CardTitle>
+            {progress.logs.length > 0 && (
+              <span className="text-xs text-gray-400">{progress.logs.length} entries</span>
+            )}
+          </div>
+          <LiveLogConsole logs={progress.logs} />
+        </Card>
+      )}
 
       <div className="space-y-3">
         <CardTitle>Test Case Results</CardTitle>

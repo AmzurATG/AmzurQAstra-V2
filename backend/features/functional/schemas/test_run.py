@@ -27,9 +27,10 @@ class TestRunCreate(BaseModel):
     browser: str = "chromium"
     headless: bool = False
     config: Optional[Dict[str, Any]] = None
-    # "sequential" = original one-by-one isolated execution (default, safe)
+    # "sequential" = original one-by-one isolated execution (safe)
     # "grouped_parallel" = AI groups cases into browser lanes and runs in parallel
-    execution_strategy: str = "sequential"
+    # None = fall back to settings.DEFAULT_EXECUTION_STRATEGY (server default)
+    execution_strategy: Optional[str] = None
 
 
 class TestRunStartResponse(BaseModel):

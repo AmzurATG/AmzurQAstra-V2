@@ -13,6 +13,7 @@ import { testCasesApi, testStepsApi } from '../../api'
 import { CredentialsOverride } from '../../components/CredentialsOverride'
 import { TestCaseEditModal } from '../../components/TestCaseEditModal'
 import { CsvImportModal } from '../../components/CsvImportModal'
+import { ExcelImportModal } from '../../components/ExcelImportModal'
 import { TestCaseTable } from '../../components/TestCaseTable'
 import { useRequiredActiveTestRun } from '../../context/ActiveTestRunProvider'
 import { useTestCaseFilters } from '../../hooks/useTestCaseFilters'
@@ -80,6 +81,7 @@ export default function CasesTab() {
   )
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
+  const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingTestCase, setEditingTestCase] = useState<TestCase | null>(null)
   const [isCreatingNew, setIsCreatingNew] = useState(false)
@@ -90,6 +92,7 @@ export default function CasesTab() {
   const [overridePass, setOverridePass] = useState('')
   const [isRunningAll, setIsRunningAll] = useState(false)
   const [isSelectingAll, setIsSelectingAll] = useState(false)
+  const [executionStrategy, setExecutionStrategy] = useState<'sequential' | 'grouped_parallel' | 'playwright'>('grouped_parallel')
 
   // Pre-populate credentials from project settings
   useEffect(() => {
@@ -239,7 +242,7 @@ export default function CasesTab() {
       project_id: pid,
       app_url: cp?.app_url || undefined,
       test_case_ids: tcIds,
-      execution_strategy: 'sequential',
+      execution_strategy: executionStrategy,
       credentials:
         overrideUser || overridePass
           ? {
@@ -567,8 +570,22 @@ export default function CasesTab() {
             Run All
           </Button>
 
+          <select
+            value={executionStrategy}
+            onChange={(e) => setExecutionStrategy(e.target.value as 'sequential' | 'grouped_parallel' | 'playwright')}
+            className="px-3 py-2 border rounded-lg text-sm bg-white"
+            title="Choose how test cases are executed"
+          >
+            <option value="sequential">Sequential (AI)</option>
+            <option value="playwright">⚡ Playwright Fast (no AI)</option>
+            <option value="grouped_parallel">Grouped Parallel (AI lanes)</option>
+          </select>
+
           <Button variant="outline" onClick={() => setIsImportModalOpen(true)}>
             <DocumentArrowUpIcon className="w-4 h-4 mr-2" /> Import CSV
+          </Button>
+          <Button variant="outline" onClick={() => setIsExcelImportModalOpen(true)}>
+            <DocumentArrowUpIcon className="w-4 h-4 mr-2" /> Import Excel
           </Button>
           <Button onClick={handleCreateManualCase}>
             <PlusIcon className="w-4 h-4 mr-2" /> New Case
@@ -695,6 +712,16 @@ export default function CasesTab() {
       <CsvImportModal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
+        projectId={pid}
+        onImported={({ wroteCases }) => {
+          if (wroteCases) void loadTestCasesAfterImport()
+          else void loadTestCases()
+        }}
+      />
+
+      <ExcelImportModal
+        isOpen={isExcelImportModalOpen}
+        onClose={() => setIsExcelImportModalOpen(false)}
         projectId={pid}
         onImported={({ wroteCases }) => {
           if (wroteCases) void loadTestCasesAfterImport()

@@ -274,6 +274,22 @@ export const testCasesApi = {
         ],
       }
     ),
+
+  importExcel: (formData: FormData) =>
+    apiClient.post<TestCaseCsvImportResponse>(
+      '/functional/test-cases/import-excel',
+      formData,
+      {
+        transformRequest: [
+          (data, headers) => {
+            if (data instanceof FormData) {
+              delete headers['Content-Type']
+            }
+            return data
+          },
+        ],
+      }
+    ),
 }
 
 // Test Steps API

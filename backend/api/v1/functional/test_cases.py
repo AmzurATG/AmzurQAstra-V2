@@ -126,6 +126,69 @@ async def import_test_cases_csv(
     return result
 
 
+@router.post("/import-excel", response_model=TestCaseCsvImportResponse)
+async def import_test_cases_excel(
+    project_id: int = Form(...),
+    dry_run: bool = Form(False),
+    import_mode: str = Form("strict"),
+    sprint_prefix: str = Form(""),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import test cases from an Excel workbook (.xlsx / .xls).
+
+    Sheets are matched to project user stories via fuzzy title matching.
+    Each row becomes one test case with custom-action steps derived from
+    the prose steps column.
+
+    sprint_prefix: optional string prepended to case_key (e.g. "S1-") to
+    avoid key collisions when importing multiple sprints into the same project.
+    """
+    from features.functional.services.analytics.access import assert_project_access
+
+    await assert_project_access(db, current_user, project_id)
+
+    content = await file.read()
+    filename = getattr(file, "filename", "unknown")
+
+    allowed_types = {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+        "application/octet-stream",
+    }
+    content_type = getattr(file, "content_type", "") or ""
+    if content_type and content_type not in allowed_types:
+        if not (filename.endswith(".xlsx") or filename.endswith(".xls")):
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail="Only .xlsx or .xls files are accepted for Excel import.",
+            )
+
+    logger.info(
+        "[import_excel] request project_id=%s user_id=%s filename=%r size_bytes=%d "
+        "dry_run=%s mode=%s sprint_prefix=%r",
+        project_id, current_user.id, filename, len(content), dry_run, import_mode, sprint_prefix,
+    )
+
+    service = TestCaseService(db)
+    result = await service.import_test_cases_from_excel(
+        project_id=project_id,
+        created_by=current_user.id,
+        file_bytes=content,
+        dry_run=dry_run,
+        import_mode=import_mode or "strict",
+        sprint_prefix=sprint_prefix or "",
+    )
+    if result.errors and not result.created_cases:
+        logger.warning(
+            "[import_excel] failed project_id=%s filename=%r error_count=%d",
+            project_id, filename, len(result.errors),
+        )
+    return result
+
+
 @router.patch("/promote-all-draft", response_model=dict)
 async def promote_all_draft_to_ready(
     body: PromoteAllDraftRequest,

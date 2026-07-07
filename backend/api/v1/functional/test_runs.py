@@ -103,11 +103,12 @@ async def get_live_progress(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Poll live execution progress. Falls back to DB for completed runs."""
-    run_number_row = (
-        await db.execute(select(TestRun.run_number).where(TestRun.id == run_id))
-    ).scalar_one_or_none()
-
+    """Poll live execution progress. Serves in-memory state first (fast path);
+    falls back to the database only for completed runs or when no in-memory
+    state is found.  The run_number DB query is intentionally deferred so the
+    hot path (active run) returns in <5 ms instead of 500 ms.
+    """
+    # ── Fast path: in-memory progress (no DB hit while run is active) ────────
     progress_manager = RunProgressManager()
     progress = progress_manager.get(run_id)
     if progress:
@@ -121,26 +122,41 @@ async def get_live_progress(
             "completed_results": list(progress.get("completed_results", [])),
             "logs": list(progress.get("logs", [])),
             "error": progress.get("error"),
+            "execution_plan": progress.get("execution_plan"),
         }
         if lite:
             body = live_progress_to_lite(body)
-        return LiveProgressResponse(
-            run_id=run_id,
-            run_number=run_number_row,
-            status=body["status"],
-            percentage=body["percentage"],
-            current_test_case_index=body["current_test_case_index"],
-            total_test_cases=body["total_test_cases"],
-            current_test_case_title=body.get("current_test_case_title"),
-            current_step_info=body.get("current_step_info"),
-            completed_results=[
-                CompletedCaseResult(**r) for r in body["completed_results"]
-            ],
-            logs=[LogEntry(**l) for l in body["logs"]],
-            error=body.get("error"),
-        )
+        # Fetch run_number only when we're going to use it (single-row PK look-up)
+        run_number_row = (
+            await db.execute(select(TestRun.run_number).where(TestRun.id == run_id))
+        ).scalar_one_or_none()
+        try:
+            return LiveProgressResponse(
+                run_id=run_id,
+                run_number=run_number_row,
+                status=body["status"],
+                percentage=body["percentage"],
+                current_test_case_index=body["current_test_case_index"],
+                total_test_cases=body["total_test_cases"],
+                current_test_case_title=body.get("current_test_case_title"),
+                current_step_info=body.get("current_step_info"),
+                completed_results=[
+                    CompletedCaseResult(**r) for r in body["completed_results"]
+                ],
+                logs=[LogEntry(**l) for l in body["logs"]],
+                error=body.get("error"),
+                execution_plan=body.get("execution_plan"),
+            )
+        except Exception as exc:
+            # Log and fall through to DB path rather than returning 500
+            from common.utils.logger import logger
+            logger.warning(f"[live] in-memory serialisation failed for run_id={run_id}: {exc}")
 
-    # Fallback: load from DB
+    # ── Slow path: load from DB (completed runs / first poll before bg starts) ─
+    run_number_row = (
+        await db.execute(select(TestRun.run_number).where(TestRun.id == run_id))
+    ).scalar_one_or_none()
+
     service = TestExecutionService(db)
     run = await service.get_run_with_results(run_id)
     if not run:

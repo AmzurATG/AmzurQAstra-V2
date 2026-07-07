@@ -5,7 +5,9 @@ Parallel Execution Orchestrator — runs all test cases via the three-phase agen
   Phase 2 (SharedSessionRunner / TestCaseRunner): One browser per lane group.
   Phase 3 (EvaluatorAgent): Fan merged results back to each TC's step_results with screenshot_path.
 
-Every run goes through this orchestrator.  The old sequential for-loop has been removed.
+Activated when execution_strategy == "grouped_parallel".  The default sequential path remains in
+TestExecutionService._execute_background.  This orchestrator is called from there when the strategy
+is set to grouped_parallel.
 """
 from __future__ import annotations
 
@@ -36,7 +38,11 @@ from features.functional.utils.credentials_redaction import (
     redact_step_dict,
 )
 
-MAX_CONCURRENT_BROWSERS = 4
+from config import settings
+
+# Configurable via settings/.env (MAX_CONCURRENT_BROWSERS). Must stay within your
+# Steel plan's concurrent-session quota (free tier ≈ 1; pro = raise to 15-25).
+MAX_CONCURRENT_BROWSERS = settings.MAX_CONCURRENT_BROWSERS
 
 
 def _build_tc_full_payload(tc: TestCase) -> Dict[str, Any]:
@@ -129,7 +135,7 @@ class ParallelExecutionOrchestrator:
             "current_test_case_title": "Building execution plan…",
             "current_step_info": "AI is merging duplicate steps and assigning browser lanes",
             "completed_results": [],
-            "logs": [],
+            "logs": list((self.pm.get(run_id) or {}).get("logs", [])),
             "error": None,
         })
 
@@ -167,7 +173,7 @@ class ParallelExecutionOrchestrator:
             "current_test_case_title": "Starting browser lanes…",
             "current_step_info": f"{len(plan.groups)} groups across {plan.parallelism} lanes",
             "completed_results": [],
-            "logs": [],
+            "logs": list((self.pm.get(run_id) or {}).get("logs", [])),
             "error": None,
             "execution_plan": plan.to_dict(),
         })
@@ -275,7 +281,7 @@ class ParallelExecutionOrchestrator:
             "current_test_case_title": None,
             "current_step_info": "Completed",
             "completed_results": completed_results,
-            "logs": [],
+            "logs": list((self.pm.get(run_id) or {}).get("logs", [])),
             "error": None,
             "execution_plan": plan.to_dict(),
         })
@@ -331,53 +337,73 @@ class ParallelExecutionOrchestrator:
                 tc_data=tc_data,
             )
         else:
-            # Isolated: run each case with its own fresh browser (unchanged path)
+            # Isolated: run each case in its OWN fresh browser, but via the SEGMENTED
+            # runner (one original step at a time) so EVERY step gets a ground-truth
+            # screenshot and a per-step pass/fail — even when the case fails (no 0/N).
+            from features.functional.core.execution.execution_plan import MergedStep, PlannedCase
             tc_results: Dict[int, Dict[str, Any]] = {}
-            isolated_runner = TestCaseRunner()
+            seg_runner = SharedSessionRunner()
             for planned in sorted(group.ordered_cases, key=lambda c: c.order):
                 if self.pm.is_cancel_requested(run_id):
-                    tc_d = tc_data.get(planned.tc_id, {})
                     tc_results[planned.tc_id] = {
-                        "overall": "cancelled",
-                        "step_results": [],
-                        "screenshots": [],
-                        "screenshot_path": None,
-                        "summary": "Run cancelled.",
-                        "duration_ms": 0,
-                        "error": None,
+                        "overall": "cancelled", "step_results": [], "screenshots": [],
+                        "screenshot_path": None, "summary": "Run cancelled.",
+                        "duration_ms": 0, "error": None,
                     }
                     continue
                 tc_d = tc_data.get(planned.tc_id, {})
-                raw = await isolated_runner.run(
-                    run_id=run_uuid,
-                    test_case_id=planned.tc_id,
-                    title=tc_d.get("title", ""),
-                    description=tc_d.get("description", ""),
-                    preconditions=tc_d.get("preconditions", ""),
-                    steps=tc_d.get("steps", []),
-                    app_url=app_url,
-                    username=username,
-                    password=password,
-                    use_google_signin=use_google_signin,
-                    headless=headless,
-                    browser_context=None,
+                steps = sorted(tc_d.get("steps", []), key=lambda x: x.get("step_number", 0))
+                if not steps:
+                    tc_results[planned.tc_id] = {
+                        "overall": "error", "step_results": [], "screenshots": [],
+                        "screenshot_path": None, "summary": "No steps to execute.",
+                        "duration_ms": 0, "error": "No steps.",
+                    }
+                    continue
+
+                # One synthetic single-case shared group: merged_steps == original steps.
+                merged = [
+                    MergedStep(
+                        merged_step_number=s.get("step_number", i + 1),
+                        action=s.get("action", "custom"),
+                        description=s.get("description") or s.get("action", "") or "step",
+                        target=s.get("target"), value=s.get("value"),
+                        expected_result=s.get("expected_result"),
+                        satisfies=[{"tc_id": planned.tc_id, "step_number": s.get("step_number", i + 1)}],
+                    )
+                    for i, s in enumerate(steps)
+                ]
+                syn_group = ExecutionGroup(
+                    group_id=f"{group.group_id}_tc{planned.tc_id}",
+                    label=(tc_d.get("title") or f"Case {planned.tc_id}")[:50],
+                    session_type="shared",  # routes to segmented runner; opens its own browser
+                    browser_lane=group.browser_lane,
+                    reset_url=app_url,
+                    ordered_cases=[PlannedCase(tc_id=planned.tc_id, order=1, reset_before=None,
+                                               reason="isolated — segmented per step")],
+                    merged_steps=merged,
+                )
+                syn_result = await seg_runner.run_group(
+                    group=syn_group, app_url=app_url, username=username, password=password,
+                    use_google_signin=use_google_signin, headless=headless, run_uuid=run_uuid,
                     execution_run_id=run_id,
                 )
-                # Attach screenshot_path to each step_result for isolated runs
-                sr = raw.get("step_results", [])
-                agent_logs = raw.get("logs", [])
-                self._attach_screenshots_to_steps(sr, agent_logs)
-                raw["step_results"] = sr
-                raw["screenshot_path"] = self._pick_primary_screenshot(sr, raw.get("screenshots", []))
-                tc_results[planned.tc_id] = {
-                    "overall": raw.get("overall", "error"),
-                    "step_results": sr,
-                    "screenshots": raw.get("screenshots", []),
-                    "screenshot_path": raw.get("screenshot_path"),
-                    "summary": raw.get("summary", ""),
-                    "duration_ms": raw.get("duration_ms", 0),
-                    "error": raw.get("error"),
+                syn_origin = {
+                    f"{syn_group.group_id}:{ms.merged_step_number}": ms.satisfies for ms in merged
                 }
+                fanned = evaluate_group_results(
+                    group=syn_group, group_result=syn_result,
+                    step_origin_map=syn_origin, tc_data=tc_data,
+                )
+                tc_res_one = fanned.get(planned.tc_id, {
+                    "overall": "error", "step_results": [], "screenshots": [],
+                    "screenshot_path": None, "summary": syn_result.get("summary", ""),
+                    "duration_ms": syn_result.get("duration_ms", 0),
+                    "error": syn_result.get("error"),
+                })
+                # Carry the detailed per-action agent_logs so isolated cases show them too.
+                tc_res_one["agent_logs"] = syn_result.get("agent_logs", [])
+                tc_results[planned.tc_id] = tc_res_one
 
         # ── Persist results ───────────────────────────────────────────────────
         async with completed_lock:
@@ -399,8 +425,11 @@ class ParallelExecutionOrchestrator:
                     for s in step_results
                 ]
 
-                # agent_logs from the group result (shared) or isolated run (per-case)
-                raw_agent_logs = group_result.get("agent_logs") if group.is_shared else None
+                # agent_logs from the group result (shared) or the per-case isolated run.
+                raw_agent_logs = (
+                    group_result.get("agent_logs") if group.is_shared
+                    else tc_res.get("agent_logs")
+                )
                 safe_logs = redact_agent_logs_list(raw_agent_logs, username, password)
 
                 test_result.status = (
@@ -459,7 +488,7 @@ class ParallelExecutionOrchestrator:
                     "current_test_case_title": tc_title,
                     "current_step_info": f"Lane {group.browser_lane}: {group.label}",
                     "completed_results": list(completed_results),
-                    "logs": [],
+                    "logs": list((self.pm.get(run_id) or {}).get("logs", [])),
                     "error": None,
                 })
 
@@ -622,6 +651,6 @@ class ParallelExecutionOrchestrator:
                 "current_test_case_title": tc_title,
                 "current_step_info": f"Lane {group.browser_lane}: {group.label}",
                 "completed_results": list(completed_results),
-                "logs": [],
+                "logs": list((self.pm.get(run_id) or {}).get("logs", [])),
                 "error": None,
             })

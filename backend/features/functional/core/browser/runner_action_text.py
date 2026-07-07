@@ -54,13 +54,33 @@ def humanize_action_dict(d: dict) -> str:
 
 
 def action_description_from_output(output: Any) -> str:
+    """Detailed, human-readable description of an agent step.
+
+    Combines the agent's OWN reasoning (what it evaluated and what it intends to do
+    next) with the concrete browser action(s) it took — so the UI shows a rich,
+    understandable step, not just "clicked an element".
+    """
     try:
-        if output and hasattr(output, "action") and output.action:
-            parts = []
+        # The agent's reasoning fields (browser-use AgentOutput).
+        goal = (getattr(output, "next_goal", None) or getattr(output, "thinking", None) or "").strip()
+        prev = (getattr(output, "evaluation_previous_goal", None) or "").strip()
+
+        actions = []
+        if output and getattr(output, "action", None):
             for act in output.action:
                 dump = act.model_dump(exclude_none=True) if hasattr(act, "model_dump") else {}
-                parts.append(humanize_action_dict(dump))
-            return " · ".join(parts) if parts else "Working…"
+                actions.append(humanize_action_dict(dump))
+        action_str = " · ".join(a for a in actions if a)
+
+        segments = []
+        if prev:
+            segments.append(f"✓ {prev[:120]}")
+        if goal:
+            segments.append(f"→ {goal[:160]}")
+        if action_str:
+            segments.append(f"[{action_str}]")
+        detailed = "  ".join(segments).strip()
+        return detailed[:400] if detailed else "Working…"
     except Exception:
         pass
     return "Working…"

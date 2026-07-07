@@ -531,9 +531,28 @@ class TestCaseRunner:
             sensitive_data = {"username": username, "password": password}
 
         browser = None
-        if browser_context:
+        _steel_kind = None
+        _steel_ctx = None
+        _browser_session = None  # BrowserSession for Steel CDP path
+
+        if browser_context is not None:
+            # Legacy: external caller supplied a pre-made browser object.
             browser = browser_context
-        
+        else:
+            # Select browser engine via factory (chrome or Steel CDP).
+            from features.functional.core.browser.browser_engine_factory import (
+                create_browser_context,
+            )
+            _steel_kind, _steel_ctx = await create_browser_context(
+                run_id=run_id, headless=headless
+            )
+            if _steel_kind == "steel" and _steel_ctx is not None:
+                # Steel path: use BrowserSession(cdp_url=...) — the correct
+                # integration per Steel docs. The cdp_url already includes the
+                # apiKey query param so no 502 on connection.
+                from browser_use import BrowserSession as _BrowserSession
+                _browser_session = _BrowserSession(cdp_url=_steel_ctx.cdp_url)
+
         max_retries = 3
         retry_count = 0
         result: Any = None
@@ -541,13 +560,13 @@ class TestCaseRunner:
         async def _run_agent_with_cancel(agent: Any) -> Any:
             """Run browser-use Agent; stop promptly when user cancels (numeric execution_run_id)."""
             if execution_run_id is None:
-                return await agent.run(max_steps=80, on_step_end=_on_step_end)
+                return await agent.run(max_steps=settings.BROWSER_USE_MAX_STEPS, on_step_end=_on_step_end)
 
             async def _wait_for_cancel() -> None:
                 while not progress_mgr.is_cancel_requested(execution_run_id):
                     await asyncio.sleep(0.25)
 
-            agent_task = asyncio.create_task(agent.run(max_steps=80, on_step_end=_on_step_end))
+            agent_task = asyncio.create_task(agent.run(max_steps=settings.BROWSER_USE_MAX_STEPS, on_step_end=_on_step_end))
             poll_task = asyncio.create_task(_wait_for_cancel())
             done, pending = await asyncio.wait(
                 [agent_task, poll_task],
@@ -608,32 +627,45 @@ class TestCaseRunner:
                         "error": None,
                     }
 
-                agent = Agent(
-                    task=task,
-                    llm=_llm(),
-                    browser=browser,
-                    browser_profile=BrowserProfile(
-                        headless=headless,
-                        is_local=True,
-                        disable_security=True,
-                        args=default_browser_chrome_args(),
-                        enable_default_extensions=settings.BROWSER_USE_DEFAULT_EXTENSIONS,
-                    ) if not browser else None,
-                    sensitive_data=sensitive_data,
-                    register_new_step_callback=_on_step,
-                    use_vision=True,  # Explicitly enable vision prowess
-                )
+                # Steel path → pass BrowserSession directly (no browser_profile needed).
+                # Chrome path → pass BrowserProfile so browser-use launches Chrome.
+                if _browser_session is not None:
+                    agent = Agent(
+                        task=task,
+                        llm=_llm(),
+                        browser_session=_browser_session,
+                        sensitive_data=sensitive_data,
+                        register_new_step_callback=_on_step,
+                        use_vision=settings.BROWSER_USE_VISION,
+                    )
+                else:
+                    agent = Agent(
+                        task=task,
+                        llm=_llm(),
+                        browser=browser,
+                        browser_profile=BrowserProfile(
+                            headless=headless,
+                            is_local=True,
+                            disable_security=True,
+                            args=default_browser_chrome_args(),
+                            enable_default_extensions=settings.BROWSER_USE_DEFAULT_EXTENSIONS,
+                        ) if not browser else None,
+                        sensitive_data=sensitive_data,
+                        register_new_step_callback=_on_step,
+                        use_vision=settings.BROWSER_USE_VISION,
+                    )
 
-                # Re-check cancellation immediately after agent creation to avoid late browser launch.
+                # Re-check cancellation immediately after agent creation.
                 if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
                     raise TestRunCancelled()
 
-                if browser:
+                # For the local Chrome path only: start the browser before agent.run.
+                # BrowserSession (Steel) starts itself lazily inside agent.run().
+                if browser and _browser_session is None:
                     try:
                         await browser.start()
                     except Exception:
                         pass
-                    # If cancel arrived while browser was starting, stop before agent.run.
                     if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
                         raise TestRunCancelled()
 
@@ -682,6 +714,11 @@ class TestCaseRunner:
                     f"⚠ Browser startup failed (attempt {retry_count}/{max_retries}). "
                     f"Retrying in {wait_time}s... Error: {str(exc)[:100]}"
                 )
+                # For the Steel path, create a fresh BrowserSession for the retry
+                # so the previous session's error state doesn't carry over.
+                if _steel_kind == "steel" and _steel_ctx is not None:
+                    from browser_use import BrowserSession as _BrowserSession
+                    _browser_session = _BrowserSession(cdp_url=_steel_ctx.cdp_url)
                 await asyncio.sleep(wait_time)
 
         try:
@@ -736,3 +773,12 @@ class TestCaseRunner:
                 "error": str(exc),
             }
             return err
+
+        finally:
+            # Release the Steel remote session if this invocation created it.
+            # (browser_context callers own their own session lifecycle.)
+            if _steel_kind is not None and _steel_ctx is not None:
+                from features.functional.core.browser.browser_engine_factory import (
+                    release_browser_context,
+                )
+                await release_browser_context(_steel_kind, _steel_ctx)
