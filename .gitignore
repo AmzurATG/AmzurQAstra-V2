@@ -38,8 +38,7 @@ uploads/*
 !uploads/.gitkeep
 
 # Document Storage (outside backend for uvicorn stability)
-storage/*
-!storage/.gitkeep
+storage/
 
 # Coverage
 coverage/
