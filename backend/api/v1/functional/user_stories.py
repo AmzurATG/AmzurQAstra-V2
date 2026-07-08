@@ -217,7 +217,7 @@ async def list_user_stories(
     total_result = await db.execute(count_query)
     total = total_result.scalar()
 
-    query = query.order_by(UserStory.updated_at.desc())
+    query = query.order_by(UserStory.id.asc())
     query = query.offset((pagination.page - 1) * pagination.page_size).limit(
         pagination.page_size
     )

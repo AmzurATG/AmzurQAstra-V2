@@ -19,6 +19,7 @@ if not _ENV_FILE.is_file():
 
 import bcrypt
 from sqlalchemy import text
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 
 
@@ -42,40 +43,138 @@ async def reset_admin():
     print(f"Password hash generated successfully")
     print(f"Verification: {bcrypt.checkpw(password_bytes, hashed.encode('utf-8'))}")
     print(f"\nConnecting to: {db_url}")
-    print(f"Schema: {settings.DB_SCHEMA}")
-    
-    engine = create_async_engine(db_url)
-    
-    async with engine.begin() as conn:
-        # Set search_path to the configured schema
-        await conn.execute(text(f"SET search_path TO {settings.DB_SCHEMA}"))
+    print(f"Configured schema: {settings.DB_SCHEMA}")
 
-        # Check existing users
-        result = await conn.execute(text("SELECT id, email, hashed_password FROM users"))
-        users = result.fetchall()
-        
-        print(f"\nExisting users in database:")
-        for user in users:
-            print(f"  ID: {user[0]}, Email: {user[1]}, Hash: {user[2][:30]}...")
-        
-        if not users:
-            print("\nNo users found! Creating admin user...")
-            await conn.execute(text("""
-                INSERT INTO users (email, hashed_password, full_name, role, is_active, is_superuser)
-                VALUES (:email, :hash, 'QAstra Admin', 'admin', true, true)
-            """), {"email": admin_email, "hash": hashed})
-            print("Admin user created!")
-        else:
-            # Update first user's password
-            user_id = users[0][0]
-            user_email = users[0][1]
-            print(f"\nUpdating password for user {user_email}...")
-            await conn.execute(text("""
-                UPDATE users SET hashed_password = :hash WHERE id = :id
-            """), {"hash": hashed, "id": user_id})
-            print(f"Password updated for {user_email}!")
+    def _quoted_ident(name: str) -> str:
+        return '"' + name.replace('"', '""') + '"'
     
-    await engine.dispose()
+    users = []
+
+    async def _run_async() -> list:
+        engine = create_async_engine(db_url)
+        try:
+            async with engine.begin() as conn:
+                schema_result = await conn.execute(text("""
+                    SELECT table_schema
+                    FROM information_schema.tables
+                    WHERE table_name = 'users'
+                    ORDER BY
+                        CASE
+                            WHEN table_schema = :preferred_schema THEN 0
+                            WHEN table_schema = 'public' THEN 1
+                            ELSE 2
+                        END,
+                        table_schema
+                    LIMIT 1
+                """), {"preferred_schema": settings.DB_SCHEMA})
+                users_schema = schema_result.scalar_one_or_none()
+
+                if not users_schema:
+                    raise RuntimeError(
+                        "users table not found in any schema. Run migrations first: "
+                        "cd backend && alembic upgrade head"
+                    )
+
+                print(f"Using users table schema: {users_schema}")
+                await conn.execute(text(f"SET search_path TO {_quoted_ident(users_schema)}"))
+
+                # Check existing users
+                result = await conn.execute(text("SELECT id, email, hashed_password FROM users"))
+                current_users = result.fetchall()
+
+                print(f"\nExisting users in database:")
+                for user in current_users:
+                    print(f"  ID: {user[0]}, Email: {user[1]}, Hash: {user[2][:30]}...")
+
+                if not current_users:
+                    print("\nNo users found! Creating admin user...")
+                    await conn.execute(text("""
+                        INSERT INTO users (email, hashed_password, full_name, role, is_active, is_superuser)
+                        VALUES (:email, :hash, 'QAstra Admin', 'admin', true, true)
+                    """), {"email": admin_email, "hash": hashed})
+                    print("Admin user created!")
+                else:
+                    # Update first user's password
+                    user_id = current_users[0][0]
+                    user_email = current_users[0][1]
+                    print(f"\nUpdating password for user {user_email}...")
+                    await conn.execute(text("""
+                        UPDATE users SET hashed_password = :hash WHERE id = :id
+                    """), {"hash": hashed, "id": user_id})
+                    print(f"Password updated for {user_email}!")
+
+                return current_users
+        finally:
+            await engine.dispose()
+
+    def _run_sync() -> list:
+        sync_url = db_url.replace("+asyncpg", "+psycopg2")
+        print("Using sync SQLAlchemy engine fallback (psycopg2).")
+        print(f"Fallback URL: {sync_url}")
+        engine = create_engine(sync_url)
+        try:
+            with engine.begin() as conn:
+                schema_result = conn.execute(text("""
+                    SELECT table_schema
+                    FROM information_schema.tables
+                    WHERE table_name = 'users'
+                    ORDER BY
+                        CASE
+                            WHEN table_schema = :preferred_schema THEN 0
+                            WHEN table_schema = 'public' THEN 1
+                            ELSE 2
+                        END,
+                        table_schema
+                    LIMIT 1
+                """), {"preferred_schema": settings.DB_SCHEMA})
+                users_schema = schema_result.scalar_one_or_none()
+
+                if not users_schema:
+                    raise RuntimeError(
+                        "users table not found in any schema. Run migrations first: "
+                        "cd backend && alembic upgrade head"
+                    )
+
+                print(f"Using users table schema: {users_schema}")
+                conn.execute(text(f"SET search_path TO {_quoted_ident(users_schema)}"))
+
+                result = conn.execute(text("SELECT id, email, hashed_password FROM users"))
+                current_users = result.fetchall()
+
+                print(f"\nExisting users in database:")
+                for user in current_users:
+                    print(f"  ID: {user[0]}, Email: {user[1]}, Hash: {user[2][:30]}...")
+
+                if not current_users:
+                    print("\nNo users found! Creating admin user...")
+                    conn.execute(text("""
+                        INSERT INTO users (email, hashed_password, full_name, role, is_active, is_superuser)
+                        VALUES (:email, :hash, 'QAstra Admin', 'admin', true, true)
+                    """), {"email": admin_email, "hash": hashed})
+                    print("Admin user created!")
+                else:
+                    user_id = current_users[0][0]
+                    user_email = current_users[0][1]
+                    print(f"\nUpdating password for user {user_email}...")
+                    conn.execute(text("""
+                        UPDATE users SET hashed_password = :hash WHERE id = :id
+                    """), {"hash": hashed, "id": user_id})
+                    print(f"Password updated for {user_email}!")
+
+                return current_users
+        finally:
+            engine.dispose()
+
+    try:
+        users = await _run_async()
+    except ImportError as exc:
+        message = str(exc)
+        if "_ctypes" in message or "asyncpg" in message:
+            print(f"Async driver import failed ({message}).")
+            users = _run_sync()
+        else:
+            raise
+
     print(f"\n✓ Login with:")
     print(f"  Email: {users[0][1] if users else admin_email}")
     print(f"  Password: {admin_password}")
