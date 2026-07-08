@@ -18,24 +18,6 @@ import { useRequiredActiveTestRun } from '../../context/ActiveTestRunProvider'
 import { useTestCaseFilters } from '../../hooks/useTestCaseFilters'
 import type { TestCase, TestRunCreateRequest, TestStep } from '../../types'
 
-const testCaseSelectionKey = (projectId: string) =>
-  `qastra:test-case-selection:${projectId}`
-
-function loadTestCaseSelection(projectId: string | undefined): Set<number> {
-  if (!projectId || typeof window === 'undefined') return new Set()
-  try {
-    const raw = sessionStorage.getItem(testCaseSelectionKey(projectId))
-    if (!raw) return new Set()
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return new Set()
-    return new Set(
-      parsed.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
-    )
-  } catch {
-    return new Set()
-  }
-}
-
 /**
  * Functional Testing → Cases tab.
  *
@@ -75,9 +57,7 @@ export default function CasesTab() {
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [loadingSteps, setLoadingSteps] = useState<Set<number>>(new Set())
   const [stepsCache, setStepsCache] = useState<Record<number, TestStep[]>>({})
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(() =>
-    loadTestCaseSelection(projectId)
-  )
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
@@ -103,22 +83,6 @@ export default function CasesTab() {
   useEffect(() => {
     if (projectId) void revalidateProject(projectId)
   }, [projectId, revalidateProject])
-
-  useEffect(() => {
-    setSelectedIds(loadTestCaseSelection(projectId))
-  }, [projectId])
-
-  useEffect(() => {
-    if (!projectId) return
-    try {
-      sessionStorage.setItem(
-        testCaseSelectionKey(projectId),
-        JSON.stringify([...selectedIds])
-      )
-    } catch {
-      // ignore quota / private mode
-    }
-  }, [projectId, selectedIds])
 
   // Drop selections for rows that disappeared within the same list view.
   useEffect(() => {
@@ -238,6 +202,7 @@ export default function CasesTab() {
     }
     const runPromise = activeRun.startRun(request).then((runId) => {
       if (runId) {
+        setSelectedIds(new Set())
         navigate(`/projects/${projectId}/functional-testing/live`)
       }
       return runId
@@ -253,8 +218,7 @@ export default function CasesTab() {
     dispatchRun(buildRequest([tcId]), 'Initializing browser…')
 
   /** Resolve every selected row (fetch if not on current page) and ensure all are `ready`. */
-  const resolveRunnableSelectedIds = async (): Promise<number[] | null> => {
-    const ids = Array.from(selectedIds)
+  const resolveRunnableSelectedIds = async (ids: number[]): Promise<number[] | null> => {
     const byId = new Map(testCases.map((tc) => [tc.id, tc]))
     const missing = ids.filter((id) => !byId.has(id))
     try {
@@ -292,11 +256,12 @@ export default function CasesTab() {
   }
 
   const runSelected = async () => {
-    if (selectedIds.size === 0) {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) {
       toast.error('Select cases first')
       return
     }
-    const runnableIds = await resolveRunnableSelectedIds()
+    const runnableIds = await resolveRunnableSelectedIds(ids)
     if (!runnableIds) return
     dispatchRun(
       buildRequest(runnableIds),
@@ -410,6 +375,22 @@ export default function CasesTab() {
     statusFilter === 'ready' ? 'Run All Ready' : 'Run All (filtered)'
   const runDisabled =
     activeRun.isCreating || activeRun.isRunning || testCases.length === 0
+  const hasSelection = selectedIds.size > 0
+  const runPrimaryLabel = `Run Selected (${selectedIds.size})`
+  const runPrimaryDisabled =
+    activeRun.isCreating ||
+    activeRun.isRunning ||
+    selectedIds.size === 0
+
+  const runAllWithConfirm = () => {
+    if (hasSelection) return
+    const confirmMessage =
+      statusFilter === 'ready'
+        ? 'Run all Ready test cases in this project?'
+        : `Run all currently filtered test cases (status filter: ${statusFilter})?`
+    if (!window.confirm(confirmMessage)) return
+    runAll()
+  }
 
   return (
     <div className="space-y-6">
@@ -428,24 +409,8 @@ export default function CasesTab() {
             />{' '}
             Refresh
           </Button>
-          {selectedIds.size > 0 && (
+          {hasSelection && (
             <>
-              <Button
-                variant="outline"
-                onClick={() => void runSelected()}
-                disabled={
-                  activeRun.isCreating ||
-                  activeRun.isRunning ||
-                  selectionIncludesNonReadyOnPage
-                }
-                title={
-                  selectionIncludesNonReadyOnPage
-                    ? 'Deselect draft or deprecated cases, or mark them Ready before running'
-                    : undefined
-                }
-              >
-                <PlayIcon className="w-4 h-4 mr-1" /> Run ({selectedIds.size})
-              </Button>
               <Button
                 variant="outline"
                 onClick={() => handleBulkStatus('ready')}
@@ -463,7 +428,29 @@ export default function CasesTab() {
               </Button>
             </>
           )}
-          <Button onClick={runAll} disabled={runDisabled}>
+          <Button
+            onClick={() => void runSelected()}
+            disabled={runPrimaryDisabled}
+            title={
+              hasSelection && selectionIncludesNonReadyOnPage
+                ? 'Some selected cases are not Ready. Click to see which ones are blocking the run.'
+                : selectedIds.size === 0
+                  ? 'Select one or more test cases to run'
+                : undefined
+            }
+          >
+            <PlayIcon className="w-4 h-4 mr-2" /> {runPrimaryLabel}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={runAllWithConfirm}
+            disabled={runDisabled || hasSelection}
+            title={
+              hasSelection
+                ? 'Clear selected cases to use Run All'
+                : undefined
+            }
+          >
             <PlayIcon className="w-4 h-4 mr-2" /> {runAllLabel}
           </Button>
           <Button variant="outline" onClick={() => setIsImportModalOpen(true)}>

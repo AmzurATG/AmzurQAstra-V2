@@ -1,7 +1,7 @@
 """
 Test Execution Service — orchestrates test runs via browser-use.
-Each test case runs sequentially with an isolated browser (fresh session per case)
-so batch runs match single-case behavior (no shared login/DOM state).
+Selected test cases in a run reuse one browser session so login state persists
+across the batch unless the application itself clears it.
 """
 import asyncio
 import re
@@ -14,14 +14,17 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
+from browser_use import Browser, BrowserProfile
 
 from common.api.pagination import PaginationParams
+import config
 from common.utils.logger import logger
 from common.db.models.project import Project
 from features.functional.db.models.test_case import TestCase, TestCaseStatus
 from features.functional.db.models.test_run import TestRun, TestRunStatus
 from features.functional.db.models.test_result import TestResult, TestResultStatus
 from features.functional.schemas.test_run import TestRunCreate
+from features.functional.core.browser.chrome_automation_args import default_browser_chrome_args
 from features.functional.core.browser.test_case_runner import (
     TestCaseRunner,
     cleanup_tc_progress,
@@ -415,10 +418,25 @@ class TestExecutionService:
                 passed = 0
                 failed = 0
                 runner = TestCaseRunner()
-                _log("🚀 Test run started — each case uses its own browser (isolated session)")
+
+                shared_browser = Browser(
+                    browser_profile=BrowserProfile(
+                        headless=headless,
+                        is_local=True,
+                        disable_security=True,
+                        args=default_browser_chrome_args(),
+                        enable_default_extensions=getattr(
+                            config, "settings"
+                        ).BROWSER_USE_DEFAULT_EXTENSIONS,
+                        keep_alive=True,
+                    )
+                )
+
+                _log("🚀 Test run started — selected cases reuse one browser session")
                 aborted_cancel = False
 
-                for idx, test_result in enumerate(ordered_results):
+                try:
+                    for idx, test_result in enumerate(ordered_results):
                         await db.refresh(run)
                         if (
                             run.status == TestRunStatus.CANCELLED
@@ -562,7 +580,7 @@ class TestExecutionService:
                             password=password,
                             use_google_signin=use_google_signin,
                             headless=headless,
-                            browser_context=None,
+                            browser_context=shared_browser,
                             on_step_callback=_on_tc_step,
                             execution_run_id=run_id,
                         )
@@ -660,6 +678,13 @@ class TestExecutionService:
                             )
                             aborted_cancel = True
                             break
+                finally:
+                    try:
+                        await shared_browser.kill()
+                    except Exception as browser_cleanup_error:
+                        logger.warning(
+                            f"[TestExecutionService] Shared browser cleanup failed: {browser_cleanup_error}"
+                        )
 
                 if aborted_cancel:
                     skipped_n = sum(
