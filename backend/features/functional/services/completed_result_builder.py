@@ -10,6 +10,15 @@ from features.functional.db.models.test_result import TestResult
 LITE_STRIP_KEYS = ("step_results", "adapted_steps", "original_steps", "agent_logs")
 
 
+def _count_step_screenshots(step_results: Optional[List[Dict[str, Any]]]) -> int:
+    """Count steps that have a screenshot (matches UI strip), not distinct files."""
+    if not step_results:
+        return 0
+    return sum(
+        1 for s in step_results if isinstance(s, dict) and s.get("screenshot_path")
+    )
+
+
 def _count_agent_screenshots(agent_logs: Optional[List[Dict[str, Any]]]) -> int:
     if not agent_logs:
         return 0
@@ -22,13 +31,25 @@ def completed_case_to_lite(d: Dict[str, Any]) -> Dict[str, Any]:
     """Shrink one completed-case dict for fast /live polling (no heavy JSON blobs)."""
     n = d.get("agent_screenshot_count")
     if n is None:
+        n = _count_step_screenshots(d.get("step_results"))
+    if not n:
         n = _count_agent_screenshots(d.get("agent_logs"))
-    has_adapt = bool(d.get("adapted_steps"))
+    if not n and d.get("screenshot_path"):
+        n = 1
+    has_adapt = bool(d.get("adapted_steps")) or bool(d.get("has_adaptations"))
+    inferred = d.get("has_inferred_verdicts")
+    if inferred is None and d.get("step_results"):
+        inferred = any(
+            isinstance(s, dict)
+            and str(s.get("verdict_source") or "").startswith("inferred")
+            for s in (d.get("step_results") or [])
+        )
     out = {k: v for k, v in d.items() if k not in LITE_STRIP_KEYS}
     for k in LITE_STRIP_KEYS:
         out[k] = None
     out["agent_screenshot_count"] = int(n) if n is not None else 0
     out["has_adaptations"] = has_adapt
+    out["has_inferred_verdicts"] = bool(inferred)
     return out
 
 
@@ -59,7 +80,35 @@ def completed_case_dict(
     original_steps: Optional[List[Dict[str, Any]]] = None,
     agent_logs: Optional[List[Dict[str, Any]]] = None,
     screenshot_path: Optional[str] = None,
+    failed_step: Optional[int] = None,
+    failure_reason: Optional[str] = None,
+    has_inferred_verdicts: Optional[bool] = None,
+    agent_screenshot_count: Optional[int] = None,
+    shared_session: Optional[bool] = None,
+    group_duration_ms: Optional[int] = None,
 ) -> Dict[str, Any]:
+    inferred = has_inferred_verdicts
+    if inferred is None and step_results:
+        inferred = any(
+            isinstance(s, dict)
+            and str(s.get("verdict_source") or "").startswith("inferred")
+            for s in step_results
+        )
+    reason = failure_reason
+    if reason is None and status != "passed" and step_results:
+        for s in step_results:
+            if isinstance(s, dict) and s.get("status") not in ("passed", None):
+                reason = (s.get("actual_result") or "")[:240] or None
+                if failed_step is None:
+                    failed_step = s.get("step_number")
+                break
+    shot_count = agent_screenshot_count
+    if shot_count is None:
+        shot_count = _count_step_screenshots(step_results)
+    if not shot_count:
+        shot_count = _count_agent_screenshots(agent_logs)
+    if not shot_count and screenshot_path:
+        shot_count = 1
     return {
         "test_result_id": test_result_id,
         "test_case_id": test_case_id,
@@ -74,7 +123,12 @@ def completed_case_dict(
         "original_steps": original_steps,
         "agent_logs": agent_logs,
         "screenshot_path": screenshot_path,
-        "agent_screenshot_count": _count_agent_screenshots(agent_logs),
+        "agent_screenshot_count": int(shot_count or 0),
+        "failed_step": failed_step,
+        "failure_reason": reason,
+        "has_inferred_verdicts": bool(inferred),
+        "shared_session": bool(shared_session) if shared_session is not None else None,
+        "group_duration_ms": group_duration_ms,
     }
 
 
@@ -100,4 +154,6 @@ def completed_case_dict_from_orm(tr: TestResult) -> Dict[str, Any]:
         original_steps=tr.original_steps,
         agent_logs=tr.agent_logs,
         screenshot_path=tr.screenshot_path,
+        failed_step=tr.failed_step,
+        agent_screenshot_count=_count_step_screenshots(sr) or _count_agent_screenshots(tr.agent_logs),
     )

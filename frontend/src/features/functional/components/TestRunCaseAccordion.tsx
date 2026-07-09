@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Button } from '@common/components/ui/Button'
 import {
   CheckCircleIcon,
@@ -13,14 +13,30 @@ import type { CompletedCaseResult, TestResult } from '../types'
 import { AgentStepsStrip } from './AgentStepsStrip'
 import { testRunsApi } from '../api'
 import { formatStepDisplayValue } from '../utils/formatStepDisplayValue'
+import {
+  actionsForStep,
+  formatActionDescription,
+  groupAgentLogsByStep,
+} from '../utils/groupAgentLogsByStep'
 
 const DETAIL_COL_SPAN = 9
 
-function screenshotEvidenceCount(r: CompletedCaseResult): number {
-  const n =
-    r.agent_screenshot_count ??
-    (r.agent_logs ?? []).filter((l) => l.screenshot_path).length
-  if (n > 0) return n
+function screenshotEvidenceCount(
+  r: CompletedCaseResult,
+  detailSteps?: { screenshot_path?: string | null }[] | null
+): number {
+  // Match the expanded strip: one evidence slot per step that has a screenshot
+  // (same file reused across merged steps still counts once per step in the UI).
+  const steps = detailSteps ?? r.step_results
+  if (steps && steps.length > 0) {
+    const n = steps.filter((s) => !!s.screenshot_path).length
+    if (n > 0) return n
+  }
+  if (typeof r.agent_screenshot_count === 'number' && r.agent_screenshot_count > 0) {
+    return r.agent_screenshot_count
+  }
+  const fromLogs = (r.agent_logs ?? []).filter((l) => l.screenshot_path).length
+  if (fromLogs > 0) return fromLogs
   return r.screenshot_path ? 1 : 0
 }
 
@@ -51,12 +67,12 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
   const hasAdaptations =
     !!result.has_adaptations ||
     (!!result.adapted_steps && result.adapted_steps.length > 0)
-  const shotCount = screenshotEvidenceCount(result)
-  const hasScreenshots = shotCount > 0
-
   const [detail, setDetail] = useState<TestResult | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState(false)
+
+  const shotCount = screenshotEvidenceCount(result, detail?.step_results)
+  const hasScreenshots = shotCount > 0
 
   useEffect(() => {
     if (!isExpanded) return
@@ -81,6 +97,10 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
   }, [isExpanded, runId, result.test_result_id, detail])
 
   const stepRows = detail?.step_results ?? result.step_results
+  const agentLogGroups = useMemo(
+    () => groupAgentLogsByStep(detail?.agent_logs ?? result.agent_logs),
+    [detail?.agent_logs, result.agent_logs]
+  )
 
   return (
     <>
@@ -119,6 +139,35 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
                 <SparklesIcon className="w-3 h-3" /> AI Adapted
               </span>
             )}
+            {result.has_inferred_verdicts && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-bold rounded-full uppercase shrink-0"
+                title="At least one step lacked an explicit STEP_VERDICT — result was inferred"
+              >
+                Inferred
+              </span>
+            )}
+            {result.shared_session && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-100 text-slate-700 text-[10px] font-bold rounded-full uppercase shrink-0"
+                title={
+                  result.group_duration_ms
+                    ? `Shared browser session — group wall time ${Math.round(result.group_duration_ms / 1000)}s; duration shown is this case's share`
+                    : 'Shared browser session with other cases in this group'
+                }
+              >
+                Shared
+              </span>
+            )}
+            {!ok && result.failure_reason && (
+              <span
+                className="text-[11px] text-red-700/90 truncate max-w-[14rem]"
+                title={result.failure_reason}
+              >
+                {result.failed_step != null ? `Step ${result.failed_step}: ` : ''}
+                {result.failure_reason}
+              </span>
+            )}
             {hasScreenshots && (
               <span
                 className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-sky-100 text-sky-800 text-[10px] font-semibold rounded-full shrink-0"
@@ -134,7 +183,16 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
           {result.steps_passed}/{result.steps_total} steps
         </td>
         <td className="px-3 py-3 text-xs text-gray-600 tabular-nums whitespace-nowrap">
-          {Math.round(result.duration_ms / 1000)}s
+          <span title={
+            result.shared_session && result.group_duration_ms
+              ? `Case share of shared group (${Math.round(result.group_duration_ms / 1000)}s wall)`
+              : undefined
+          }>
+            {Math.round(result.duration_ms / 1000)}s
+            {result.shared_session ? (
+              <span className="text-gray-400 font-normal"> · share</span>
+            ) : null}
+          </span>
         </td>
         <td className="px-3 py-3 text-right whitespace-nowrap">
           {isExpanded ? (
@@ -173,6 +231,24 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
                     const adaptText = formatStepDisplayValue(s.adaptation)
                     const isAdapted = adaptText.length > 0
                     const syncKey = `${result.test_result_id}-${s.step_number}`
+                    const stepActionsFromResult = (s.agent_actions ?? []).filter(Boolean)
+                    const stepActionsFromLogs = actionsForStep(agentLogGroups, s.step_number)
+                    const stepActionTexts =
+                      stepActionsFromResult.length > 0
+                        ? stepActionsFromResult
+                        : stepActionsFromLogs.map((a) => formatActionDescription(a.description))
+                    const statusLabel =
+                      s.status === 'passed'
+                        ? 'Passed'
+                        : s.status === 'failed'
+                          ? 'Failed'
+                          : s.status === 'error'
+                            ? 'Error'
+                            : s.status === 'skipped'
+                              ? 'Skipped'
+                              : s.status
+                    const verdictSrc = s.verdict_source || ''
+                    const isInferred = verdictSrc.startsWith('inferred')
                     return (
                       <div
                         key={i}
@@ -184,9 +260,24 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
                         ) : (
                           <XCircleIcon className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
                         )}
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between">
-                            <span className="font-semibold text-gray-700">Step {s.step_number}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-gray-700">
+                              Step {s.step_number}
+                              <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">
+                                {statusLabel}
+                              </span>
+                              {isInferred && (
+                                <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-amber-600">
+                                  Inferred
+                                </span>
+                              )}
+                              {verdictSrc === 'explicit' && (
+                                <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-emerald-600">
+                                  Explicit
+                                </span>
+                              )}
+                            </span>
                             {isAdapted && (
                               <Button
                                 size="xs"
@@ -197,7 +288,7 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
                                 }
                                 isLoading={syncing[syncKey]}
                               >
-                                <SparklesIcon className="w-3 h-3 mr-1" /> 
+                                <SparklesIcon className="w-3 h-3 mr-1" />
                               </Button>
                             )}
                           </div>
@@ -206,7 +297,33 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
                             Original: {descText || '—'}
                           </div>
 
-                          <p className="text-gray-600 mt-1">{actualText || '—'}</p>
+                          <div className="mt-1.5">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">
+                              Result
+                            </p>
+                            <p className="text-gray-700 mt-0.5 text-sm leading-snug">
+                              {actualText || '—'}
+                            </p>
+                          </div>
+
+                          {stepActionTexts.length > 0 && (
+                            <div className="mt-2 rounded-md border border-gray-100 bg-gray-50/80 px-2.5 py-2">
+                              <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">
+                                Browser actions ({stepActionTexts.length})
+                              </p>
+                              <ul className="space-y-1">
+                                {stepActionTexts.map((text, ai) => (
+                                  <li
+                                    key={`${s.step_number}-${ai}`}
+                                    className="text-xs text-gray-600 leading-snug flex gap-1.5"
+                                  >
+                                    <span className="text-gray-300 shrink-0 select-none">•</span>
+                                    <span className="min-w-0 break-words">{text}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
 
                           {isAdapted && (
                             <div className="mt-2 p-3 bg-purple-50 rounded-lg border border-purple-100 text-xs shadow-sm">

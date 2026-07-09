@@ -152,7 +152,8 @@ class Settings(BaseSettings):
     #   Hobby/FREE = 5  | Starter($29) = 10 | Developer($99) = 20 | Pro($499) = 100
     # Free tier = 5 concurrent sessions total; using 4 leaves a 1-session margin so a
     # lane opening a new group's session while the previous one is still releasing
-    # doesn't momentarily exceed the quota (→ 429). Raise on Pro (100).
+    # doesn't momentarily exceed the quota (→ 429). Raise to 16 on Steel Premium /
+    # Developer+ when demoing 200–6000 cases (set MAX_CONCURRENT_BROWSERS=16 in .env).
     MAX_CONCURRENT_BROWSERS: int = 4
     # Planner batching: max test cases sent to the grouping LLM in a single call.
     # Sending hundreds of cases at once overflows the model's OUTPUT token limit,
@@ -184,6 +185,13 @@ class Settings(BaseSettings):
     SEGMENT_MAX_STEPS: int = 8
     # Login/auth steps need a few more actions (2FA, redirects).
     SEGMENT_LOGIN_MAX_STEPS: int = 12
+    # Screenshot capture policy for segmented runs:
+    #   "per_step"   (default) — one ground-truth PNG per merged/test step (fast, relevant)
+    #   "per_action" — PNG after every browser-use action (debug / max evidence; slow + disk-heavy)
+    SCREENSHOT_CAPTURE_MODE: str = "per_step"
+    # Keep only lite summaries in RunProgressManager during large runs (full detail via
+    # GET .../results/{id}). Cuts RAM for 200–6000 case demos.
+    LIVE_PROGRESS_STORE_LITE: bool = True
 
     # ── Plan caching ──────────────────────────────────────────────────────
     # Reuse a previously-built grouping plan when the exact same set of test cases

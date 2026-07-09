@@ -493,11 +493,11 @@ export const userStoriesApi = {
 // Test Run Reports API
 export const testRunReportsApi = {
   /** Kick off background PDF report generation. Returns immediately. */
-  generate: (runId: number, force = true) =>
+  generate: (runId: number, force = true, format: 'short' | 'long' = 'short') =>
     apiClient.post<{ run_id: number; status: string; message: string }>(
       `/functional/test-runs/${runId}/report/generate`,
       null,
-      { params: { force } },
+      { params: { force, format } },
     ),
 
   /** Poll generation status: not_started | generating | ready | failed | not_found */
@@ -507,9 +507,10 @@ export const testRunReportsApi = {
     ),
 
   /** Trigger a browser file download of the generated PDF. */
-  download: (runId: number) =>
+  download: (runId: number, format?: 'short' | 'long') =>
     apiClient.get<Blob>(`/functional/test-runs/${runId}/report/download`, {
       responseType: 'blob',
+      params: format ? { format } : undefined,
     }),
 
   /** Email the PDF report to an address. */

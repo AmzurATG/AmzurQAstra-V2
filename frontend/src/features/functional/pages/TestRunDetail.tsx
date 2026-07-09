@@ -19,6 +19,7 @@ import EmailReportDialog from '../components/EmailReportDialog'
 import { useActiveTestRun } from '../context/ActiveTestRunProvider'
 import { isTerminalStatus, pollingProgressSource } from '../live/progressSource'
 import type { LiveProgressResponse } from '../types'
+import { displayRunStatus } from '../utils/runStatusDisplay'
 
 type ReportJobState = 'idle' | 'generating' | 'ready' | 'failed'
 
@@ -72,38 +73,47 @@ export default function TestRunDetail() {
     }, 3000)
   }, [numRunId])
 
-  const handleGenerateReport = useCallback(async () => {
-    setReportJob('generating')
-    try {
-      const { data } = await testRunReportsApi.generate(numRunId)
-      if (data.status === 'ready') {
-        setReportJob('ready')
-        toast.success('Report is ready — click Download PDF.')
-      } else if (data.status === 'generating') {
-        startReportPolling()
-      } else {
+  const handleGenerateReport = useCallback(
+    async (format: 'short' | 'long' = 'short') => {
+      setReportJob('generating')
+      try {
+        const { data } = await testRunReportsApi.generate(numRunId, true, format)
+        if (data.status === 'ready') {
+          setReportJob('ready')
+          toast.success(`${format === 'short' ? 'Short' : 'Long'} report ready — download below.`)
+        } else if (data.status === 'generating') {
+          startReportPolling()
+          toast.success(`Generating ${format} report…`)
+        } else {
+          setReportJob('failed')
+          toast.error(data.message || 'Failed to start report generation.')
+        }
+      } catch {
         setReportJob('failed')
-        toast.error(data.message || 'Failed to start report generation.')
+        toast.error('Failed to start report generation.')
       }
-    } catch {
-      setReportJob('failed')
-      toast.error('Failed to start report generation.')
-    }
-  }, [numRunId, startReportPolling])
+    },
+    [numRunId, startReportPolling],
+  )
 
-  const handleDownloadReport = useCallback(async () => {
-    try {
-      const { data } = await testRunReportsApi.download(numRunId)
-      const url = URL.createObjectURL(new Blob([data as unknown as BlobPart], { type: 'application/pdf' }))
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `QAstra_TestRun_${numRunId}_Report.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch {
-      toast.error('Download failed. Try regenerating the report.')
-    }
-  }, [numRunId])
+  const handleDownloadReport = useCallback(
+    async (format: 'short' | 'long' = 'short') => {
+      try {
+        const { data } = await testRunReportsApi.download(numRunId, format)
+        const url = URL.createObjectURL(
+          new Blob([data as unknown as BlobPart], { type: 'application/pdf' }),
+        )
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `QAstra_TestRun_${numRunId}_${format}_Report.pdf`
+        a.click()
+        URL.revokeObjectURL(url)
+      } catch {
+        toast.error('Download failed. Try regenerating the report.')
+      }
+    },
+    [numRunId],
+  )
 
   // Check if report already exists on mount (for revisited completed runs)
   useEffect(() => {
@@ -152,10 +162,15 @@ export default function TestRunDetail() {
 
   const passed = progress.completed_results.filter((r) => r.status === 'passed').length
   const failed = progress.completed_results.filter((r) => r.status !== 'passed').length
+  const display = displayRunStatus(progress.status, {
+    passed,
+    failed,
+    total: progress.total_tests || passed + failed,
+  })
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -172,7 +187,7 @@ export default function TestRunDetail() {
             </h1>
             <p className="text-gray-500 text-sm">
               {isDone
-                ? `Completed — ${passed} passed, ${failed} failed`
+                ? `${display.label} — ${passed} passed, ${failed} failed (${display.passRate}%)`
                 : progress.current_test_case_title || 'Starting…'}
             </p>
             <p className="text-gray-400 text-xs mt-0.5">
@@ -186,40 +201,38 @@ export default function TestRunDetail() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {isDone && reportJob === 'idle' && (
-            <Button variant="outline" size="sm" onClick={handleGenerateReport}>
-              <DocumentTextIcon className="w-4 h-4 mr-1" />
-              Generate Report
-            </Button>
-          )}
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           {isDone && reportJob === 'generating' && (
             <Button variant="outline" size="sm" disabled>
               <ArrowPathIcon className="w-4 h-4 mr-1 animate-spin" />
               Generating…
             </Button>
           )}
-          {isDone && reportJob === 'ready' && (
+          {isDone && reportJob !== 'generating' && (
             <>
-              <Button variant="outline" size="sm" onClick={handleDownloadReport}>
-                <DocumentArrowDownIcon className="w-4 h-4 mr-1" />
-                Download PDF
+              <Button variant="outline" size="sm" onClick={() => handleGenerateReport('short')}>
+                <DocumentTextIcon className="w-4 h-4 mr-1" />
+                Short PDF
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setEmailOpen(true)}>
-                <EnvelopeIcon className="w-4 h-4 mr-1" />
-                Email Report
+              <Button variant="outline" size="sm" onClick={() => handleGenerateReport('long')}>
+                Long PDF
               </Button>
             </>
           )}
-          {isDone && reportJob === 'failed' && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-red-600 border-red-200"
-              onClick={handleGenerateReport}
-            >
-              Retry Report
-            </Button>
+          {isDone && reportJob === 'ready' && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => handleDownloadReport('short')}>
+                <DocumentArrowDownIcon className="w-4 h-4 mr-1" />
+                DL short
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => handleDownloadReport('long')}>
+                DL long
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setEmailOpen(true)}>
+                <EnvelopeIcon className="w-4 h-4 mr-1" />
+                Email
+              </Button>
+            </>
           )}
           {!isDone && (
             <Button

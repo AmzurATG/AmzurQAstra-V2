@@ -28,6 +28,7 @@ from features.functional.db.models.test_result import TestResult, TestResultStat
 from features.functional.schemas.test_run import TestRunCreate
 from features.functional.services.run_progress_manager import RunProgressManager
 from features.functional.services.completed_result_builder import completed_case_dict
+from features.functional.services.run_outcome import finalize_run_status
 from features.functional.services.test_run_stats import fetch_test_run_summary
 from features.functional.services import test_result_evidence
 
@@ -556,14 +557,14 @@ class TestExecutionService:
 
                 # ── Finalize run ───────────────────────────────────────────────
                 was_cancelled = self.progress_manager.is_cancel_requested(run_id)
-                if was_cancelled:
-                    final_status = TestRunStatus.CANCELLED
-                elif failed_count > 0:
-                    final_status = TestRunStatus.FAILED
-                elif passed_count > 0:
-                    final_status = TestRunStatus.PASSED
-                else:
-                    final_status = TestRunStatus.ERROR
+                final_status = TestRunStatus(
+                    finalize_run_status(
+                        cancelled=was_cancelled,
+                        passed=passed_count,
+                        failed=failed_count,
+                        total=total,
+                    )
+                )
 
                 run.status = final_status
                 run.passed_tests = passed_count
@@ -571,7 +572,7 @@ class TestExecutionService:
                 run.completed_at = datetime.utcnow()
                 await db.commit()
 
-                _log(f"Run complete — {passed_count} passed, {failed_count} failed")
+                _log(f"Run complete — {passed_count} passed, {failed_count} failed (status={final_status.value})")
 
                 self.progress_manager.set(run_id, {
                     "status": "cancelled" if was_cancelled else "completed",

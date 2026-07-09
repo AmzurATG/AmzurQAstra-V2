@@ -90,11 +90,14 @@ _job_manager = _ReportJobManager()
 # PDF storage helpers
 # ---------------------------------------------------------------------------
 
-def _pdf_storage_path(project_id: int, run_id: int) -> Path:
+def _pdf_storage_path(project_id: int, run_id: int, report_format: str = "short") -> Path:
     base = Path(settings.STORAGE_LOCAL_PATH).resolve()
     subdir = base / "TestRunReports" / str(project_id)
     subdir.mkdir(parents=True, exist_ok=True)
-    return subdir / f"run_{run_id}.pdf"
+    fmt = (report_format or "short").strip().lower()
+    if fmt not in ("short", "long"):
+        fmt = "short"
+    return subdir / f"run_{run_id}_{fmt}.pdf"
 
 
 # ---------------------------------------------------------------------------
@@ -217,14 +220,19 @@ async def _fetch_report_data(db: AsyncSession, run_id: int) -> Dict[str, Any]:
 # Background generation task
 # ---------------------------------------------------------------------------
 
-async def _generate_report_task(run_id: int, project_id: int) -> None:
+async def _generate_report_task(
+    run_id: int, project_id: int, report_format: str = "short"
+) -> None:
     """
     Coroutine run as a background asyncio task.
     Creates its own DB session (safe to run outside the request lifecycle).
     """
     from common.db.database import async_session_maker  # lazy import avoids circular deps
 
-    logger.info("Report generation started for run_id=%s", run_id)
+    fmt = (report_format or "short").strip().lower()
+    if fmt not in ("short", "long"):
+        fmt = "short"
+    logger.info("Report generation started for run_id=%s format=%s", run_id, fmt)
     try:
         async with async_session_maker() as db:
             data = await _fetch_report_data(db, run_id)
@@ -248,12 +256,13 @@ async def _generate_report_task(run_id: int, project_id: int) -> None:
                 requirements=data["requirements"],
                 user_stories=data["user_stories"],
                 screenshots_dir=settings.SCREENSHOTS_DIR,
+                report_format=fmt,
             )
 
-            pdf_path = _pdf_storage_path(run.project_id, run_id)
+            pdf_path = _pdf_storage_path(run.project_id, run_id, fmt)
             pdf_path.write_bytes(pdf_bytes)
 
-            # Write path back to test_runs.report_path
+            # Write path back to test_runs.report_path (latest generated)
             await db.execute(
                 update(TestRun)
                 .where(TestRun.id == run_id)
@@ -262,21 +271,26 @@ async def _generate_report_task(run_id: int, project_id: int) -> None:
             await db.commit()
 
         _job_manager.set_ready(run_id, str(pdf_path))
-        logger.info("Report generation complete for run_id=%s (%.1f KB)", run_id, len(pdf_bytes) / 1024)
+        logger.info(
+            "Report generation complete for run_id=%s format=%s (%.1f KB)",
+            run_id,
+            fmt,
+            len(pdf_bytes) / 1024,
+        )
 
     except Exception as exc:
         logger.exception("Report generation failed for run_id=%s: %s", run_id, exc)
         _job_manager.set_failed(run_id, str(exc))
 
 
-def _sync_generate_wrapper(run_id: int, project_id: int) -> None:
+def _sync_generate_wrapper(run_id: int, project_id: int, report_format: str = "short") -> None:
     """Synchronous wrapper for Windows ProactorEventLoop (same pattern as test execution)."""
     policy = asyncio.WindowsProactorEventLoopPolicy()
     asyncio.set_event_loop_policy(policy)
     loop = policy.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        loop.run_until_complete(_generate_report_task(run_id, project_id))
+        loop.run_until_complete(_generate_report_task(run_id, project_id, report_format))
     finally:
         loop.close()
 
@@ -294,7 +308,7 @@ class TestRunReportService:
     async def get_status(self, run_id: int) -> Dict[str, Any]:
         """
         Return current report status for a run.
-        Checks in-memory job first, then DB (for reports generated in a previous session).
+        Checks in-memory job first, then format-specific files on disk, then DB.
         """
         job = _job_manager.get(run_id)
         if job:
@@ -305,44 +319,82 @@ class TestRunReportService:
                 "error": job["error"],
             }
 
-        # Fall back to DB
         row = (await self.db.execute(
-            select(TestRun.report_path, TestRun.status).where(TestRun.id == run_id)
+            select(TestRun.report_path, TestRun.project_id).where(TestRun.id == run_id)
         )).one_or_none()
 
         if row is None:
             return {"run_id": run_id, "status": "not_found", "pdf_path": None, "error": None}
 
-        report_path, run_status = row
+        report_path, project_id = row
+
+        # Prefer short, then long — never treat a legacy unformatted dump as the
+        # default "ready" short report (those were often 1000+ pages).
+        for fmt in ("short", "long"):
+            candidate = _pdf_storage_path(int(project_id), run_id, fmt)
+            if candidate.exists():
+                return {
+                    "run_id": run_id,
+                    "status": "ready",
+                    "pdf_path": str(candidate),
+                    "error": None,
+                }
+
         if report_path and Path(report_path).exists():
-            return {"run_id": run_id, "status": "ready", "pdf_path": report_path, "error": None}
+            name = Path(report_path).name
+            if name.endswith("_short.pdf") or name.endswith("_long.pdf"):
+                return {
+                    "run_id": run_id,
+                    "status": "ready",
+                    "pdf_path": report_path,
+                    "error": None,
+                }
 
         return {"run_id": run_id, "status": "not_started", "pdf_path": None, "error": None}
 
-    async def generate(self, run_id: int, *, force: bool = False) -> Dict[str, Any]:
+    async def generate(
+        self,
+        run_id: int,
+        *,
+        force: bool = False,
+        report_format: str = "short",
+    ) -> Dict[str, Any]:
         """
         Kick off background report generation (idempotent unless ``force`` is True).
+
+        report_format: ``short`` (default, summary + failures) or ``long`` (full evidence).
         Returns immediately with the current job status.
         """
+        fmt = (report_format or "short").strip().lower()
+        if fmt not in ("short", "long"):
+            fmt = "short"
+
         # Already generating?
         if _job_manager.is_generating(run_id):
             return {"run_id": run_id, "status": "generating", "message": "Report generation is already in progress."}
 
-        # Already in DB?
+        # Already in DB for this format?
         row = (await self.db.execute(
-            select(TestRun.report_path, TestRun.project_id, TestRun.status)
+            select(TestRun.project_id, TestRun.status)
             .where(TestRun.id == run_id)
         )).one_or_none()
 
         if row is None:
             return {"run_id": run_id, "status": "not_found", "message": "Test run not found."}
 
-        report_path, project_id, run_status = row
+        project_id, _run_status = row
+        preferred = _pdf_storage_path(project_id, run_id, fmt)
 
-        if report_path and Path(report_path).exists() and not force:
-            # Re-cache in memory and return immediately
-            _job_manager.set_ready(run_id, report_path)
-            return {"run_id": run_id, "status": "ready", "message": "Report already generated — ready to download."}
+        if preferred.exists() and not force:
+            _job_manager.set_ready(run_id, str(preferred))
+            return {
+                "run_id": run_id,
+                "status": "ready",
+                "message": f"{fmt.title()} report already generated — ready to download.",
+            }
+
+        # Always build format-specific run_{id}_{short|long}.pdf (never reuse
+        # legacy unformatted dumps that could be 1000+ pages).
 
         if force:
             _job_manager.clear(run_id)
@@ -352,12 +404,16 @@ class TestRunReportService:
 
         if sys.platform == "win32":
             asyncio.create_task(
-                asyncio.to_thread(_sync_generate_wrapper, run_id, project_id)
+                asyncio.to_thread(_sync_generate_wrapper, run_id, project_id, fmt)
             )
         else:
-            asyncio.create_task(_generate_report_task(run_id, project_id))
+            asyncio.create_task(_generate_report_task(run_id, project_id, fmt))
 
-        return {"run_id": run_id, "status": "generating", "message": "Report generation started. Poll /status for updates."}
+        return {
+            "run_id": run_id,
+            "status": "generating",
+            "message": f"{fmt.title()} report generation started. Poll /status for updates.",
+        }
 
     async def get_pdf_bytes(self, run_id: int) -> Optional[bytes]:
         """Return PDF bytes if the report is ready, else None."""

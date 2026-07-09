@@ -31,6 +31,7 @@ from features.functional.db.models.test_case import TestCase
 from features.functional.db.models.test_result import TestResult, TestResultStatus
 from features.functional.db.models.test_run import TestRun, TestRunStatus
 from features.functional.services.completed_result_builder import completed_case_dict
+from features.functional.services.run_outcome import finalize_run_status
 from features.functional.services.run_progress_manager import RunProgressManager
 from features.functional.utils.credentials_redaction import (
     redact_agent_logs_list,
@@ -266,13 +267,20 @@ class ParallelExecutionOrchestrator:
         if self.pm.is_cancel_requested(run_id):
             run.status = TestRunStatus.CANCELLED
         else:
-            run.status = TestRunStatus.PASSED if final_failed == 0 else TestRunStatus.FAILED
+            run.status = TestRunStatus(
+                finalize_run_status(
+                    cancelled=False,
+                    passed=final_passed,
+                    failed=final_failed,
+                    total=len(completed_results) or total,
+                )
+            )
         run.completed_at = datetime.utcnow()
         run.passed_tests = final_passed
         run.failed_tests = final_failed
         await self.db.commit()
 
-        log_fn(f"Run complete — {final_passed} passed, {final_failed} failed")
+        log_fn(f"Run complete — {final_passed} passed, {final_failed} failed (status={run.status.value})")
         self.pm.set(run_id, {
             "status": "cancelled" if self.pm.is_cancel_requested(run_id) else "completed",
             "percentage": 100,
@@ -401,8 +409,9 @@ class ParallelExecutionOrchestrator:
                     "duration_ms": syn_result.get("duration_ms", 0),
                     "error": syn_result.get("error"),
                 })
-                # Carry the detailed per-action agent_logs so isolated cases show them too.
-                tc_res_one["agent_logs"] = syn_result.get("agent_logs", [])
+                # Evaluator already sliced logs; only fill if missing.
+                if not tc_res_one.get("agent_logs"):
+                    tc_res_one["agent_logs"] = syn_result.get("agent_logs", [])
                 tc_results[planned.tc_id] = tc_res_one
 
         # ── Persist results ───────────────────────────────────────────────────
@@ -425,12 +434,22 @@ class ParallelExecutionOrchestrator:
                     for s in step_results
                 ]
 
-                # agent_logs from the group result (shared) or the per-case isolated run.
-                raw_agent_logs = (
-                    group_result.get("agent_logs") if group.is_shared
-                    else tc_res.get("agent_logs")
-                )
+                # Prefer per-case sliced logs from the evaluator (shared groups).
+                raw_agent_logs = tc_res.get("agent_logs")
+                if raw_agent_logs is None:
+                    raw_agent_logs = (
+                        group_result.get("agent_logs") if group.is_shared
+                        else None
+                    )
                 safe_logs = redact_agent_logs_list(raw_agent_logs, username, password)
+
+                shot_count = tc_res.get("agent_screenshot_count")
+                if shot_count is None:
+                    shot_count = sum(
+                        1
+                        for s in final_steps
+                        if isinstance(s, dict) and s.get("screenshot_path")
+                    )
 
                 test_result.status = (
                     TestResultStatus.PASSED if overall == "passed"
@@ -455,30 +474,44 @@ class ParallelExecutionOrchestrator:
                 await self.db.commit()
 
                 tc_title = (tc.title if tc else None) or f"Case #{tc_id}"
+                share_note = ""
+                if tc_res.get("shared_session") and tc_res.get("group_duration_ms"):
+                    share_note = f" (shared group {tc_res.get('group_duration_ms')}ms)"
                 log_fn(
                     f"{'✓' if overall == 'passed' else '✗'} [{group.label}] {tc_title} — "
-                    f"{overall.upper()} ({tc_res.get('duration_ms', 0)}ms)",
+                    f"{overall.upper()} ({tc_res.get('duration_ms', 0)}ms){share_note} "
+                    f"shots={shot_count}",
                     tc_id,
                 )
 
                 cur_done = len(completed_results) + 1
-                completed_results.append(
-                    completed_case_dict(
-                        test_result_id=test_result.id,
-                        test_case_id=tc_id,
-                        title=tc_title,
-                        status=overall,
-                        steps_total=len(final_steps),
-                        steps_passed=sum(1 for s in final_steps if s.get("status") == "passed"),
-                        steps_failed=sum(1 for s in final_steps if s.get("status") != "passed"),
-                        duration_ms=tc_res.get("duration_ms", 0),
-                        step_results=final_steps,
-                        adapted_steps=[s for s in final_steps if s.get("adaptation")],
-                        original_steps=steps_data,
-                        agent_logs=None,
-                        screenshot_path=test_result.screenshot_path,
-                    )
+                case_payload = completed_case_dict(
+                    test_result_id=test_result.id,
+                    test_case_id=tc_id,
+                    title=tc_title,
+                    status=overall,
+                    steps_total=len(final_steps),
+                    steps_passed=sum(1 for s in final_steps if s.get("status") == "passed"),
+                    steps_failed=sum(1 for s in final_steps if s.get("status") != "passed"),
+                    duration_ms=tc_res.get("duration_ms", 0),
+                    step_results=final_steps,
+                    adapted_steps=[s for s in final_steps if s.get("adaptation")],
+                    original_steps=steps_data,
+                    agent_logs=safe_logs,
+                    screenshot_path=test_result.screenshot_path,
+                    failed_step=test_result.failed_step,
+                    agent_screenshot_count=int(shot_count or 0),
+                    shared_session=bool(tc_res.get("shared_session")),
+                    group_duration_ms=tc_res.get("group_duration_ms"),
                 )
+                # Store lite summaries in progress RAM for large runs; full detail via result API.
+                if settings.LIVE_PROGRESS_STORE_LITE:
+                    from features.functional.services.completed_result_builder import (
+                        completed_case_to_lite,
+                    )
+                    completed_results.append(completed_case_to_lite(case_payload))
+                else:
+                    completed_results.append(case_payload)
 
                 self.pm.set(run_id, {
                     "status": "running",

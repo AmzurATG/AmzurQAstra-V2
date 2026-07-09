@@ -69,6 +69,14 @@ def redact_step_dict(
         v = out[k]
         text = normalize_display_field(v)
         out[k] = redact_known_credentials(text, username=username, password=password) or ""
+    # Per-step browser action strings (segmented runner) may include typed values.
+    actions = out.get("agent_actions")
+    if isinstance(actions, list):
+        out["agent_actions"] = [
+            redact_known_credentials(str(a), username=username, password=password) or ""
+            for a in actions
+            if a is not None
+        ]
     return out
 
 

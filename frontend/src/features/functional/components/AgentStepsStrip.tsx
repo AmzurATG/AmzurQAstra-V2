@@ -144,20 +144,38 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
   // (they are keyed directly to each test step), fall back to agent log screenshots.
   const stepShots: AgentLogEntry[] = useMemo(() => {
     if (!stepResults || stepResults.length === 0) return []
+    // One gallery entry per step that has evidence (matches the row badge count).
     return stepResults
       .filter((s) => s.screenshot_path)
-      .map((s, i) => ({
-        timestamp: '',
-        agent_step: s.step_number,
-        description: `Step ${s.step_number}: ${s.description ?? ''}`.trim(),
-        adaptation: s.adaptation ?? null,
-        screenshot_path: s.screenshot_path!,
-      }))
+      .map((s) => {
+        const actionHint =
+          (s.agent_actions && s.agent_actions.length > 0
+            ? s.agent_actions.slice(-2).join(' · ')
+            : '') ||
+          (s.actual_result || '')
+        const label = `Step ${s.step_number}: ${s.description ?? ''}`.trim()
+        return {
+          timestamp: '',
+          agent_step: s.step_number,
+          description: actionHint ? `${label}\n${actionHint}` : label,
+          adaptation: s.adaptation ?? null,
+          screenshot_path: s.screenshot_path!,
+        }
+      })
   }, [stepResults])
 
   const withShots: AgentLogEntry[] = useMemo(() => {
     if (stepShots.length > 0) return stepShots
-    return logs.filter((l) => l.screenshot_path)
+    // Fallback: unique agent-log shots (avoid counting the same file many times).
+    const seen = new Set<string>()
+    const out: AgentLogEntry[] = []
+    for (const l of logs) {
+      const p = l.screenshot_path
+      if (!p || seen.has(p)) continue
+      seen.add(p)
+      out.push(l)
+    }
+    return out
   }, [stepShots, logs])
   const [blobByKey, setBlobByKey] = useState<Record<string, string>>({})
   const [primaryBlobUrl, setPrimaryBlobUrl] = useState<string | null>(null)
@@ -511,6 +529,11 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
                   {(galleryIndex ?? 0) + 1} / {withShots.length}
                 </span>
               </p>
+              {galleryEntry?.description ? (
+                <p className="text-gray-700 mt-2 text-xs leading-snug whitespace-pre-wrap break-words">
+                  {galleryEntry.description}
+                </p>
+              ) : null}
               <p className="text-[10px] text-gray-400 mt-3">
                 Use the side arrows or ← → keys for the next or previous screenshot. Esc to close.
               </p>

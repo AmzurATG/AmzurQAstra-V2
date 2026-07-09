@@ -9,13 +9,18 @@ POST   /functional/test-runs/{run_id}/report/email      — email the PDF to a r
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, EmailStr
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.api.deps import get_current_active_user
 from common.db.database import get_db
 from common.db.models.user import User
 from common.services.smtp_mailer import SmtpSendError, is_smtp_configured
-from features.functional.services.test_run_report_service import TestRunReportService
+from features.functional.db.models.test_run import TestRun
+from features.functional.services.test_run_report_service import (
+    TestRunReportService,
+    _pdf_storage_path,
+)
 
 router = APIRouter()
 
@@ -57,18 +62,18 @@ class ReportEmailResponse(BaseModel):
 async def generate_report(
     run_id: int,
     force: bool = False,
+    format: str = "short",
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> ReportGenerateResponse:
     """
     Start asynchronous PDF report generation for ``run_id``.
 
-    Returns immediately (202) with a status of ``generating`` or ``ready``
-    (if the report was previously generated). Poll ``/report/status`` to
-    know when the PDF is available.
+    ``format``: ``short`` (default — cover, index, failures) or ``long`` (full evidence).
+    Returns immediately (202) with a status of ``generating`` or ``ready``.
     """
     svc = TestRunReportService(db)
-    result = await svc.generate(run_id, force=force)
+    result = await svc.generate(run_id, force=force, report_format=format)
     return ReportGenerateResponse(**result)
 
 
@@ -105,23 +110,32 @@ async def report_status(
 )
 async def download_report(
     run_id: int,
+    format: str | None = None,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Stream the generated PDF as a file download.
 
-    Returns 404 if the report has not been generated yet (generate it first
-    via ``POST /report/generate``).
+    Optional ``format=short|long`` prefers that file when both exist.
     """
     svc = TestRunReportService(db)
     pdf_path = await svc.get_pdf_path(run_id)
+    if format in ("short", "long"):
+        project_id = (
+            await db.execute(select(TestRun.project_id).where(TestRun.id == run_id))
+        ).scalar_one_or_none()
+        if project_id is not None:
+            candidate = _pdf_storage_path(int(project_id), run_id, format)
+            if candidate.exists():
+                pdf_path = str(candidate)
     if not pdf_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Report not ready. Call POST /report/generate first and wait for status 'ready'.",
         )
-    filename = f"QAstra_TestRun_{run_id}_Report.pdf"
+    fmt_tag = f"_{format}" if format in ("short", "long") else ""
+    filename = f"QAstra_TestRun_{run_id}{fmt_tag}_Report.pdf"
     return FileResponse(
         path=pdf_path,
         media_type="application/pdf",

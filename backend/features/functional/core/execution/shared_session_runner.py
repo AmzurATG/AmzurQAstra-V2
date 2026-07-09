@@ -140,12 +140,95 @@ def _synthetic_verdict(total: int, overall: str) -> Dict[str, Any]:
     }
 
 
-def _parse_segment_verdict(final_text: str, history: Any) -> tuple:
-    """Parse a single segment's STEP_VERDICT line; fall back to the agent success flag.
+_FAILURE_HINTS = (
+    "invalid login", "invalid credentials", "could not", "unable to", "failed to",
+    "not found", "does not exist", "error occurred", "was not able",
+)
 
-    Returns (status, actual_result, adaptation).
+
+def _action_lines_from_logs(segment_logs: List[Dict[str, Any]]) -> List[str]:
+    """Extract human-readable browser action lines from a segment's agent_logs slice."""
+    out: List[str] = []
+    for entry in segment_logs or []:
+        desc = (entry.get("description") or "").strip()
+        if not desc or desc.startswith("▶"):
+            continue
+        # Strip the "   • " bullet prefix used by the segmented runner.
+        if desc.startswith("•"):
+            desc = desc.lstrip("•").strip()
+        elif "•" in desc[:4]:
+            desc = desc.split("•", 1)[-1].strip()
+        if desc:
+            out.append(desc)
+    return out
+
+
+def _synthesize_actual_from_actions(
+    action_descriptions: List[str],
+    *,
+    expected_result: Optional[str] = None,
+    note: Optional[str] = None,
+) -> str:
+    """Build an honest actual_result from recorded browser actions when STEP_VERDICT is missing."""
+    bullets = [a.strip() for a in (action_descriptions or []) if a and str(a).strip()]
+    parts: List[str] = []
+    if note:
+        parts.append(note)
+    if expected_result and str(expected_result).strip():
+        parts.append(f"Expected: {str(expected_result).strip()[:160]}")
+    if bullets:
+        # Prefer the last few actions — closest to what the page looked like at the end.
+        trail = " → ".join(b[:140] for b in bullets[-5:])
+        parts.append(f"Observed actions: {trail}")
+    elif not parts:
+        parts.append("No STEP_VERDICT and no browser actions were recorded for this step.")
+    return " | ".join(parts)[:500]
+
+
+def _history_done_text(history: Any) -> str:
+    """Best-effort extraction of the agent's final done()/final_result narrative."""
+    if history is None:
+        return ""
+    try:
+        fn = getattr(history, "final_result", None)
+        if callable(fn):
+            val = fn()
+            if val:
+                return str(val).strip()
+    except Exception:
+        pass
+    try:
+        # Some browser-use versions expose extracted_content on the last step.
+        if hasattr(history, "extracted_content"):
+            chunks = history.extracted_content()
+            if chunks:
+                return str(chunks[-1] or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _parse_segment_verdict(
+    final_text: str,
+    history: Any,
+    *,
+    action_descriptions: Optional[List[str]] = None,
+    expected_result: Optional[str] = None,
+) -> tuple:
+    """Parse a single segment's STEP_VERDICT line; fall back to actions + success flag.
+
+    Returns (status, actual_result, adaptation, verdict_source).
+
+    verdict_source is one of:
+      explicit | inferred_success | inferred_failure | inferred_actions | error
+
+    Never invents a confident marketing placeholder. When the agent omits STEP_VERDICT,
+    actual_result is synthesized from recorded browser actions (and expected_result when
+    available) so the UI shows what the agent actually did.
     """
-    text = final_text or ""
+    text = (final_text or "").strip() or _history_done_text(history)
+    actions = list(action_descriptions or [])
+
     m = re.search(r"STEP_VERDICT:\s*(PASS|FAIL)\b[\s—:\-]*(.*)", text, re.IGNORECASE | re.DOTALL)
     if m:
         verdict = m.group(1).upper()
@@ -155,30 +238,56 @@ def _parse_segment_verdict(final_text: str, history: Any) -> tuple:
         if adapt_m:
             adaptation = adapt_m.group(1).strip()[:300] or None
             rest = rest[: adapt_m.start()].strip()
-        return ("passed" if verdict == "PASS" else "failed", rest[:500], adaptation)
+        if not rest:
+            rest = _synthesize_actual_from_actions(
+                actions,
+                expected_result=expected_result,
+                note="STEP_VERDICT had no observation text.",
+            )
+        return ("passed" if verdict == "PASS" else "failed", rest[:500], adaptation, "explicit")
 
-    # No marker — use browser-use's own success signal.
+    # No marker — use browser-use's own success signal + action trail.
     ok = None
     try:
         if history is not None and callable(getattr(history, "is_successful", None)):
             ok = history.is_successful()
     except Exception:
         ok = None
-    if ok is True:
-        return ("passed", (text[:500] or "Step completed."), None)
-    if ok is False:
-        return ("failed", (text[:500] or "Step failed."), None)
-    # Unknown completion signal (agent didn't emit done(success) or a marker). Decide by
-    # evidence: explicit failure/error text -> failed; otherwise the step ran without a
-    # detectable error -> passed. This catches real failures (e.g. "Invalid Login") without
-    # marking every silent step as failed.
+
     low = text.lower()
-    if any(w in low for w in (
-        "invalid login", "invalid credentials", "could not", "unable to", "failed to",
-        "not found", "does not exist", "error occurred", "was not able",
-    )):
-        return ("failed", text[:500], None)
-    return ("passed", (text[:500] or "Step completed (no explicit verdict; no error detected)."), None)
+    looks_failed = any(w in low for w in _FAILURE_HINTS)
+
+    if ok is True and not looks_failed:
+        actual = text[:500] if text else _synthesize_actual_from_actions(
+            actions,
+            expected_result=expected_result,
+            note="Inferred PASS (agent success flag; no STEP_VERDICT).",
+        )
+        return ("passed", actual, None, "inferred_success")
+    if ok is False or looks_failed:
+        actual = text[:500] if text else _synthesize_actual_from_actions(
+            actions,
+            expected_result=expected_result,
+            note="Inferred FAIL (agent reported failure or error text; no STEP_VERDICT).",
+        )
+        return ("failed", actual, None, "inferred_failure")
+
+    # Unknown completion signal — do not claim "no error detected". Prefer action evidence.
+    if text:
+        status = "failed" if looks_failed else "passed"
+        actual = f"No STEP_VERDICT; using agent narrative. {text}"[:500]
+        src = "inferred_failure" if status == "failed" else "inferred_success"
+        return (status, actual, None, src)
+
+    actual = _synthesize_actual_from_actions(
+        actions,
+        expected_result=expected_result,
+        note="No STEP_VERDICT and no agent success flag — inferred from recorded actions only.",
+    )
+    # Fail closed when we have zero evidence of what happened.
+    if not actions:
+        return ("error", actual, None, "error")
+    return ("passed", actual, None, "inferred_actions")
 
 
 class SharedSessionRunner:
@@ -402,7 +511,7 @@ class SharedSessionRunner:
                         agent_task.cancel()
                         await asyncio.gather(agent_task, return_exceptions=True)
                         raise TestRunCancelled()
-                    await asyncio.sleep(0.3)
+                    await asyncio.sleep(0.1)
                 return await agent_task
 
             result = await _run_with_cancel()
@@ -530,7 +639,11 @@ class SharedSessionRunner:
         llm = get_browser_use_llm()
         agent: Any = None
 
-        # ── Per-action callbacks: detailed agent steps + a screenshot on EVERY action ──
+        # ── Per-action callbacks: detailed agent steps; screenshots per policy ──
+        capture_every_action = (
+            (settings.SCREENSHOT_CAPTURE_MODE or "per_step").strip().lower() == "per_action"
+        )
+
         def _on_action(_state: Any, output: Any, _step_num: int) -> None:
             try:
                 desc = action_description_from_output(output) or "action"
@@ -548,20 +661,20 @@ class SharedSessionRunner:
         async def _on_action_end(ag: Any) -> None:
             if not agent_logs:
                 return
-            sess = getattr(ag, "browser_session", None)
-            if sess is None:
-                return
-            try:
-                summary = await sess.get_browser_state_summary(include_screenshot=True)
-                b64 = getattr(summary, "screenshot", None)
-                if b64:
-                    p = save_screenshot_b64(b64, f"{run_uuid}_{group.group_id}", 0, len(agent_logs))
-                    if p:
-                        agent_logs[-1]["screenshot_path"] = p
-                        if p not in screenshots:
-                            screenshots.append(p)
-            except Exception as exc:
-                logger.warning(f"[SharedSessionRunner:seg] per-action screenshot failed: {exc}")
+            if capture_every_action:
+                sess = getattr(ag, "browser_session", None)
+                if sess is not None:
+                    try:
+                        summary = await sess.get_browser_state_summary(include_screenshot=True)
+                        b64 = getattr(summary, "screenshot", None)
+                        if b64:
+                            p = save_screenshot_b64(b64, f"{run_uuid}_{group.group_id}", 0, len(agent_logs))
+                            if p:
+                                agent_logs[-1]["screenshot_path"] = p
+                                if p not in screenshots:
+                                    screenshots.append(p)
+                    except Exception as exc:
+                        logger.warning(f"[SharedSessionRunner:seg] per-action screenshot failed: {exc}")
             set_tc_progress(key, {
                 "status": "running",
                 "current_step": agent_logs[-1]["description"],
@@ -630,24 +743,39 @@ class SharedSessionRunner:
                     final_text = str(history.final_result() or "")
                 except Exception:
                     pass
-                status, actual, adaptation = _parse_segment_verdict(final_text, history)
+                segment_actions = _action_lines_from_logs(agent_logs[seg_start:])
+                status, actual, adaptation, verdict_source = _parse_segment_verdict(
+                    final_text,
+                    history,
+                    action_descriptions=segment_actions,
+                    expected_result=ms.expected_result,
+                )
 
-                # Ground-truth screenshot for THIS merged step = last action screenshot in
-                # this segment; fall back to history; then a forced live capture.
-                shot = None
-                for entry in reversed(agent_logs[seg_start:]):
-                    if entry.get("screenshot_path"):
-                        shot = entry["screenshot_path"]
-                        break
+                # Ground-truth screenshot for THIS merged/test step.
+                # Prefer a FRESH live capture (Steel + add_new_task history is often stale/
+                # cumulative). Fall back to last per-action shot, then history.
+                shot = await self._capture_segment_screenshot(
+                    agent, history, run_uuid, group.group_id, idx, prefer_live=True
+                )
                 if not shot:
-                    shot = await self._capture_segment_screenshot(agent, history, run_uuid, group.group_id, idx)
+                    for entry in reversed(agent_logs[seg_start:]):
+                        if entry.get("screenshot_path"):
+                            shot = entry["screenshot_path"]
+                            break
                 if shot and shot not in screenshots:
                     screenshots.append(shot)
 
+                log_end = len(agent_logs)
                 merged_step_results.append({
                     "merged_step_number": idx, "status": status,
                     "actual_result": redact_known_credentials(actual, username=username, password=password),
                     "adaptation": adaptation, "screenshot_path": shot,
+                    # Per-step browser actions for the UI (survives fan-out to original TCs).
+                    "agent_actions": segment_actions,
+                    "verdict_source": verdict_source,
+                    # Inclusive log slice for this segment (header at seg_start-1).
+                    "log_start_index": max(0, seg_start - 1),
+                    "log_end_index": log_end,
                 })
                 # Annotate the header with the resolved status + screenshot.
                 agent_logs[seg_start - 1]["description"] = (
@@ -658,6 +786,7 @@ class SharedSessionRunner:
                 )
                 agent_logs[seg_start - 1]["screenshot_path"] = shot
                 agent_logs[seg_start - 1]["adaptation"] = adaptation
+                agent_logs[seg_start - 1]["merged_step_number"] = idx
 
                 set_tc_progress(key, {
                     "status": "running",
@@ -718,43 +847,62 @@ class SharedSessionRunner:
                 agent_task.cancel()
                 await asyncio.gather(agent_task, return_exceptions=True)
                 raise TestRunCancelled()
-            await asyncio.sleep(0.3)
+            # Poll aggressively so Cancel feels responsive during long LLM/browser steps.
+            await asyncio.sleep(0.1)
         return await agent_task
 
     async def _capture_segment_screenshot(
-        self, agent: Any, history: Any, run_uuid: str, group_id: str, step_no: int
+        self,
+        agent: Any,
+        history: Any,
+        run_uuid: str,
+        group_id: str,
+        step_no: int,
+        *,
+        prefer_live: bool = True,
     ) -> Optional[str]:
         """Persist a ground-truth screenshot for this merged step.
 
-        Prefers browser-use's OWN per-step screenshot (captured every step when vision
-        is on) from the run history — this is reliable even on Steel CDP, where a
-        post-run get_browser_state_summary often returns no screenshot. Falls back to a
-        live session capture.
+        When prefer_live=True (segmented default), take a fresh viewport shot first so
+        each merged step gets a frame that matches the UI *after that step* — not a
+        stale/cumulative history frame from earlier segments (common on Steel +
+        add_new_task). History is used as fallback.
         """
-        # 1) From the agent's run history (most recent step's screenshot).
-        try:
-            if history is not None and hasattr(history, "screenshots"):
-                shots = history.screenshots(return_none_if_not_screenshot=False)
-                if shots:
-                    b64 = shots[-1]
-                    if b64:
-                        path = save_screenshot_b64(b64, f"{run_uuid}_{group_id}", 0, step_no)
-                        if path:
-                            return path
-        except Exception as exc:
-            logger.warning(f"[SharedSessionRunner:seg] history screenshot failed step={step_no}: {exc}")
-
-        # 2) Fallback: live session screenshot.
-        try:
-            session = getattr(agent, "browser_session", None)
-            if session is not None:
+        async def _live() -> Optional[str]:
+            try:
+                session = getattr(agent, "browser_session", None)
+                if session is None:
+                    return None
                 summary = await session.get_browser_state_summary(include_screenshot=True)
                 b64 = getattr(summary, "screenshot", None)
                 if b64:
                     return save_screenshot_b64(b64, f"{run_uuid}_{group_id}", 0, step_no)
-        except Exception as exc:
-            logger.warning(f"[SharedSessionRunner:seg] live screenshot failed step={step_no}: {exc}")
-        return None
+            except Exception as exc:
+                logger.warning(f"[SharedSessionRunner:seg] live screenshot failed step={step_no}: {exc}")
+            return None
+
+        def _from_history() -> Optional[str]:
+            try:
+                if history is not None and hasattr(history, "screenshots"):
+                    shots = history.screenshots(return_none_if_not_screenshot=False)
+                    if shots:
+                        b64 = shots[-1]
+                        if b64:
+                            return save_screenshot_b64(b64, f"{run_uuid}_{group_id}", 0, step_no)
+            except Exception as exc:
+                logger.warning(f"[SharedSessionRunner:seg] history screenshot failed step={step_no}: {exc}")
+            return None
+
+        if prefer_live:
+            path = await _live()
+            if path:
+                return path
+            return _from_history()
+
+        path = _from_history()
+        if path:
+            return path
+        return await _live()
 
     def _attach_screenshots_to_merged_steps(
         self,

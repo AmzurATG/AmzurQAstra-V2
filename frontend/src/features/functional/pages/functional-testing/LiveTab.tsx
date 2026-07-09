@@ -70,7 +70,8 @@ export default function LiveTab() {
             <p className="text-sm text-gray-500">{progress.current_step_info}</p>
           )}
           <p className="text-xs text-gray-400 mt-1">
-            The planner is analysing test cases, merging duplicate steps, and assigning browser lanes.
+            For larger suites the planner merges duplicate steps (e.g. shared login) and
+            assigns browser lanes. Small runs (under 6 cases) skip planning and start immediately.
           </p>
         </div>
       </Card>
@@ -78,17 +79,42 @@ export default function LiveTab() {
   }
 
   const isDone = isTerminalStatus(progress.status)
+  const failedCount =
+    progress.completed_results?.filter((r) => r.status !== 'passed').length ?? 0
+  const passedCount =
+    progress.completed_results?.filter((r) => r.status === 'passed').length ?? 0
+  const mostlyOk = isDone && passedCount > failedCount && failedCount > 0
 
   return (
     <div className="space-y-4">
       {isDone && activeRunId && (
-        <div className="flex items-center justify-between rounded-lg border border-green-200 bg-green-50 px-4 py-3">
-          <p className="text-sm font-medium text-green-800">
-            Run complete. Open the full report for screenshots and logs.
+        <div
+          className={`flex items-center justify-between rounded-lg border px-4 py-3 ${
+            failedCount === 0
+              ? 'border-green-200 bg-green-50'
+              : mostlyOk
+                ? 'border-amber-200 bg-amber-50'
+                : 'border-red-200 bg-red-50'
+          }`}
+        >
+          <p
+            className={`text-sm font-medium ${
+              failedCount === 0
+                ? 'text-green-800'
+                : mostlyOk
+                  ? 'text-amber-900'
+                  : 'text-red-800'
+            }`}
+          >
+            {failedCount === 0
+              ? 'Run complete — all cases passed.'
+              : mostlyOk
+                ? `Mostly passed (${passedCount} ok, ${failedCount} failed). Open the report for triage.`
+                : `Run finished with ${failedCount} failure(s). Open the report for details.`}
           </p>
           <Link to={`${base}/history/${activeRunId}`}>
             <Button size="sm" variant="outline">
-              View full report
+              View report
             </Button>
           </Link>
         </div>

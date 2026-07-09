@@ -449,6 +449,10 @@ export interface TestStepResult {
   description?: string
   adaptation?: string | null
   screenshot_path?: string | null
+  /** Browser-use action descriptions recorded while executing this step */
+  agent_actions?: string[]
+  /** How the pass/fail was decided: explicit | inferred_* | error */
+  verdict_source?: string | null
 }
 
 export interface AgentLogEntry {
@@ -492,10 +496,20 @@ export interface CompletedCaseResult {
   agent_logs?: AgentLogEntry[]
   /** Stored as `/screenshots/<file>`; load via authenticated API */
   screenshot_path?: string | null
-  /** From lite /live when agent_logs omitted */
+  /** Distinct step/agent screenshots for this case (lite-safe) */
   agent_screenshot_count?: number | null
   /** From lite /live when adapted_steps omitted */
   has_adaptations?: boolean | null
+  /** First failing step number (lite triage) */
+  failed_step?: number | null
+  /** Short failure reason for live triage */
+  failure_reason?: string | null
+  /** True when any step used inferred (non-STEP_VERDICT) pass/fail */
+  has_inferred_verdicts?: boolean | null
+  /** Case shared a browser session with siblings */
+  shared_session?: boolean | null
+  /** Full shared-group wall time when duration_ms is a per-case share */
+  group_duration_ms?: number | null
 }
 
 export interface ExecutionPlanGroup {

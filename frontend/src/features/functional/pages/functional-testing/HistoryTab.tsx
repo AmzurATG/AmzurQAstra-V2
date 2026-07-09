@@ -18,12 +18,12 @@ import { Button } from '@common/components/ui/Button'
 import { Card } from '@common/components/ui/Card'
 import { PaginationBar } from '@common/components/ui/PaginationBar'
 import { formatDateTimeIST } from '@common/utils/dateTime'
-import { formatDisplayLabel } from '@common/utils/formatDisplayLabel'
 
 import { testRunReportsApi } from '../../api'
 import { useTestRunsList } from '../../hooks/useTestRunsList'
 import type { TestRun } from '../../types'
 import EmailReportDialog from '../../components/EmailReportDialog'
+import { displayRunStatus } from '../../utils/runStatusDisplay'
 
 type StatusCfg = {
   icon: ComponentType<{ className?: string }>
@@ -103,16 +103,17 @@ export default function HistoryTab() {
   )
 
   const handleGenerateReport = useCallback(
-    async (e: React.MouseEvent, runId: number) => {
+    async (e: React.MouseEvent, runId: number, format: 'short' | 'long' = 'short') => {
       e.stopPropagation()
       setJobState(runId, 'generating')
       try {
-        const { data } = await testRunReportsApi.generate(runId)
+        const { data } = await testRunReportsApi.generate(runId, true, format)
         if (data.status === 'ready') {
           setJobState(runId, 'ready')
-          toast.success('Report is already generated — click Download.')
+          toast.success(`${format === 'short' ? 'Short' : 'Long'} report ready — click Download.`)
         } else if (data.status === 'generating') {
           startPolling(runId)
+          toast.success(`Generating ${format} report…`)
         } else {
           setJobState(runId, 'failed')
           toast.error(data.message || 'Failed to start report generation.')
@@ -125,20 +126,23 @@ export default function HistoryTab() {
     [setJobState, startPolling],
   )
 
-  const handleDownload = useCallback(async (e: React.MouseEvent, runId: number) => {
-    e.stopPropagation()
-    try {
-      const { data } = await testRunReportsApi.download(runId)
-      const url = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `QAstra_TestRun_${runId}_Report.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch {
-      toast.error('Download failed. Try regenerating the report.')
-    }
-  }, [])
+  const handleDownload = useCallback(
+    async (e: React.MouseEvent, runId: number, format: 'short' | 'long' = 'short') => {
+      e.stopPropagation()
+      try {
+        const { data } = await testRunReportsApi.download(runId, format)
+        const url = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `QAstra_TestRun_${runId}_${format}_Report.pdf`
+        a.click()
+        URL.revokeObjectURL(url)
+      } catch {
+        toast.error('Download failed. Try regenerating the report.')
+      }
+    },
+    [],
+  )
 
   const handleEmailClick = useCallback((e: React.MouseEvent, runId: number) => {
     e.stopPropagation()
@@ -260,7 +264,12 @@ export default function HistoryTab() {
                 </thead>
                 <tbody className="divide-y">
                   {runs.map((run: TestRun, index: number) => {
-                    const cfg = STATUS_CFG[run.status] || STATUS_CFG.pending
+                    const display = displayRunStatus(run.status, {
+                      passed: run.passed_tests ?? 0,
+                      failed: run.failed_tests ?? 0,
+                      total: run.total_tests ?? 0,
+                    })
+                    const cfg = STATUS_CFG[display.status] || STATUS_CFG.pending
                     const Icon = cfg.icon
                     const rowNum = (page - 1) * pageSize + index + 1
                     const isDone = ['passed', 'failed', 'error', 'cancelled'].includes(run.status)
@@ -283,6 +292,11 @@ export default function HistoryTab() {
                         <td className="px-6 py-4">
                           <div
                             className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full ${cfg.bg}`}
+                            title={
+                              display.hasFailures
+                                ? `${display.passRate}% pass rate — failures listed in report`
+                                : undefined
+                            }
                           >
                             <Icon
                               className={`w-3 h-3 ${cfg.color} ${
@@ -292,7 +306,7 @@ export default function HistoryTab() {
                             <span
                               className={`text-[10px] font-bold uppercase ${cfg.color}`}
                             >
-                              {formatDisplayLabel(run.status)}
+                              {display.label}
                             </span>
                           </div>
                         </td>
@@ -325,47 +339,63 @@ export default function HistoryTab() {
                         <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                           {!isDone ? (
                             <span className="text-xs text-gray-400">Run in progress</span>
-                          ) : jobState === 'idle' ? (
-                            <button
-                              type="button"
-                              onClick={(e) => handleGenerateReport(e, run.id)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
-                            >
-                              <DocumentTextIcon className="w-3.5 h-3.5" />
-                              Generate Report
-                            </button>
                           ) : jobState === 'generating' ? (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-blue-600 font-medium">
                               <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" />
                               Generating…
                             </span>
-                          ) : jobState === 'ready' ? (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={(e) => handleDownload(e, run.id)}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
-                              >
-                                <DocumentArrowDownIcon className="w-3.5 h-3.5" />
-                                Download
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => handleEmailClick(e, run.id)}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors"
-                              >
-                                <EnvelopeIcon className="w-3.5 h-3.5" />
-                                Email
-                              </button>
-                            </div>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={(e) => handleGenerateReport(e, run.id)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
-                            >
-                              Retry Report
-                            </button>
+                            <div className="flex flex-col gap-1 items-start">
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleGenerateReport(e, run.id, 'short')}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
+                                  title="Cover, results index, failures only (~tens of pages)"
+                                >
+                                  <DocumentTextIcon className="w-3.5 h-3.5" />
+                                  Short PDF
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleGenerateReport(e, run.id, 'long')}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors"
+                                  title="Full steps, agent logs, screenshot appendix"
+                                >
+                                  Long PDF
+                                </button>
+                              </div>
+                              {jobState === 'ready' && (
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleDownload(e, run.id, 'short')}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
+                                  >
+                                    <DocumentArrowDownIcon className="w-3.5 h-3.5" />
+                                    DL short
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleDownload(e, run.id, 'long')}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
+                                  >
+                                    DL long
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleEmailClick(e, run.id)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors"
+                                  >
+                                    <EnvelopeIcon className="w-3.5 h-3.5" />
+                                    Email
+                                  </button>
+                                </div>
+                              )}
+                              {jobState === 'failed' && (
+                                <span className="text-[10px] text-red-600">Generation failed — retry above</span>
+                              )}
+                            </div>
                           )}
                         </td>
 
