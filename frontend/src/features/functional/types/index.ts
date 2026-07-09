@@ -419,6 +419,7 @@ export interface TestRunCreateRequest {
   use_google_signin?: boolean
   browser?: string
   headless?: boolean
+  max_concurrency?: number
 }
 
 // Test Result Types
@@ -426,6 +427,7 @@ export interface TestResult {
   id: number
   test_run_id: number
   test_case_id: number
+  worker_id?: number
   status: 'passed' | 'failed' | 'skipped' | 'error'
   error_message?: string
   failed_step?: number

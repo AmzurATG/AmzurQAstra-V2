@@ -317,6 +317,7 @@ class TestCaseRunner:
         password: Optional[str] = None,
         use_google_signin: bool = False,
         headless: bool = False,
+        capture_screenshots: bool = True,
         browser_context: Optional[Any] = None,
         on_step_callback: Optional[Any] = None,
         execution_run_id: Optional[int] = None,
@@ -324,7 +325,7 @@ class TestCaseRunner:
         return await self._run_impl(
             run_id, test_case_id, title, description, preconditions,
             steps, app_url, username, password, use_google_signin, headless,
-            browser_context, on_step_callback, execution_run_id,
+            capture_screenshots, browser_context, on_step_callback, execution_run_id,
         )
 
     async def _run_impl(
@@ -340,6 +341,7 @@ class TestCaseRunner:
         password: Optional[str],
         use_google_signin: bool,
         headless: bool,
+        capture_screenshots: bool,
         browser_context: Optional[Any] = None,
         on_step_callback: Optional[Any] = None,
         execution_run_id: Optional[int] = None,
@@ -460,6 +462,8 @@ class TestCaseRunner:
 
         async def _on_step_end(agent: Any) -> None:
             """Persist viewport screenshot after the step's actions have run."""
+            if not capture_screenshots:
+                return
             if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
                 return
             if not agent_logs:

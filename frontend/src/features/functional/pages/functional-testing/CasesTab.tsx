@@ -67,6 +67,7 @@ export default function CasesTab() {
   const [showCreds, setShowCreds] = useState(false)
   const [overrideUser, setOverrideUser] = useState('')
   const [overridePass, setOverridePass] = useState('')
+  const [maxConcurrency, setMaxConcurrency] = useState(1)
 
   // Pre-populate credentials from project settings
   useEffect(() => {
@@ -181,6 +182,7 @@ export default function CasesTab() {
       project_id: pid,
       app_url: cp?.app_url || undefined,
       test_case_ids: tcIds,
+      max_concurrency: maxConcurrency,
       credentials:
         overrideUser || overridePass
           ? {
@@ -472,6 +474,38 @@ export default function CasesTab() {
         setOverridePass={setOverridePass}
         onSaveToProject={saveCredentialsToProject}
       />
+
+      <Card className="p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-900">Execution Workers</p>
+            <p className="text-xs text-gray-500">
+              Higher values run more test cases in parallel. Each worker keeps its own browser session.
+            </p>
+          </div>
+          <div className="w-full sm:w-56">
+            <label className="block text-xs font-medium text-gray-700 mb-1" htmlFor="max-concurrency">
+              Worker count
+            </label>
+            <select
+              id="max-concurrency"
+              value={String(maxConcurrency)}
+              onChange={(e) => {
+                const parsed = Number.parseInt(e.target.value, 10)
+                setMaxConcurrency(Number.isFinite(parsed) ? Math.min(5, Math.max(1, parsed)) : 1)
+              }}
+              className="w-full px-3 py-2 border rounded-lg text-sm"
+              disabled={activeRun.isCreating || activeRun.isRunning}
+            >
+              <option value="1">1 worker (sequential)</option>
+              <option value="2">2 workers</option>
+              <option value="3">3 workers</option>
+              <option value="4">4 workers</option>
+              <option value="5">5 workers</option>
+            </select>
+          </div>
+        </div>
+      </Card>
 
       <Card>
         <div className="flex flex-col md:flex-row gap-4 mb-4">

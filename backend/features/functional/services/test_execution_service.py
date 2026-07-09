@@ -1,7 +1,7 @@
 """
 Test Execution Service — orchestrates test runs via browser-use.
-Selected test cases in a run reuse one browser session so login state persists
-across the batch unless the application itself clears it.
+Runs can execute with one or more workers. Each worker reuses its own browser
+session across assigned test cases so login state persists within that worker.
 """
 import asyncio
 import re
@@ -204,6 +204,7 @@ class TestExecutionService:
                 "app_url": run_data.app_url,
                 "use_google_signin": run_data.use_google_signin,
                 "has_credentials": run_data.credentials is not None,
+                "max_concurrency": run_data.max_concurrency,
             },
         )
         self.db.add(test_run)
@@ -244,12 +245,15 @@ class TestExecutionService:
             "password": password
         }
 
+        effective_max_concurrency = max(1, int(run_data.max_concurrency or 1))
+
         # Persist resolved app URL on the run so DB / retries reflect what automation will use
         run_row = (await self.db.execute(select(TestRun).where(TestRun.id == run_id))).scalar_one_or_none()
         if run_row is not None:
             cfg = dict(run_row.config or {})
             if app_url:
                 cfg["app_url"] = app_url
+            cfg["max_concurrency"] = effective_max_concurrency
             run_row.config = cfg
             await self.db.commit()
 
@@ -265,6 +269,7 @@ class TestExecutionService:
                     password=final_creds["password"],
                     use_google_signin=run_data.use_google_signin,
                     headless=run_data.headless,
+                    max_concurrency=effective_max_concurrency,
                 )
             )
         else:
@@ -276,6 +281,7 @@ class TestExecutionService:
                     password=final_creds["password"],
                     use_google_signin=run_data.use_google_signin,
                     headless=run_data.headless,
+                    max_concurrency=effective_max_concurrency,
                 )
             )
 
@@ -299,6 +305,7 @@ class TestExecutionService:
         password: Optional[str],
         use_google_signin: bool,
         headless: bool,
+        max_concurrency: int,
     ) -> None:
         from common.db.database import async_session_maker
 
@@ -399,6 +406,65 @@ class TestExecutionService:
                     .where(TestCase.id.in_(tc_ids))
                 )).scalars().all()
                 tc_map = {tc.id: tc for tc in tc_rows}
+                result_by_id = {r.id: r for r in ordered_results}
+
+                work_items: List[Dict[str, Any]] = []
+                for idx, test_result in enumerate(ordered_results):
+                    tc = tc_map.get(test_result.test_case_id)
+                    if tc is None:
+                        work_items.append({
+                            "idx": idx,
+                            "test_result_id": test_result.id,
+                            "test_case_id": test_result.test_case_id,
+                            "title": f"Missing case #{test_result.test_case_id}",
+                            "user_story_id": None,
+                            "description": "",
+                            "preconditions": "",
+                            "steps": [],
+                            "exists": False,
+                        })
+                        continue
+
+                    steps_data = [
+                        {
+                            "step_number": s.step_number,
+                            "action": s.action.value if hasattr(s.action, "value") else str(s.action),
+                            "target": s.target,
+                            "value": s.value,
+                            "description": s.description,
+                            "expected_result": s.expected_result,
+                        }
+                        for s in sorted(tc.steps, key=lambda s: s.step_number)
+                    ]
+                    work_items.append({
+                        "idx": idx,
+                        "test_result_id": test_result.id,
+                        "test_case_id": tc.id,
+                        "title": tc.title or f"Test Case #{tc.id}",
+                        "user_story_id": tc.user_story_id,
+                        "description": tc.description or "",
+                        "preconditions": tc.preconditions or "",
+                        "steps": steps_data,
+                        "exists": True,
+                    })
+
+                story_groups: Dict[str, List[Dict[str, Any]]] = {}
+                for item in work_items:
+                    group_key = (
+                        f"us:{item['user_story_id']}"
+                        if item.get("user_story_id") is not None
+                        else "us:none"
+                    )
+                    story_groups.setdefault(group_key, []).append(item)
+
+                effective_workers = max(1, min(max_concurrency, len(story_groups)))
+                worker_queues: List[List[Dict[str, Any]]] = [[] for _ in range(effective_workers)]
+                worker_loads: List[int] = [0 for _ in range(effective_workers)]
+
+                for group in story_groups.values():
+                    least_loaded = min(range(effective_workers), key=lambda i: worker_loads[i])
+                    worker_queues[least_loaded].extend(group)
+                    worker_loads[least_loaded] += len(group)
 
                 self.progress_manager.set(run_id, {
                     "status": "running",
@@ -414,145 +480,444 @@ class TestExecutionService:
 
                 _log(f"Starting test run with {total} test case(s)")
                 _log(f"🔗 Application URL: {app_url}")
+                _log(f"⚙️ Max concurrency configured: {max_concurrency}")
+                _log(f"🧩 User story groups: {len(story_groups)}")
+                _log(f"🧵 Worker count in use: {effective_workers}")
+
                 completed_results: List[Dict[str, Any]] = []
                 passed = 0
                 failed = 0
+                completed_count = 0
+                executed_result_ids = set()
+                state_lock = asyncio.Lock()
+                auth_execution_lock = asyncio.Lock()
                 runner = TestCaseRunner()
 
-                shared_browser = Browser(
-                    browser_profile=BrowserProfile(
-                        headless=headless,
-                        is_local=True,
-                        disable_security=True,
-                        args=default_browser_chrome_args(),
-                        enable_default_extensions=getattr(
-                            config, "settings"
-                        ).BROWSER_USE_DEFAULT_EXTENSIONS,
-                        keep_alive=True,
+                def _build_browser() -> Browser:
+                    return Browser(
+                        browser_profile=BrowserProfile(
+                            headless=headless,
+                            is_local=True,
+                            disable_security=True,
+                            args=default_browser_chrome_args(),
+                            enable_default_extensions=getattr(
+                                config, "settings"
+                            ).BROWSER_USE_DEFAULT_EXTENSIONS,
+                            keep_alive=True,
+                        )
                     )
-                )
 
-                _log("🚀 Test run started — selected cases reuse one browser session")
-                aborted_cancel = False
-
-                try:
-                    for idx, test_result in enumerate(ordered_results):
-                        await db.refresh(run)
-                        if (
-                            run.status == TestRunStatus.CANCELLED
-                            or self.progress_manager.is_cancel_requested(run_id)
-                        ):
-                            await _mark_remaining_skipped(
-                                db,
-                                ordered_results,
-                                idx,
-                                tc_map,
-                                "Run cancelled by user.",
-                                completed_results,
-                            )
-                            aborted_cancel = True
-                            break
-
-                        tc = tc_map.get(test_result.test_case_id)
-                        if not tc:
-                            _log(f"✗ Test case id={test_result.test_case_id} not found — marking ERROR", test_result.test_case_id)
-                            test_result.status = TestResultStatus.ERROR
-                            test_result.error_message = "Test case was deleted or is not in this project."
-                            test_result.completed_at = datetime.utcnow()
-                            await db.commit()
-                            failed += 1
-                            completed_results.append(
-                                completed_case_dict(
-                                    test_result_id=test_result.id,
-                                    test_case_id=test_result.test_case_id,
-                                    title=f"Missing case #{test_result.test_case_id}",
-                                    status="error",
-                                    steps_total=0,
-                                    steps_passed=0,
-                                    steps_failed=0,
-                                    duration_ms=0,
-                                    step_results=[],
-                                    adapted_steps=[],
-                                    original_steps=[],
-                                    agent_logs=None,
-                                    screenshot_path=None,
-                                )
-                            )
-                            self.progress_manager.set(run_id, {
-                                "status": "running",
-                                "percentage": int(((idx + 1) / total) * 100),
-                                "current_test_case_index": idx,
-                                "total_test_cases": total,
-                                "current_test_case_title": None,
-                                "current_step_info": None,
-                                "completed_results": list(completed_results),
-                                "logs": list(logs),
-                                "error": None,
-                            })
-                            continue
-
-                        tc_title = tc.title or f"Test Case #{tc.id}"
-                        _log(f"▶ [{idx + 1}/{total}] {tc_title}", tc.id)
-
-                        # Callback to update granular progress during a single test case
-                        async def _on_tc_step(step_num: int, desc: str, log_entry: Optional[Dict]):
-                            # Calculate granular percentage
-                            base_pct = int((idx / total) * 100)
-                            tc_pct_contribution = int((1 / total) * 100 * (step_num / 25))
-                            total_pct = min(99, base_pct + tc_pct_contribution)
-                            
-                            self.progress_manager.set(run_id, {
-                                "status": "running",
-                                "percentage": total_pct,
-                                "current_test_case_index": idx,
-                                "total_test_cases": total,
-                                "current_test_case_title": tc_title,
-                                "current_step_info": desc,
-                                "completed_results": completed_results,
-                                "logs": list(logs),
-                                "error": None,
-                            })
-                            if log_entry:
-                                msg = f"  Step {step_num}: {desc}"
-                                _log(msg, tc.id)
-
-                        self.progress_manager.set(run_id, {
-                            "status": "running",
-                            "percentage": int((idx / total) * 100),
-                            "current_test_case_index": idx,
-                            "total_test_cases": total,
-                            "current_test_case_title": tc_title,
-                            "current_step_info": "Starting…",
-                            "completed_results": completed_results,
-                            "logs": list(logs),
-                            "error": None,
-                        })
-
-                        steps_data = [
-                            {
-                                "step_number": s.step_number,
-                                "action": s.action.value if hasattr(s.action, "value") else str(s.action),
-                                "target": s.target,
-                                "value": s.value,
-                                "description": s.description,
-                                "expected_result": s.expected_result,
-                            }
-                            for s in sorted(tc.steps, key=lambda s: s.step_number)
+                def _is_auth_sensitive_case(item: Dict[str, Any]) -> bool:
+                    # These cases are highly sensitive to pre-existing login state.
+                    markers = (
+                        "login",
+                        "log in",
+                        "signin",
+                        "sign in",
+                        "authentication",
+                        "invalid password",
+                        "invalid email",
+                        "wrong password",
+                        "non-existent",
+                        "non existent",
+                        "unauthorized",
+                        "401",
+                        "403",
+                        "otp",
+                        "mfa",
+                        "two-factor",
+                        "two factor",
+                        "forgot password",
+                        "reset password",
+                    )
+                    step_text = " ".join(
+                        " ".join(
+                            str(s.get(k) or "")
+                            for k in ("description", "expected_result", "action", "target", "value")
+                        )
+                        for s in item.get("steps", [])
+                    )
+                    haystack = " ".join(
+                        [
+                            str(item.get("title") or ""),
+                            str(item.get("description") or ""),
+                            str(item.get("preconditions") or ""),
+                            step_text,
                         ]
+                    ).lower()
+                    return any(marker in haystack for marker in markers)
 
-                        if not steps_data:
-                            _log(f"✗ {tc_title} — no steps defined; skipping automation", tc.id)
-                            test_result.status = TestResultStatus.ERROR
-                            test_result.error_message = "Test case has no steps."
-                            test_result.duration_ms = 0
-                            test_result.completed_at = datetime.utcnow()
-                            test_result.step_results = []
-                            await db.commit()
+                async def _publish_running(title: Optional[str], step_info: Optional[str], base_completed: int) -> None:
+                    pct = min(99, int((base_completed / total) * 100)) if total else 0
+                    self.progress_manager.set(run_id, {
+                        "status": "running",
+                        "percentage": pct,
+                        "current_test_case_index": min(base_completed, total),
+                        "total_test_cases": total,
+                        "current_test_case_title": title,
+                        "current_step_info": step_info,
+                        "completed_results": list(completed_results),
+                        "logs": list(logs),
+                        "error": None,
+                    })
+
+                async def _mark_item_complete(item: Dict[str, Any], entry: Dict[str, Any], tc_status: str) -> None:
+                    nonlocal passed, failed, completed_count
+                    async with state_lock:
+                        completed_results.append(entry)
+                        executed_result_ids.add(item["test_result_id"])
+                        completed_count += 1
+                        if tc_status == "passed":
+                            passed += 1
+                        elif tc_status != "cancelled":
                             failed += 1
-                            completed_results.append(
-                                completed_case_dict(
-                                    test_result_id=test_result.id,
-                                    test_case_id=tc.id,
+                        base_completed = completed_count
+                    await _publish_running(None, None, base_completed)
+
+                async def _persist_result(
+                    item: Dict[str, Any],
+                    worker_id: int,
+                    tc_status: str,
+                    duration: int,
+                    final_step_results: List[Dict[str, Any]],
+                    safe_agent_logs: Optional[List[Dict[str, Any]]],
+                    screenshot_path: Optional[str],
+                    err_msg: Optional[str],
+                ) -> None:
+                    async with async_session_maker() as wdb:
+                        tr_row = (await wdb.execute(
+                            select(TestResult).where(TestResult.id == item["test_result_id"])
+                        )).scalar_one_or_none()
+                        if not tr_row:
+                            return
+                        tr_row.worker_id = worker_id
+                        tr_row.status = (
+                            TestResultStatus.PASSED if tc_status == "passed"
+                            else TestResultStatus.FAILED if tc_status == "failed"
+                            else TestResultStatus.SKIPPED if tc_status == "cancelled"
+                            else TestResultStatus.ERROR
+                        )
+                        tr_row.duration_ms = duration
+                        tr_row.started_at = datetime.utcnow()
+                        tr_row.completed_at = datetime.utcnow()
+                        tr_row.step_results = final_step_results
+                        tr_row.adapted_steps = [s for s in final_step_results if s.get("adaptation")]
+                        tr_row.original_steps = item["steps"]
+                        tr_row.screenshot_path = screenshot_path
+                        tr_row.agent_logs = safe_agent_logs
+                        tr_row.error_message = err_msg
+                        tr_row.failed_step = next(
+                            (s["step_number"] for s in final_step_results if s.get("status") != "passed"),
+                            None,
+                        )
+                        await wdb.commit()
+
+                async def _persist_simple_error(item: Dict[str, Any], worker_id: int, err_msg: str) -> None:
+                    async with async_session_maker() as wdb:
+                        tr_row = (await wdb.execute(
+                            select(TestResult).where(TestResult.id == item["test_result_id"])
+                        )).scalar_one_or_none()
+                        if not tr_row:
+                            return
+                        tr_row.worker_id = worker_id
+                        tr_row.status = TestResultStatus.ERROR
+                        tr_row.error_message = err_msg
+                        tr_row.duration_ms = 0
+                        tr_row.completed_at = datetime.utcnow()
+                        tr_row.step_results = []
+                        tr_row.failed_step = None
+                        await wdb.commit()
+
+                def _screenshot_belongs_to_testcase(path: Optional[str], tc_id: int) -> bool:
+                    if not path or not isinstance(path, str):
+                        return False
+                    return re.search(rf"_tc{int(tc_id)}_", path) is not None
+
+                def _sanitize_evidence_for_testcase(
+                    tc_id: int,
+                    screenshots: List[Any],
+                    logs_list: Optional[List[Dict[str, Any]]],
+                ) -> Tuple[List[str], Optional[List[Dict[str, Any]]], int, int]:
+                    valid_screenshots: List[str] = []
+                    dropped_screenshot_count = 0
+                    for raw in screenshots or []:
+                        path = str(raw) if raw is not None else ""
+                        if _screenshot_belongs_to_testcase(path, tc_id):
+                            valid_screenshots.append(path)
+                        elif path:
+                            dropped_screenshot_count += 1
+                            _log(
+                                f"⚠ Dropped screenshot that does not belong to tc={tc_id}: {path}",
+                                tc_id,
+                            )
+
+                    if not logs_list:
+                        return valid_screenshots, logs_list, dropped_screenshot_count, 0
+
+                    cleaned_logs: List[Dict[str, Any]] = []
+                    dropped_log_screenshot_count = 0
+                    for entry in logs_list:
+                        log_entry = dict(entry or {})
+                        sp = log_entry.get("screenshot_path")
+                        if sp and not _screenshot_belongs_to_testcase(str(sp), tc_id):
+                            dropped_log_screenshot_count += 1
+                            _log(
+                                f"⚠ Dropped agent log screenshot mismatch for tc={tc_id}: {sp}",
+                                tc_id,
+                            )
+                            log_entry["screenshot_path"] = None
+                        cleaned_logs.append(log_entry)
+                    return (
+                        valid_screenshots,
+                        cleaned_logs,
+                        dropped_screenshot_count,
+                        dropped_log_screenshot_count,
+                    )
+
+                async def _worker(worker_id: int, queue: List[Dict[str, Any]]) -> None:
+                    worker_browser = _build_browser()
+                    _log(f"🧵 Worker {worker_id} started ({len(queue)} case(s))")
+                    try:
+                        for item in queue:
+                            if self.progress_manager.is_cancel_requested(run_id):
+                                break
+
+                            tc_title = item["title"]
+                            tc_id = item["test_case_id"]
+
+                            async with state_lock:
+                                base_completed = completed_count
+                            await _publish_running(tc_title, f"Worker {worker_id}: Starting…", base_completed)
+
+                            isolated_browser: Optional[Browser] = None
+                            try:
+                                if not item["exists"]:
+                                    _log(
+                                        f"✗ [W{worker_id}] Test case id={tc_id} not found — marking ERROR",
+                                        tc_id,
+                                    )
+                                    await _persist_simple_error(item, worker_id, "Test case was deleted or is not in this project.")
+                                    entry = completed_case_dict(
+                                        test_result_id=item["test_result_id"],
+                                        test_case_id=tc_id,
+                                        title=tc_title,
+                                        status="error",
+                                        steps_total=0,
+                                        steps_passed=0,
+                                        steps_failed=0,
+                                        duration_ms=0,
+                                        step_results=[],
+                                        adapted_steps=[],
+                                        original_steps=[],
+                                        agent_logs=None,
+                                        screenshot_path=None,
+                                    )
+                                    await _mark_item_complete(item, entry, "error")
+                                    continue
+
+                                if not item["steps"]:
+                                    _log(f"✗ [W{worker_id}] {tc_title} — no steps defined; skipping automation", tc_id)
+                                    await _persist_simple_error(item, worker_id, "Test case has no steps.")
+                                    entry = completed_case_dict(
+                                        test_result_id=item["test_result_id"],
+                                        test_case_id=tc_id,
+                                        title=tc_title,
+                                        status="error",
+                                        steps_total=0,
+                                        steps_passed=0,
+                                        steps_failed=0,
+                                        duration_ms=0,
+                                        step_results=[],
+                                        adapted_steps=[],
+                                        original_steps=[],
+                                        agent_logs=None,
+                                        screenshot_path=None,
+                                    )
+                                    await _mark_item_complete(item, entry, "error")
+                                    continue
+
+                                _log(f"▶ [W{worker_id}] {tc_title}", tc_id)
+
+                                case_browser: Browser = worker_browser
+                                is_auth_sensitive = _is_auth_sensitive_case(item)
+                                if is_auth_sensitive:
+                                    isolated_browser = _build_browser()
+                                    case_browser = isolated_browser
+                                    _log(
+                                        f"🔐 [W{worker_id}] Auth-sensitive case uses isolated browser session",
+                                        tc_id,
+                                    )
+
+                                async def _on_tc_step(step_num: int, desc: str, log_entry: Optional[Dict]):
+                                    async with state_lock:
+                                        base = completed_count
+                                    base_pct = min(99, int((base / total) * 100)) if total else 0
+                                    tc_pct_contribution = int((1 / max(total, 1)) * 100 * (step_num / 25))
+                                    total_pct = min(99, base_pct + tc_pct_contribution)
+                                    self.progress_manager.set(run_id, {
+                                        "status": "running",
+                                        "percentage": total_pct,
+                                        "current_test_case_index": min(base, total),
+                                        "total_test_cases": total,
+                                        "current_test_case_title": tc_title,
+                                        "current_step_info": f"Worker {worker_id}: {desc}",
+                                        "completed_results": list(completed_results),
+                                        "logs": list(logs),
+                                        "error": None,
+                                    })
+                                    if log_entry:
+                                        _log(f"  [W{worker_id}] Step {step_num}: {desc}", tc_id)
+
+                                async def _run_current_case() -> Dict[str, Any]:
+                                    return await runner.run(
+                                        run_id=run_uuid,
+                                        test_case_id=tc_id,
+                                        title=tc_title,
+                                        description=item["description"],
+                                        preconditions=item["preconditions"],
+                                        steps=item["steps"],
+                                        app_url=app_url,
+                                        username=username,
+                                        password=password,
+                                        use_google_signin=use_google_signin,
+                                        headless=headless,
+                                        capture_screenshots=True,
+                                        browser_context=case_browser,
+                                        on_step_callback=_on_tc_step,
+                                        execution_run_id=run_id,
+                                    )
+
+                                if is_auth_sensitive:
+                                    _log(
+                                        f"🔒 [W{worker_id}] Auth-sensitive execution lock acquired",
+                                        tc_id,
+                                    )
+                                    async with auth_execution_lock:
+                                        result = await _run_current_case()
+                                else:
+                                    result = await _run_current_case()
+
+                                tc_status = result.get("overall", "error")
+                                duration = result.get("duration_ms", 0)
+
+                                llm_steps = {
+                                    s.get("step_number"): s
+                                    for s in result.get("step_results", [])
+                                }
+                                final_step_results: List[Dict[str, Any]] = []
+                                for s_orig in item["steps"]:
+                                    num = s_orig["step_number"]
+                                    s_res = llm_steps.get(num, {})
+                                    merged = {
+                                        **s_orig,
+                                        "status": s_res.get("status", "skipped"),
+                                        "actual_result": s_res.get("actual_result"),
+                                        "adaptation": s_res.get("adaptation"),
+                                    }
+                                    final_step_results.append(
+                                        redact_step_dict(merged, username, password)
+                                    )
+
+                                safe_agent_logs = redact_agent_logs_list(
+                                    result.get("logs"), username, password
+                                )
+                                screenshots_raw = result.get("screenshots") or []
+                                (
+                                    safe_screenshots,
+                                    safe_agent_logs,
+                                    dropped_screenshots_count,
+                                    dropped_log_screenshot_count,
+                                ) = _sanitize_evidence_for_testcase(
+                                    tc_id=tc_id,
+                                    screenshots=screenshots_raw,
+                                    logs_list=safe_agent_logs,
+                                )
+                                if safe_agent_logs is None:
+                                    safe_agent_logs = []
+                                safe_agent_logs.insert(0, {
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                    "agent_step": 0,
+                                    "description": "[debug] Worker assignment metadata",
+                                    "adaptation": None,
+                                    "screenshot_path": None,
+                                    "debug": {
+                                        "worker_id": worker_id,
+                                        "run_uuid": run_uuid,
+                                        "test_case_id": tc_id,
+                                        "test_result_id": item["test_result_id"],
+                                        "user_story_id": item.get("user_story_id"),
+                                        "auth_sensitive_case": is_auth_sensitive,
+                                        "isolated_browser": bool(isolated_browser is not None),
+                                        "dropped_screenshot_count": dropped_screenshots_count,
+                                        "dropped_agentlog_screenshot_count": dropped_log_screenshot_count,
+                                    },
+                                })
+                                screenshot_path = (safe_screenshots or [None])[0]
+                                err_msg = (
+                                    "Run cancelled by user"
+                                    if tc_status == "cancelled"
+                                    else redact_known_credentials(
+                                        result.get("error"),
+                                        username=username,
+                                        password=password,
+                                    )
+                                )
+
+                                await _persist_result(
+                                    item,
+                                    worker_id=worker_id,
+                                    tc_status=tc_status,
+                                    duration=duration,
+                                    final_step_results=final_step_results,
+                                    safe_agent_logs=safe_agent_logs,
+                                    screenshot_path=screenshot_path,
+                                    err_msg=err_msg,
+                                )
+
+                                entry = completed_case_dict(
+                                    test_result_id=item["test_result_id"],
+                                    test_case_id=tc_id,
+                                    title=tc_title,
+                                    status=tc_status,
+                                    steps_total=result.get("steps_total", 0),
+                                    steps_passed=result.get("steps_passed", 0),
+                                    steps_failed=result.get("steps_failed", 0),
+                                    duration_ms=duration,
+                                    step_results=final_step_results,
+                                    adapted_steps=[s for s in final_step_results if s.get("adaptation")],
+                                    original_steps=item["steps"],
+                                    agent_logs=safe_agent_logs,
+                                    screenshot_path=screenshot_path,
+                                )
+                                await _mark_item_complete(item, entry, tc_status)
+
+                                if tc_status == "passed":
+                                    _log(f"✓ [W{worker_id}] {tc_title} — PASSED ({duration}ms)", tc_id)
+                                elif tc_status == "cancelled":
+                                    _log(f"⏹ [W{worker_id}] {tc_title} — CANCELLED ({duration}ms)", tc_id)
+                                    self.progress_manager.request_cancel(run_id)
+                                    break
+                                else:
+                                    _log(f"✗ [W{worker_id}] {tc_title} — {tc_status.upper()} ({duration}ms)", tc_id)
+
+                                cleanup_tc_progress(f"{run_uuid}:{tc_id}")
+                                if isolated_browser is not None:
+                                    try:
+                                        await isolated_browser.kill()
+                                    except Exception as isolated_browser_cleanup_error:
+                                        logger.warning(
+                                            f"[TestExecutionService] Worker {worker_id} isolated browser cleanup failed: {isolated_browser_cleanup_error}"
+                                        )
+                            except Exception as tc_exc:
+                                safe_err = redact_known_credentials(
+                                    str(tc_exc), username=username, password=password
+                                )
+                                safe_err_str = safe_err or "Worker execution error"
+                                _log(f"✗ [W{worker_id}] {tc_title} — ERROR ({safe_err_str})", tc_id)
+                                await _persist_simple_error(item, worker_id, safe_err_str)
+                                entry = completed_case_dict(
+                                    test_result_id=item["test_result_id"],
+                                    test_case_id=tc_id,
                                     title=tc_title,
                                     status="error",
                                     steps_total=0,
@@ -561,177 +926,116 @@ class TestExecutionService:
                                     duration_ms=0,
                                     step_results=[],
                                     adapted_steps=[],
-                                    original_steps=[],
+                                    original_steps=item["steps"],
                                     agent_logs=None,
                                     screenshot_path=None,
                                 )
+                                await _mark_item_complete(item, entry, "error")
+                                if isolated_browser is not None:
+                                    try:
+                                        await isolated_browser.kill()
+                                    except Exception as isolated_browser_cleanup_error:
+                                        logger.warning(
+                                            f"[TestExecutionService] Worker {worker_id} isolated browser cleanup failed: {isolated_browser_cleanup_error}"
+                                        )
+                    finally:
+                        try:
+                            await worker_browser.kill()
+                        except Exception as browser_cleanup_error:
+                            logger.warning(
+                                f"[TestExecutionService] Worker {worker_id} browser cleanup failed: {browser_cleanup_error}"
                             )
+
+                await asyncio.gather(
+                    *[
+                        _worker(worker_id=i + 1, queue=q)
+                        for i, q in enumerate(worker_queues)
+                        if q
+                    ]
+                )
+
+                cancelled = self.progress_manager.is_cancel_requested(run_id)
+                if cancelled:
+                    cancel_reason = "Run cancelled by user."
+                    for item in work_items:
+                        tr_id = item["test_result_id"]
+                        if tr_id in executed_result_ids:
                             continue
-
-                        result = await runner.run(
-                            run_id=run_uuid,
-                            test_case_id=tc.id,
-                            title=tc_title,
-                            description=tc.description or "",
-                            preconditions=tc.preconditions or "",
-                            steps=steps_data,
-                            app_url=app_url,
-                            username=username,
-                            password=password,
-                            use_google_signin=use_google_signin,
-                            headless=headless,
-                            browser_context=shared_browser,
-                            on_step_callback=_on_tc_step,
-                            execution_run_id=run_id,
-                        )
-
-                        tc_status = result.get("overall", "error")
-                        duration = result.get("duration_ms", 0)
-                        
-                        # Merge original step info with LLM results
-                        final_step_results = []
-                        llm_steps = {s.get("step_number"): s for s in result.get("step_results", [])}
-                        
-                        for s_orig in steps_data:
-                            num = s_orig["step_number"]
-                            s_res = llm_steps.get(num, {})
-                            merged = {
-                                **s_orig,
-                                "status": s_res.get("status", "skipped"),
-                                "actual_result": s_res.get("actual_result"),
-                                "adaptation": s_res.get("adaptation"),
-                            }
-                            final_step_results.append(
-                                redact_step_dict(merged, username, password)
-                            )
-
-                        safe_agent_logs = redact_agent_logs_list(
-                            result.get("logs"), username, password
-                        )
-
-                        test_result.status = (
-                            TestResultStatus.PASSED if tc_status == "passed"
-                            else TestResultStatus.FAILED if tc_status == "failed"
-                            else TestResultStatus.SKIPPED if tc_status == "cancelled"
-                            else TestResultStatus.ERROR
-                        )
-                        test_result.duration_ms = duration
-                        test_result.started_at = datetime.utcnow()
-                        test_result.completed_at = datetime.utcnow()
-                        test_result.step_results = final_step_results
-                        test_result.adapted_steps = [s for s in final_step_results if s.get("adaptation")]
-                        test_result.original_steps = steps_data
-                        # First screenshot for legacy consumers; full trail in agent_logs
-                        test_result.screenshot_path = (result.get("screenshots") or [None])[0]
-                        test_result.agent_logs = safe_agent_logs
-                        test_result.error_message = (
-                            "Run cancelled by user"
-                            if tc_status == "cancelled"
-                            else redact_known_credentials(
-                                result.get("error"),
-                                username=username,
-                                password=password,
-                            )
-                        )
-                        test_result.failed_step = next(
-                            (s["step_number"] for s in final_step_results if s.get("status") != "passed"),
-                            None,
-                        )
-                        await db.commit()
-
-                        if tc_status == "passed":
-                            passed += 1
-                            _log(f"✓ {tc_title} — PASSED ({duration}ms)", tc.id)
-                        elif tc_status == "cancelled":
-                            _log(f"⏹ {tc_title} — CANCELLED ({duration}ms)", tc.id)
-                        else:
-                            failed += 1
-                            _log(f"✗ {tc_title} — {tc_status.upper()} ({duration}ms)", tc.id)
-
+                        tr_row = result_by_id.get(tr_id)
+                        if tr_row:
+                            tr_row.status = TestResultStatus.SKIPPED
+                            tr_row.error_message = cancel_reason
+                            tr_row.completed_at = datetime.utcnow()
+                            tr_row.duration_ms = tr_row.duration_ms or 0
+                            tr_row.step_results = []
+                            tr_row.failed_step = None
                         completed_results.append(
                             completed_case_dict(
-                                test_result_id=test_result.id,
-                                test_case_id=tc.id,
-                                title=tc_title,
-                                status=tc_status,
-                                steps_total=result.get("steps_total", 0),
-                                steps_passed=result.get("steps_passed", 0),
-                                steps_failed=result.get("steps_failed", 0),
-                                duration_ms=duration,
-                                step_results=final_step_results,
-                                adapted_steps=[s for s in final_step_results if s.get("adaptation")],
-                                original_steps=steps_data,
-                                agent_logs=safe_agent_logs,
-                                screenshot_path=test_result.screenshot_path,
+                                test_result_id=tr_id,
+                                test_case_id=item["test_case_id"],
+                                title=item["title"],
+                                status="skipped",
+                                steps_total=0,
+                                steps_passed=0,
+                                steps_failed=0,
+                                duration_ms=0,
+                                step_results=[],
+                                adapted_steps=[],
+                                original_steps=[],
+                                agent_logs=None,
+                                screenshot_path=None,
                             )
                         )
-                        cleanup_tc_progress(f"{run_uuid}:{tc.id}")
-
-                        if tc_status == "cancelled":
-                            await _mark_remaining_skipped(
-                                db,
-                                ordered_results,
-                                idx + 1,
-                                tc_map,
-                                "Run cancelled by user.",
-                                completed_results,
-                            )
-                            aborted_cancel = True
-                            break
-                finally:
-                    try:
-                        await shared_browser.kill()
-                    except Exception as browser_cleanup_error:
-                        logger.warning(
-                            f"[TestExecutionService] Shared browser cleanup failed: {browser_cleanup_error}"
-                        )
-
-                if aborted_cancel:
-                    skipped_n = sum(
-                        1 for r in ordered_results if r.status == TestResultStatus.SKIPPED
-                    )
-                    run.status = TestRunStatus.CANCELLED
-                    run.completed_at = datetime.utcnow()
-                    run.passed_tests = passed
-                    run.failed_tests = failed
-                    run.skipped_tests = skipped_n
                     await db.commit()
-                    _log(f"Run cancelled — {passed} passed, {failed} failed, {skipped_n} skipped")
-                    self.progress_manager.set(run_id, {
-                        "status": "cancelled",
-                        "percentage": 100,
-                        "current_test_case_index": total,
-                        "total_test_cases": total,
-                        "current_test_case_title": None,
-                        "current_step_info": "Cancelled",
-                        "completed_results": completed_results,
-                        "logs": list(logs),
-                        "error": None,
-                    })
-                    self.progress_manager.clear_cancel(run_id)
-                    self.progress_manager.schedule_cleanup(run_id, delay_seconds=300)
+
+                status_rows = (await db.execute(
+                    select(TestResult.status, func.count(TestResult.id))
+                    .where(TestResult.test_run_id == run_id)
+                    .group_by(TestResult.status)
+                )).all()
+                passed_n = 0
+                failed_n = 0
+                skipped_n = 0
+                for st, cnt in status_rows:
+                    n = int(cnt or 0)
+                    if st == TestResultStatus.PASSED:
+                        passed_n += n
+                    elif st in (TestResultStatus.FAILED, TestResultStatus.ERROR):
+                        failed_n += n
+                    elif st == TestResultStatus.SKIPPED:
+                        skipped_n += n
+
+                run.status = TestRunStatus.CANCELLED if cancelled else (
+                    TestRunStatus.PASSED if failed_n == 0 else TestRunStatus.FAILED
+                )
+                run.completed_at = datetime.utcnow()
+                run.passed_tests = passed_n
+                run.failed_tests = failed_n
+                run.skipped_tests = skipped_n
+                await db.commit()
+
+                if cancelled:
+                    _log(f"Run cancelled — {passed_n} passed, {failed_n} failed, {skipped_n} skipped")
+                    final_status = "cancelled"
+                    final_step = "Cancelled"
                 else:
-                    run.status = TestRunStatus.PASSED if failed == 0 else TestRunStatus.FAILED
-                    run.completed_at = datetime.utcnow()
-                    run.passed_tests = passed
-                    run.failed_tests = failed
-                    await db.commit()
+                    _log(f"Run complete — {passed_n} passed, {failed_n} failed")
+                    final_status = "completed"
+                    final_step = "Completed"
 
-                    _log(f"Run complete — {passed} passed, {failed} failed")
-                    self.progress_manager.set(run_id, {
-                        "status": "completed",
-                        "percentage": 100,
-                        "current_test_case_index": total,
-                        "total_test_cases": total,
-                        "current_test_case_title": None,
-                        "current_step_info": "Completed",
-                        "completed_results": completed_results,
-                        "logs": list(logs),
-                        "error": None,
-                    })
-                    self.progress_manager.clear_cancel(run_id)
-                    # Schedule cleanup after 5 minutes
-                    self.progress_manager.schedule_cleanup(run_id, delay_seconds=300)
+                self.progress_manager.set(run_id, {
+                    "status": final_status,
+                    "percentage": 100,
+                    "current_test_case_index": total,
+                    "total_test_cases": total,
+                    "current_test_case_title": None,
+                    "current_step_info": final_step,
+                    "completed_results": completed_results,
+                    "logs": list(logs),
+                    "error": None,
+                })
+                self.progress_manager.clear_cancel(run_id)
+                self.progress_manager.schedule_cleanup(run_id, delay_seconds=300)
             except Exception as e:
                 logger.error(f"[TestExecutionService] Fatal error in background execution: {str(e)}")
                 _log(f"✗ FATAL ERROR: {str(e)}")

@@ -3,7 +3,7 @@ Test Run Schemas
 """
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from features.functional.db.models.test_run import TestRunStatus
 from features.functional.db.models.test_result import TestResultStatus
@@ -26,6 +26,7 @@ class TestRunCreate(BaseModel):
     use_google_signin: bool = False
     browser: str = "chromium"
     headless: bool = False
+    max_concurrency: int = Field(default=1, ge=1, le=5)
     config: Optional[Dict[str, Any]] = None
 
 
@@ -74,6 +75,7 @@ class TestResultResponse(BaseModel):
     id: int
     test_run_id: int
     test_case_id: int
+    worker_id: Optional[int] = None
     status: TestResultStatus
     duration_ms: Optional[int] = None
     error_message: Optional[str] = None

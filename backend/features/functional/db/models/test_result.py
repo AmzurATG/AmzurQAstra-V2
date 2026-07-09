@@ -24,6 +24,8 @@ class TestResult(BaseModel):
     
     test_run_id = Column(Integer, ForeignKey("test_runs.id"), nullable=False)
     test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
+    # Worker that executed this case in concurrent runs (1-based); null for legacy/sequential rows.
+    worker_id = Column(Integer, nullable=True, index=True)
     
     # Result
     status = Column(Enum(TestResultStatus, values_callable=lambda e: [x.value for x in e]), nullable=False)
