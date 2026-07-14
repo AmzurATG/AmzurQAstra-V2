@@ -25,7 +25,7 @@ celery==5.3.6
 
 # HTTP Client
 httpx==0.28.1
-aiohttp==3.13.3
+aiohttp==3.13.4
 
 # LLM Integrations
 openai==2.16.0
@@ -52,7 +52,7 @@ markdown==3.5.1
 # File Handling
 python-magic==0.4.27
 aiofiles==25.1.0
-pillow==12.1.1
+pillow==12.2.0
 fsspec==2026.2.0
 
 # Cloud Storage

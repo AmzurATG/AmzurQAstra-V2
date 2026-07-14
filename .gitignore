@@ -41,10 +41,11 @@ uploads/*
 storage/*
 !storage/.gitkeep
 
-# Coverage
-coverage/
+# Pytest/tooling coverage reports (not features/*/core/coverage package)
+/coverage/
 htmlcov/
 .coverage
+.coverage.*
 
 # Playwright
 test-results/
