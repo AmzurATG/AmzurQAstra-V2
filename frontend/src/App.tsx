@@ -18,9 +18,11 @@ import ProjectOverview from '@features/functional/pages/ProjectOverview'
 import Requirements from '@features/functional/pages/Requirements'
 import TestCaseDetail from '@features/functional/pages/TestCaseDetail'
 import TestRunDetail from '@features/functional/pages/TestRunDetail'
+import RunReport from '@features/functional/pages/RunReport'
 import FunctionalTesting from '@features/functional/pages/FunctionalTesting'
 import Analytics from '@features/functional/pages/analytics/Analytics'
 import CasesTab from '@features/functional/pages/functional-testing/CasesTab'
+import GroupsTab from '@features/functional/pages/functional-testing/GroupsTab'
 import LiveTab from '@features/functional/pages/functional-testing/LiveTab'
 import HistoryTab from '@features/functional/pages/functional-testing/HistoryTab'
 import { ActiveTestRunProvider } from '@features/functional/context/ActiveTestRunProvider'
@@ -135,11 +137,13 @@ function App() {
                 <Route element={<FunctionalTesting />}>
                   <Route index element={<Navigate to="cases" replace />} />
                   <Route path="cases" element={<CasesTab />} />
+                  <Route path="groups" element={<GroupsTab />} />
                   <Route path="live" element={<LiveTab />} />
                   <Route path="history" element={<HistoryTab />} />
                 </Route>
                 <Route path="cases/:testCaseId" element={<TestCaseDetail />} />
                 <Route path="history/:runId" element={<TestRunDetail />} />
+                <Route path="history/:runId/report" element={<RunReport />} />
               </Route>
 
               {/* Legacy URL redirects — kept permanently, not deprecated */}

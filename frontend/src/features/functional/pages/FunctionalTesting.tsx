@@ -5,6 +5,7 @@ import {
   ClockIcon,
   ExclamationTriangleIcon,
   SignalSlashIcon,
+  Squares2X2Icon,
 } from '@heroicons/react/24/outline'
 
 import { ExecutionPanel } from '../components/ExecutionPanel'
@@ -54,7 +55,7 @@ export default function FunctionalTesting() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Functional Testing</h1>
         <p className="text-gray-600">
-          Promote reviewed cases, execute them, and review past runs — all in one place.
+          Upload CSV, run all test cases, and review results — orchestrated across 6 browser lanes.
         </p>
       </div>
 
@@ -101,6 +102,12 @@ export default function FunctionalTesting() {
           <span className="inline-flex items-center gap-1.5">
             <ClipboardDocumentListIcon className="h-4 w-4" />
             Test Cases
+          </span>
+        </NavLink>
+        <NavLink to={`${base}/groups`} className={tabClass}>
+          <span className="inline-flex items-center gap-1.5">
+            <Squares2X2Icon className="h-4 w-4" />
+            Groups
           </span>
         </NavLink>
         <NavLink to={`${base}/live`} className={tabClass}>

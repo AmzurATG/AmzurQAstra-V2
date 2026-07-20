@@ -14,15 +14,21 @@ from __future__ import annotations
 from config import settings
 
 
-def get_browser_use_llm():
+def get_browser_use_llm(model_override: str | None = None):
     """
     Return a browser-use chat model (BaseChatModel).
 
     Default: ChatOpenAI with LITELLM_API_BASE + virtual key (same as OpenAI SDK tests).
 
     Optional: BROWSER_USE_LLM_BACKEND=google → ChatGoogle + GEMINI_API_KEY.
+
+    Args:
+        model_override: Explicit model id (e.g. vision-retry model). Prefer this
+            over mutating the global BROWSER_USE_LLM_MODEL env — it is safe under
+            concurrent lanes.
     """
     backend = (settings.BROWSER_USE_LLM_BACKEND or "litellm").strip().lower()
+    override = (model_override or "").strip() or None
 
     if backend == "google":
         from browser_use import ChatGoogle
@@ -31,7 +37,7 @@ def get_browser_use_llm():
             raise ValueError(
                 "BROWSER_USE_LLM_BACKEND=google requires GEMINI_API_KEY in .env"
             )
-        model = (settings.BROWSER_USE_LLM_MODEL or "gemini-2.0-flash").strip()
+        model = override or (settings.BROWSER_USE_LLM_MODEL or "gemini-2.0-flash").strip()
         return ChatGoogle(
             model=model,
             api_key=settings.GEMINI_API_KEY.strip(),
@@ -47,7 +53,7 @@ def get_browser_use_llm():
             "Or set BROWSER_USE_LLM_BACKEND=google with GEMINI_API_KEY."
         )
 
-    model = (settings.BROWSER_USE_LLM_MODEL or settings.LITELLM_MODEL).strip()
+    model = override or (settings.BROWSER_USE_LLM_MODEL or settings.LITELLM_MODEL).strip()
     base = settings.LITELLM_API_BASE.strip().rstrip("/")
     # browser-use defaults frequency_penalty=0.3; Gemini rejects penalty params (400).
     return ChatOpenAI(

@@ -422,6 +422,15 @@ export interface TestRunCreateRequest {
   max_concurrency?: number
 }
 
+export interface TestRunRunAllRequest {
+  project_id: number
+  app_url?: string
+  credentials?: { username?: string; password?: string }
+  use_google_signin?: boolean
+  headless?: boolean
+  test_case_ids?: number[]
+}
+
 // Test Result Types
 export interface TestResult {
   id: number
@@ -492,6 +501,88 @@ export interface CompletedCaseResult {
   agent_screenshot_count?: number | null
   /** From lite /live when adapted_steps omitted */
   has_adaptations?: boolean | null
+  ai_modified?: Record<string, unknown> | null
+  group_id?: string | null
+}
+
+export interface ActiveLaneInfo {
+  worker_id: number
+  lane_id?: number
+  test_case_id?: number
+  title?: string
+  step?: string
+  step_num?: number
+  group_id?: string
+  chrome_group?: number
+  busy?: boolean
+}
+
+export interface GroupProgressInfo {
+  group_id: string
+  title?: string
+  case_ids?: number[]
+  status?: string
+  lane_id?: number
+}
+
+export interface RunReportStep {
+  step_number: number
+  status: string
+  description?: string
+  expected_result?: string
+  actual_result?: string
+  adaptation?: string | null
+}
+
+export interface RunReportCase {
+  test_result_id: number
+  test_case_id: number
+  title: string
+  status: string
+  duration_ms: number
+  group_id?: string | null
+  steps_total: number
+  steps_passed: number
+  steps_failed: number
+  steps: RunReportStep[]
+  has_adaptations: boolean
+  adaptation_count: number
+  screenshot_path?: string | null
+  error_message?: string | null
+}
+
+export interface RunReportGroup {
+  group_id: string
+  title: string
+  phase_order?: string[]
+  shared_login: boolean
+  case_ids: number[]
+  cases: RunReportCase[]
+  passed: number
+  total: number
+}
+
+export interface RunReportData {
+  run_id: number
+  run_number?: number | null
+  project_id: number
+  name?: string | null
+  status: string
+  app_url?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+  lane_count?: number | null
+  totals: {
+    total: number
+    passed: number
+    failed: number
+    skipped: number
+    success_rate: number
+    adaptations: number
+  }
+  groups: RunReportGroup[]
+  cases: RunReportCase[]
+  failed_cases: RunReportCase[]
 }
 
 export interface LiveProgressResponse {
@@ -506,6 +597,9 @@ export interface LiveProgressResponse {
   completed_results: CompletedCaseResult[]
   logs: LogEntry[]
   error?: string
+  active_lanes?: ActiveLaneInfo[]
+  groups?: GroupProgressInfo[]
+  live_screenshots?: string[]
 }
 
 // Integrity Check Types

@@ -26,8 +26,18 @@ class TestRunCreate(BaseModel):
     use_google_signin: bool = False
     browser: str = "chromium"
     headless: bool = False
-    max_concurrency: int = Field(default=1, ge=1, le=5)
+    max_concurrency: int = Field(default=6, ge=1, le=6)
     config: Optional[Dict[str, Any]] = None
+
+
+class TestRunRunAllCreate(BaseModel):
+    """Run-all orchestrated execution (LangGraph + local browser lanes)."""
+    project_id: int
+    app_url: Optional[str] = None
+    credentials: Optional[TestRunCredentials] = None
+    use_google_signin: bool = False
+    headless: bool = False
+    test_case_ids: Optional[List[int]] = None
 
 
 class TestRunStartResponse(BaseModel):
@@ -76,6 +86,7 @@ class TestResultResponse(BaseModel):
     test_run_id: int
     test_case_id: int
     worker_id: Optional[int] = None
+    group_id: Optional[str] = None
     status: TestResultStatus
     duration_ms: Optional[int] = None
     error_message: Optional[str] = None
@@ -85,6 +96,7 @@ class TestResultResponse(BaseModel):
     adapted_steps: Optional[List[Dict[str, Any]]] = None
     original_steps: Optional[List[Dict[str, Any]]] = None
     agent_logs: Optional[List[Dict[str, Any]]] = None
+    ai_modified: Optional[Dict[str, Any]] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
@@ -110,6 +122,7 @@ class CompletedCaseResult(BaseModel):
     test_case_id: int
     title: str
     status: str
+    group_id: Optional[str] = None
     steps_total: int
     steps_passed: int
     steps_failed: int
@@ -121,6 +134,27 @@ class CompletedCaseResult(BaseModel):
     screenshot_path: Optional[str] = None
     agent_screenshot_count: Optional[int] = None
     has_adaptations: Optional[bool] = None
+    ai_modified: Optional[Dict[str, Any]] = None
+
+
+class ActiveLaneInfo(BaseModel):
+    worker_id: int
+    lane_id: Optional[int] = None
+    test_case_id: Optional[int] = None
+    title: Optional[str] = None
+    step: Optional[str] = None
+    step_num: Optional[int] = None
+    group_id: Optional[str] = None
+    chrome_group: Optional[int] = None
+    busy: Optional[bool] = None
+
+
+class GroupProgressInfo(BaseModel):
+    group_id: str
+    title: Optional[str] = None
+    case_ids: Optional[List[int]] = None
+    status: Optional[str] = None
+    lane_id: Optional[int] = None
 
 
 class LiveProgressResponse(BaseModel):
@@ -135,3 +169,6 @@ class LiveProgressResponse(BaseModel):
     completed_results: List[CompletedCaseResult] = []
     logs: List[LogEntry] = []
     error: Optional[str] = None
+    active_lanes: List[ActiveLaneInfo] = []
+    groups: List[GroupProgressInfo] = []
+    live_screenshots: List[str] = []

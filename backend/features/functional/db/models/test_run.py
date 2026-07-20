@@ -61,6 +61,11 @@ class TestRun(BaseModel):
         back_populates="test_run",
         cascade="all, delete-orphan",
     )
-    
+    run_groups = relationship(
+        "TestRunGroup",
+        back_populates="test_run",
+        cascade="all, delete-orphan",
+    )
+
     def __repr__(self):
         return f"<TestRun(id={self.id}, status='{self.status}')>"

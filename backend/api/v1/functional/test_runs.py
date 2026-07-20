@@ -12,6 +12,7 @@ from common.api.deps import get_current_active_user
 from common.api.pagination import PaginationParams, PaginatedResponse
 from features.functional.schemas.test_run import (
     TestRunCreate,
+    TestRunRunAllCreate,
     TestRunStartResponse,
     TestRunResponse,
     TestRunDetailResponse,
@@ -20,11 +21,16 @@ from features.functional.schemas.test_run import (
     LiveProgressResponse,
     LogEntry,
     CompletedCaseResult,
+    ActiveLaneInfo,
+    GroupProgressInfo,
 )
 from features.functional.db.models.test_run import TestRun, TestRunStatus
 from features.functional.db.models.test_result import TestResultStatus
 from features.functional.services.test_execution_service import (
     TestExecutionService,
+)
+from features.functional.orchestration.orchestrated_run_service import (
+    OrchestratedRunService,
 )
 from features.functional.services.run_progress_manager import RunProgressManager
 from features.functional.services.completed_result_builder import (
@@ -32,6 +38,8 @@ from features.functional.services.completed_result_builder import (
     completed_case_to_lite,
     live_progress_to_lite,
 )
+from features.functional.services.test_run_report_service import build_report_data
+from features.functional.services.test_run_pdf import build_test_run_pdf
 
 router = APIRouter()
 
@@ -62,6 +70,46 @@ async def test_runs_summary(
     service = TestExecutionService(db)
     data = await service.get_run_summary(project_id)
     return TestRunSummaryResponse(**data)
+
+
+@router.post("/run-all", response_model=TestRunStartResponse, status_code=status.HTTP_201_CREATED)
+async def run_all_test_cases(
+    run_data: TestRunRunAllCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload-ready Run All: LangGraph orchestrator + 6 local browser lanes."""
+    service = OrchestratedRunService(db)
+    try:
+        run = await service.create_run_all(
+            project_id=run_data.project_id,
+            triggered_by=current_user.id,
+            app_url=run_data.app_url,
+            username=run_data.credentials.username if run_data.credentials else None,
+            password=run_data.credentials.password if run_data.credentials else None,
+            use_google_signin=run_data.use_google_signin,
+            headless=run_data.headless,
+            test_case_ids=run_data.test_case_ids,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    await service.start_orchestrated_run(run.id)
+    return TestRunStartResponse(run_id=run.id, status="running")
+
+
+@router.post("/{run_id}/resume", response_model=TestRunStartResponse)
+async def resume_orchestrated_run(
+    run_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resume an orchestrated run from LangGraph Postgres checkpoint."""
+    service = OrchestratedRunService(db)
+    try:
+        await service.resume_run(run_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return TestRunStartResponse(run_id=run_id, status="running")
 
 
 @router.post("/", response_model=TestRunStartResponse, status_code=status.HTTP_201_CREATED)
@@ -121,6 +169,9 @@ async def get_live_progress(
             "completed_results": list(progress.get("completed_results", [])),
             "logs": list(progress.get("logs", [])),
             "error": progress.get("error"),
+            "active_lanes": list(progress.get("active_lanes") or []),
+            "groups": list(progress.get("groups") or []),
+            "live_screenshots": list(progress.get("live_screenshots") or []),
         }
         if lite:
             body = live_progress_to_lite(body)
@@ -138,6 +189,9 @@ async def get_live_progress(
             ],
             logs=[LogEntry(**l) for l in body["logs"]],
             error=body.get("error"),
+            active_lanes=[ActiveLaneInfo(**ln) for ln in body.get("active_lanes") or []],
+            groups=[GroupProgressInfo(**g) for g in body.get("groups") or []],
+            live_screenshots=body.get("live_screenshots") or [],
         )
 
     # Fallback: load from DB
@@ -179,11 +233,126 @@ async def cancel_test_run(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    service = TestExecutionService(db)
-    run = await service.cancel_run(run_id)
+    run_row = (
+        await db.execute(select(TestRun).where(TestRun.id == run_id))
+    ).scalar_one_or_none()
+    if run_row and (run_row.config or {}).get("orchestration") == "langgraph":
+        service = OrchestratedRunService(db)
+        run = await service.cancel_run(run_id)
+    else:
+        service = TestExecutionService(db)
+        run = await service.cancel_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Test run not found")
     return run
+
+
+@router.get("/{run_id}/report")
+async def get_test_run_report(
+    run_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Structured run report (summary + groups + per-case steps/adaptations) for the in-app report page."""
+    report = await build_report_data(db, run_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Test run not found")
+    return report
+
+
+@router.get("/{run_id}/report.pdf")
+async def get_test_run_report_pdf(
+    run_id: int,
+    download: bool = Query(False),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Downloadable PDF report with embedded screenshots."""
+    from fastapi import Response
+    from urllib.parse import quote
+
+    report = await build_report_data(db, run_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Test run not found")
+    data = build_test_run_pdf(report)
+    filename = f"test-run-{report.get('run_number') or run_id}-report.pdf"
+    disp = "attachment" if download else "inline"
+    cd = f"{disp}; filename*=UTF-8''{quote(filename)}"
+    return Response(content=data, media_type="application/pdf", headers={"Content-Disposition": cd})
+
+
+@router.post("/{run_id}/report/email", status_code=status.HTTP_200_OK)
+async def email_test_run_report(
+    run_id: int,
+    body: dict,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Email the PDF report (with screenshots attached best-effort)."""
+    import asyncio
+    from pathlib import Path
+    from config import settings
+    from common.services.smtp_mailer import (
+        is_smtp_configured,
+        send_email_with_pdf_attachment,
+        SmtpSendError,
+    )
+
+    to_addr = (body or {}).get("to")
+    if not to_addr:
+        raise HTTPException(status_code=400, detail="Recipient 'to' is required")
+    if not is_smtp_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Email delivery is not configured (set SMTP_HOST and EMAIL_FROM_ADDRESS).",
+        )
+    report = await build_report_data(db, run_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Test run not found")
+    data = build_test_run_pdf(report)
+    filename = f"test-run-{report.get('run_number') or run_id}-report.pdf"
+
+    totals = report.get("totals", {})
+    subject = (
+        f"{settings.APP_NAME} — Test Run #{report.get('run_number') or run_id} report "
+        f"({totals.get('passed', 0)}/{totals.get('total', 0)} passed)"
+    )
+    text_body = (
+        f"Test Run #{report.get('run_number') or run_id}\n"
+        f"Status: {report.get('status')}\n"
+        f"Passed {totals.get('passed', 0)} / {totals.get('total', 0)} "
+        f"(success {totals.get('success_rate', 0)}%), failed {totals.get('failed', 0)}.\n"
+        f"AI adaptations: {totals.get('adaptations', 0)}.\n"
+    )
+    html_body = f"<p>{text_body.replace(chr(10), '<br>')}</p>"
+
+    screenshots_dir = Path(settings.SCREENSHOTS_DIR)
+    attachments: list[tuple[bytes, str]] = []
+    for c in report.get("failed_cases", [])[:20]:
+        sp = c.get("screenshot_path")
+        if not sp:
+            continue
+        try:
+            fp = screenshots_dir / Path(str(sp)).name
+            if fp.is_file():
+                attachments.append((fp.read_bytes(), fp.name))
+        except Exception:
+            pass
+
+    try:
+        await asyncio.to_thread(
+            send_email_with_pdf_attachment,
+            to_addr=str(to_addr),
+            subject=subject,
+            text_body=text_body,
+            html_body=html_body,
+            pdf_bytes=data,
+            attachment_filename=filename,
+            screenshot_attachments=attachments or None,
+        )
+    except SmtpSendError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return {"detail": "Report email sent"}
 
 
 @router.get("/{run_id}/results/{result_id}", response_model=TestResultResponse)

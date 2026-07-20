@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowPathIcon, PlayIcon, PlusIcon, DocumentArrowUpIcon, CheckBadgeIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, PlayIcon, PlusIcon, DocumentArrowUpIcon, CheckBadgeIcon, SparklesIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 
 import { Button } from '@common/components/ui/Button'
@@ -16,7 +16,7 @@ import { CsvImportModal } from '../../components/CsvImportModal'
 import { TestCaseTable } from '../../components/TestCaseTable'
 import { useRequiredActiveTestRun } from '../../context/ActiveTestRunProvider'
 import { useTestCaseFilters } from '../../hooks/useTestCaseFilters'
-import type { TestCase, TestRunCreateRequest, TestStep } from '../../types'
+import type { TestCase, TestRunRunAllRequest, TestStep } from '../../types'
 
 /**
  * Functional Testing → Cases tab.
@@ -67,7 +67,6 @@ export default function CasesTab() {
   const [showCreds, setShowCreds] = useState(false)
   const [overrideUser, setOverrideUser] = useState('')
   const [overridePass, setOverridePass] = useState('')
-  const [maxConcurrency, setMaxConcurrency] = useState(1)
 
   // Pre-populate credentials from project settings
   useEffect(() => {
@@ -175,14 +174,13 @@ export default function CasesTab() {
     }
   }
 
-  const buildRequest = (tcIds?: number[]): TestRunCreateRequest => {
+  const buildRequest = (tcIds?: number[]): TestRunRunAllRequest => {
     // Always read the latest project so newly-saved app_url takes effect.
     const cp = useProjectStore.getState().currentProject
     return {
       project_id: pid,
       app_url: cp?.app_url || undefined,
       test_case_ids: tcIds,
-      max_concurrency: maxConcurrency,
       credentials:
         overrideUser || overridePass
           ? {
@@ -194,7 +192,7 @@ export default function CasesTab() {
   }
 
   const dispatchRun = async (
-    request: TestRunCreateRequest,
+    request: TestRunRunAllRequest,
     loadingMsg: string
   ) => {
     if (activeRun.isCreating || activeRun.isRunning) return
@@ -202,7 +200,8 @@ export default function CasesTab() {
       toast.error('Set App URL first')
       return
     }
-    const runPromise = activeRun.startRun(request).then((runId) => {
+    // LangGraph orchestrator groups shared-login flows and runs across 6 lanes.
+    const runPromise = activeRun.startRunAll(request).then((runId) => {
       if (runId) {
         setSelectedIds(new Set())
         navigate(`/projects/${projectId}/functional-testing/live`)
@@ -373,10 +372,9 @@ export default function CasesTab() {
     [stepsCache]
   )
 
-  const runAllLabel =
-    statusFilter === 'ready' ? 'Run All Ready' : 'Run All (filtered)'
-  const runDisabled =
-    activeRun.isCreating || activeRun.isRunning || testCases.length === 0
+  const totalCases = pagination.total ?? testCases.length
+  const runAllLabel = 'Run All'
+  const runDisabled = activeRun.isCreating || activeRun.isRunning
   const hasSelection = selectedIds.size > 0
   const runPrimaryLabel = `Run Selected (${selectedIds.size})`
   const runPrimaryDisabled =
@@ -386,10 +384,10 @@ export default function CasesTab() {
 
   const runAllWithConfirm = () => {
     if (hasSelection) return
+    const countText = totalCases > 0 ? `${totalCases} ` : ''
     const confirmMessage =
-      statusFilter === 'ready'
-        ? 'Run all Ready test cases in this project?'
-        : `Run all currently filtered test cases (status filter: ${statusFilter})?`
+      `Run ALL ${countText}test cases in this project? ` +
+      'Every case (including drafts) will be executed.'
     if (!window.confirm(confirmMessage)) return
     runAll()
   }
@@ -450,10 +448,11 @@ export default function CasesTab() {
             title={
               hasSelection
                 ? 'Clear selected cases to use Run All'
-                : undefined
+                : 'Run every test case in this project'
             }
           >
             <PlayIcon className="w-4 h-4 mr-2" /> {runAllLabel}
+            {totalCases > 0 && ` (${totalCases})`}
           </Button>
           <Button variant="outline" onClick={() => setIsImportModalOpen(true)}>
             <DocumentArrowUpIcon className="w-4 h-4 mr-2" /> Import CSV
@@ -475,34 +474,16 @@ export default function CasesTab() {
         onSaveToProject={saveCredentialsToProject}
       />
 
-      <Card className="p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <Card className="p-4 border-primary-100 bg-primary-50/30">
+        <div className="flex items-start gap-3">
+          <SparklesIcon className="w-5 h-5 text-primary-600 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-medium text-gray-900">Execution Workers</p>
-            <p className="text-xs text-gray-500">
-              Higher values run more test cases in parallel. Each worker keeps its own browser session.
+            <p className="text-sm font-medium text-gray-900">Smart orchestrated execution</p>
+            <p className="text-xs text-gray-600 mt-0.5">
+              Selected cases are grouped by shared login (negative-login first, then
+              authenticated flows, logout last) and run across up to 6 local browser lanes.
+              Watch grouping and screenshots in the Groups and Live tabs.
             </p>
-          </div>
-          <div className="w-full sm:w-56">
-            <label className="block text-xs font-medium text-gray-700 mb-1" htmlFor="max-concurrency">
-              Worker count
-            </label>
-            <select
-              id="max-concurrency"
-              value={String(maxConcurrency)}
-              onChange={(e) => {
-                const parsed = Number.parseInt(e.target.value, 10)
-                setMaxConcurrency(Number.isFinite(parsed) ? Math.min(5, Math.max(1, parsed)) : 1)
-              }}
-              className="w-full px-3 py-2 border rounded-lg text-sm"
-              disabled={activeRun.isCreating || activeRun.isRunning}
-            >
-              <option value="1">1 worker (sequential)</option>
-              <option value="2">2 workers</option>
-              <option value="3">3 workers</option>
-              <option value="4">4 workers</option>
-              <option value="5">5 workers</option>
-            </select>
           </div>
         </div>
       </Card>

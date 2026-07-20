@@ -130,7 +130,13 @@ These steps are a guide, not a straightjacket. If the UI has changed or a step i
    - After every major action (Click, Fill, Navigate), take a moment to analyze the new state. 
    - Ask yourself: "Does this look like the state described in the next step?" If yes, proceed. If no, analyze why and try to fix it (e.g., re-click, wait, or scroll).
 
-7. **AUTHENTICATION & INPUT VALUES**:
+7. **PER-STEP EXPECTED-RESULT VERIFICATION (ACCURACY CRITICAL)**:
+   - Each guide step has its own **Expected Result**. You MUST verify THAT specific expectation for THAT step — do not mark a step passed just because the page loaded or a later step succeeded.
+   - Judge each step independently: put the concrete on-screen evidence you actually observed into `actual_result` (e.g. the exact text, the element you saw, the resulting URL/state).
+   - If the step's expected result was NOT met, mark that step `failed` even if the overall flow continued. Only set `overall` to `passed` when EVERY step's intent was genuinely satisfied.
+   - If you had to deviate from the written step to meet its intent, record a concise `adaptation` describing what you changed and why. Never leave `adaptation` blank when you deviated.
+
+8. **AUTHENTICATION & INPUT VALUES**:
 {auth_section}
 
 ## OUTPUT FORMAT (STRONGLY PREFERRED — RUNNER PARSES THIS)

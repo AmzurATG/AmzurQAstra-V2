@@ -57,6 +57,7 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
   const [detail, setDetail] = useState<TestResult | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState(false)
+  const [showAiModified, setShowAiModified] = useState(true)
 
   useEffect(() => {
     if (!isExpanded) return
@@ -167,7 +168,20 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
                     primaryScreenshotPath={detail.screenshot_path ?? undefined}
                     stepResults={detail.step_results ?? result.step_results}
                   />
-                  {stepRows?.map((s, i) => {
+                  {stepRows && stepRows.length > 0 && (
+                <div className="flex items-center justify-end mb-2">
+                  <label className="inline-flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showAiModified}
+                      onChange={(e) => setShowAiModified(e.target.checked)}
+                      className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                    />
+                    Show AI-modified steps
+                  </label>
+                </div>
+              )}
+              {stepRows?.map((s, i) => {
                     const descText = formatStepDisplayValue(s.description)
                     const actualText = formatStepDisplayValue(s.actual_result)
                     const adaptText = formatStepDisplayValue(s.adaptation)
@@ -208,11 +222,11 @@ export const TestRunCaseAccordion: React.FC<TestRunCaseAccordionProps> = ({
 
                           <p className="text-gray-600 mt-1">{actualText || '—'}</p>
 
-                          {isAdapted && (
+                          {isAdapted && showAiModified && (
                             <div className="mt-2 p-3 bg-purple-50 rounded-lg border border-purple-100 text-xs shadow-sm">
                               <div className="flex items-center gap-2 text-purple-800 font-bold mb-1">
                                 <SparklesIcon className="w-3.5 h-3.5" />
-                                AI INTELLIGENCE: STEP ADAPTATION
+                                AI modified this step
                               </div>
                               <div className="grid grid-cols-2 gap-4 mt-2">
                                 <div>

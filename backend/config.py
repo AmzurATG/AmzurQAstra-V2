@@ -126,6 +126,25 @@ class Settings(BaseSettings):
     BROWSER_USE_LLM_TEMPERATURE: float = 0.15
     GEMINI_API_KEY: Optional[str] = None  # only when BROWSER_USE_LLM_BACKEND=google
     BROWSER_USE_DEFAULT_EXTENSIONS: bool = True
+
+    # LangGraph orchestrated run-all (local browsers).
+    # Default kept modest so parallel vision calls don't exhaust the shared LLM
+    # proxy / hit rate limits (accuracy over raw speed). Raise on RAM+quota-rich setups.
+    ORCHESTRATION_LANE_COUNT: int = 3
+    # Hard ceiling lanes can auto-scale to on RAM-rich machines (16GB+).
+    ORCHESTRATION_MAX_LANE_COUNT: int = 12
+    ORCHESTRATION_CHROME_PROCESSES: int = 2
+    ORCHESTRATION_CONTEXTS_PER_CHROME: int = 3
+    ORCHESTRATION_MIN_FREE_RAM_MB: int = 1200
+    # Estimated RAM per lane (Chrome + agent) used by the adaptive lane guard.
+    ORCHESTRATION_PER_LANE_RAM_MB: int = 450
+    ORCHESTRATION_REASONING_MODEL: str = "gpt-4o"
+    ORCHESTRATION_VISION_RETRY_MODEL: str = "gpt-4o"
+    ORCHESTRATION_PLANNER_CHUNK_TOKENS: int = 12000
+    ORCHESTRATION_MAX_PLANNERS: int = 4
+    # Max browser-use agent steps per test case. Lower fails runaway cases fast
+    # without hurting normal cases (most finish well under this).
+    TEST_CASE_MAX_AGENT_STEPS: int = 40
     # Comma-separated extra Chrome flags appended after defaults (see chrome_automation_args).
     BROWSER_CHROME_EXTRA_ARGS: Optional[str] = None
     # Outside backend/ to prevent uvicorn --reload restarts when screenshots are written.

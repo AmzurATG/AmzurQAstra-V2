@@ -25,7 +25,7 @@ export interface ProgressSource {
   ): () => void
 }
 
-const ACTIVE_POLL_MS = 3_000
+const ACTIVE_POLL_MS = 1_500
 const HIDDEN_POLL_MS = 15_000
 
 const TERMINAL_STATES = new Set([
@@ -36,6 +36,9 @@ const TERMINAL_STATES = new Set([
   'cancelled',
   'not_found',
 ])
+
+export const isCancellingStatus = (status: string | undefined | null): boolean =>
+  status === 'cancelling'
 
 export const isTerminalStatus = (status: string | undefined | null): boolean =>
   !!status && TERMINAL_STATES.has(status)

@@ -4,6 +4,7 @@ import {
   ArrowLeftIcon,
   ArrowPathIcon,
   StopIcon,
+  DocumentTextIcon,
 } from '@heroicons/react/24/outline'
 
 import { Button } from '@common/components/ui/Button'
@@ -113,15 +114,27 @@ export default function TestRunDetail() {
             </p>
           </div>
         </div>
-        {!isDone && (
-          <Button
-            variant="outline"
-            className="text-red-600 border-red-200"
-            onClick={handleCancel}
-          >
-            <StopIcon className="w-4 h-4 mr-1" /> Cancel
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {isDone && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                navigate(`/projects/${projectId}/functional-testing/history/${numRunId}/report`)
+              }
+            >
+              <DocumentTextIcon className="w-4 h-4 mr-1" /> Full Report
+            </Button>
+          )}
+          {!isDone && (
+            <Button
+              variant="outline"
+              className="text-red-600 border-red-200"
+              onClick={handleCancel}
+            >
+              <StopIcon className="w-4 h-4 mr-1" /> Cancel
+            </Button>
+          )}
+        </div>
       </div>
 
       <TestRunDetailView progress={progress} runId={numRunId} />

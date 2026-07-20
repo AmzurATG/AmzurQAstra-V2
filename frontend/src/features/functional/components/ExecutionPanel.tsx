@@ -2,6 +2,7 @@ import React from 'react'
 import { Card } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
 import { StopIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
+import { isCancellingStatus } from '../live/progressSource'
 import type { LiveProgressResponse } from '../types'
 
 interface ExecutionPanelProps {
@@ -51,6 +52,7 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
 
   const status = progress?.status || ''
   const isError = status === 'error' || !!progress?.error
+  const isCancelling = isCancellingStatus(status)
 
   if (isError) {
     return (
@@ -79,15 +81,22 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
         <span className="text-sm font-medium text-gray-700">
           {isDone
             ? `Run complete — ${passedCount} passed, ${failedCount} failed`
-            : `Running: ${progress.current_test_case_title || 'Starting…'} (${progress.current_test_case_index + 1}/${progress.total_test_cases})`
+            : isCancelling
+              ? 'Cancelling — stopping browser lanes…'
+              : `Running: ${progress.current_test_case_title || 'Starting…'} (${Math.min(progress.current_test_case_index + 1, progress.total_test_cases)}/${progress.total_test_cases})`
           }
         </span>
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-primary-600">{pct}%</span>
-          {isRunning && (
+          {isRunning && !isCancelling && (
             <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={onCancel}>
               <StopIcon className="w-3.5 h-3.5 mr-1" /> Cancel
             </Button>
+          )}
+          {isCancelling && (
+            <span className="inline-flex items-center gap-1 text-sm text-amber-700">
+              <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" /> Stopping…
+            </span>
           )}
           {isDone && (
             <Button variant="ghost" size="sm" onClick={onViewDetails}>
@@ -98,10 +107,16 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
       </div>
       <div className="w-full bg-gray-200 rounded-full h-2.5">
         <div
-          className={`h-2.5 rounded-full transition-all duration-500 ${isDone && failedCount > 0 ? 'bg-red-500' : isDone ? 'bg-green-500' : 'bg-primary-500'}`}
+          className={`h-2.5 rounded-full transition-all duration-500 ${isDone && failedCount > 0 ? 'bg-red-500' : isDone ? 'bg-green-500' : isCancelling ? 'bg-amber-500' : 'bg-primary-500'}`}
           style={{ width: `${pct}%` }}
         />
       </div>
+      {!isDone && (progress.active_lanes?.length ?? 0) > 0 && (
+        <p className="mt-2 text-xs text-gray-500">
+          {(progress.active_lanes || []).filter((l) => l.busy !== false && l.title !== 'Idle').length} of 6 lanes active
+          {(progress.completed_results?.length ?? 0) > 0 && ` · ${progress.completed_results.length} done`}
+        </p>
+      )}
     </Card>
   )
 }

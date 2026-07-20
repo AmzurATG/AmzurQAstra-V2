@@ -299,6 +299,12 @@ export const testRunsApi = {
   create: (data: import('../types').TestRunCreateRequest) =>
     apiClient.post<import('../types').TestRunStartResponse>(`/functional/test-runs/`, data),
 
+  runAll: (data: import('../types').TestRunRunAllRequest) =>
+    apiClient.post<import('../types').TestRunStartResponse>(`/functional/test-runs/run-all`, data),
+
+  resume: (runId: number) =>
+    apiClient.post<import('../types').TestRunStartResponse>(`/functional/test-runs/${runId}/resume`),
+
   getLiveProgress: (id: number, params?: { lite?: boolean }) =>
     apiClient.get<import('../types').LiveProgressResponse>(`/functional/test-runs/${id}/live`, {
       params: { lite: params?.lite !== false },
@@ -315,6 +321,18 @@ export const testRunsApi = {
 
   syncStep: (resultId: number, stepNumber: number) =>
     apiClient.post(`/functional/test-runs/results/${resultId}/steps/${stepNumber}/sync`),
+
+  getReport: (runId: number) =>
+    apiClient.get<import('../types').RunReportData>(`/functional/test-runs/${runId}/report`),
+
+  reportPdf: (runId: number) =>
+    apiClient.get<Blob>(`/functional/test-runs/${runId}/report.pdf`, {
+      params: { download: true },
+      responseType: 'blob',
+    }),
+
+  emailReport: (runId: number, to: string) =>
+    apiClient.post(`/functional/test-runs/${runId}/report/email`, { to }),
 }
 
 // Integrity Check API

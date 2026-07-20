@@ -41,7 +41,17 @@ def live_progress_to_lite(body: Dict[str, Any], *, log_cap: int = 200) -> Dict[s
     logs = body.get("logs") or []
     if log_cap > 0 and len(logs) > log_cap:
         logs = logs[-log_cap:]
-    return {**body, "completed_results": lite_results, "logs": logs}
+    shots = body.get("live_screenshots") or []
+    if len(shots) > 12:
+        shots = shots[-12:]
+    return {
+        **body,
+        "completed_results": lite_results,
+        "logs": logs,
+        "active_lanes": list(body.get("active_lanes") or []),
+        "groups": list(body.get("groups") or []),
+        "live_screenshots": list(shots),
+    }
 
 
 def completed_case_dict(
@@ -59,6 +69,7 @@ def completed_case_dict(
     original_steps: Optional[List[Dict[str, Any]]] = None,
     agent_logs: Optional[List[Dict[str, Any]]] = None,
     screenshot_path: Optional[str] = None,
+    ai_modified: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     return {
         "test_result_id": test_result_id,
@@ -75,6 +86,10 @@ def completed_case_dict(
         "agent_logs": agent_logs,
         "screenshot_path": screenshot_path,
         "agent_screenshot_count": _count_agent_screenshots(agent_logs),
+        "ai_modified": ai_modified,
+        "has_adaptations": bool(adapted_steps) or bool(
+            ai_modified and ai_modified.get("has_changes")
+        ),
     }
 
 
@@ -100,4 +115,5 @@ def completed_case_dict_from_orm(tr: TestResult) -> Dict[str, Any]:
         original_steps=tr.original_steps,
         agent_logs=tr.agent_logs,
         screenshot_path=tr.screenshot_path,
+        ai_modified=getattr(tr, "ai_modified", None),
     )

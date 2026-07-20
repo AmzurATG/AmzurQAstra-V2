@@ -26,6 +26,7 @@ class TestResult(BaseModel):
     test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
     # Worker that executed this case in concurrent runs (1-based); null for legacy/sequential rows.
     worker_id = Column(Integer, nullable=True, index=True)
+    group_id = Column(String(64), nullable=True, index=True)
     
     # Result
     status = Column(Enum(TestResultStatus, values_callable=lambda e: [x.value for x in e]), nullable=False)
@@ -45,6 +46,7 @@ class TestResult(BaseModel):
     step_results = Column(JSONB, nullable=True)  # Array of step results
     adapted_steps = Column(JSONB, nullable=True)  # Array of steps that were adapted by AI
     original_steps = Column(JSONB, nullable=True)  # Array of original steps for comparison
+    ai_modified = Column(JSONB, nullable=True)  # Per-step AI modification metadata for UI toggle
     # Per browser-use agent iteration: timestamp, agent_step, description, adaptation, screenshot_path
     agent_logs = Column(JSONB, nullable=True)
     

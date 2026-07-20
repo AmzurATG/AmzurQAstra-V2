@@ -16,6 +16,7 @@ import { isTerminalStatus, pollingProgressSource } from '../live/progressSource'
 import type {
   LiveProgressResponse,
   TestRunCreateRequest,
+  TestRunRunAllRequest,
 } from '../types'
 
 /**
@@ -43,6 +44,8 @@ export interface ActiveTestRunContextValue {
   connectionStatus: ConnectionStatus
   /** Start a new run. Resolves with the new run id on success. */
   startRun: (data: TestRunCreateRequest) => Promise<number | null>
+  /** LangGraph Run All orchestrated execution. */
+  startRunAll: (data: TestRunRunAllRequest) => Promise<number | null>
   cancelRun: () => Promise<void>
   /** Clear a completed/failed run from the strip so it stops showing. */
   dismissCompletedRun: () => void
@@ -168,16 +171,45 @@ export function ActiveTestRunProvider({ children }: ProviderProps) {
     [activeRunId, attachSubscription, progress]
   )
 
+  const startRunAll = useCallback(
+    async (data: TestRunRunAllRequest): Promise<number | null> => {
+      if (createInFlightRef.current) return null
+      if (activeRunId && progress && !isTerminalStatus(progress.status)) {
+        setError('A test run is already in progress. Cancel it before starting a new one.')
+        return null
+      }
+      createInFlightRef.current = true
+      setIsCreating(true)
+      setError(null)
+      setProgress(null)
+      try {
+        const res = await testRunsApi.runAll(data)
+        const id = res.data.run_id
+        setActiveRunId(id)
+        attachSubscription(id)
+        return id
+      } catch (err) {
+        const typed = err as { response?: { data?: { detail?: string } }; message?: string }
+        setError(typed?.response?.data?.detail || typed?.message || 'Failed to start Run All')
+        return null
+      } finally {
+        createInFlightRef.current = false
+        setIsCreating(false)
+      }
+    },
+    [activeRunId, attachSubscription, progress]
+  )
+
   const cancelRun = useCallback(async () => {
     if (!activeRunId) return
+    setProgress((prev) =>
+      prev ? { ...prev, status: 'cancelling', current_step_info: 'Cancelling…' } : prev
+    )
     try {
       await testRunsApi.cancel(activeRunId)
-      // Optimistically mark as cancelling; keep the poller running so the
-      // backend's eventual terminal "cancelled" wins.
-      setProgress((prev) => (prev ? { ...prev, status: 'cancelling' } : prev))
       attachSubscription(activeRunId)
     } catch {
-      // ignore — poller will keep trying
+      // ignore
     }
   }, [activeRunId, attachSubscription])
 
@@ -200,6 +232,7 @@ export function ActiveTestRunProvider({ children }: ProviderProps) {
       error,
       connectionStatus,
       startRun,
+      startRunAll,
       cancelRun,
       dismissCompletedRun,
       ensureProjectHasAppUrl,
@@ -212,6 +245,7 @@ export function ActiveTestRunProvider({ children }: ProviderProps) {
       error,
       connectionStatus,
       startRun,
+      startRunAll,
       cancelRun,
       dismissCompletedRun,
       ensureProjectHasAppUrl,

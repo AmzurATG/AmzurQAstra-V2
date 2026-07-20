@@ -16,15 +16,15 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    port: 5173,
+    port: 3001,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8001',
         changeOrigin: true,
       },
       // FastAPI mounts screenshots at /screenshots (not under /api)
       '/screenshots': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8001',
         changeOrigin: true,
       },
     },

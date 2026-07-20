@@ -275,7 +275,7 @@ def _parse_verdict(
             logger.info("[TestCaseRunner] Verdict JSON missing; using agent is_successful()=False fallback.")
             return _synthesize_verdict_from_history(narrative, total_steps, False)
 
-    logger.warning("[TestCaseRunner] No parseable verdict and no agent success flag — marking error.")
+    logger.warning("[TestCaseRunner] No parseable verdict and no agent success flag — inconclusive.")
     return {
         "steps": [
             {
@@ -288,15 +288,18 @@ def _parse_verdict(
         ],
         "overall": "failed",
         "summary": "Agent did not return parseable VERDICT_JSON and task completion status was unavailable.",
+        # Signals an infrastructure/LLM problem (not a real test verdict) so the
+        # runner can retry with backoff instead of recording a false failure.
+        "inconclusive": True,
     }
 
 
 # ── LLM ──────────────────────────────────────────────────────────────────────
 
-def _llm():
+def _llm(model_override: Optional[str] = None):
     from features.functional.core.browser.browser_use_llm import get_browser_use_llm
 
-    return get_browser_use_llm()
+    return get_browser_use_llm(model_override=model_override)
 
 
 # ── Runner ───────────────────────────────────────────────────────────────────
@@ -321,11 +324,13 @@ class TestCaseRunner:
         browser_context: Optional[Any] = None,
         on_step_callback: Optional[Any] = None,
         execution_run_id: Optional[int] = None,
+        llm_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         return await self._run_impl(
             run_id, test_case_id, title, description, preconditions,
             steps, app_url, username, password, use_google_signin, headless,
             capture_screenshots, browser_context, on_step_callback, execution_run_id,
+            llm_model=llm_model,
         )
 
     async def _run_impl(
@@ -345,6 +350,7 @@ class TestCaseRunner:
         browser_context: Optional[Any] = None,
         on_step_callback: Optional[Any] = None,
         execution_run_id: Optional[int] = None,
+        llm_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         from browser_use import Agent, Browser, BrowserProfile
         from features.functional.services.run_progress_manager import RunProgressManager
@@ -542,16 +548,21 @@ class TestCaseRunner:
         retry_count = 0
         result: Any = None
 
+        # Cap agent steps so a runaway case fails fast. Scale a little with the
+        # guide length so long legitimate cases still have headroom.
+        _cfg_max_steps = int(getattr(settings, "TEST_CASE_MAX_AGENT_STEPS", 40) or 40)
+        max_agent_steps = max(_cfg_max_steps, len(steps) * 3 + 5)
+
         async def _run_agent_with_cancel(agent: Any) -> Any:
             """Run browser-use Agent; stop promptly when user cancels (numeric execution_run_id)."""
             if execution_run_id is None:
-                return await agent.run(max_steps=80, on_step_end=_on_step_end)
+                return await agent.run(max_steps=max_agent_steps, on_step_end=_on_step_end)
 
             async def _wait_for_cancel() -> None:
                 while not progress_mgr.is_cancel_requested(execution_run_id):
                     await asyncio.sleep(0.25)
 
-            agent_task = asyncio.create_task(agent.run(max_steps=80, on_step_end=_on_step_end))
+            agent_task = asyncio.create_task(agent.run(max_steps=max_agent_steps, on_step_end=_on_step_end))
             poll_task = asyncio.create_task(_wait_for_cancel())
             done, pending = await asyncio.wait(
                 [agent_task, poll_task],
@@ -614,7 +625,7 @@ class TestCaseRunner:
 
                 agent = Agent(
                     task=task,
-                    llm=_llm(),
+                    llm=_llm(llm_model),
                     browser=browser,
                     browser_profile=BrowserProfile(
                         headless=headless,
@@ -641,24 +652,34 @@ class TestCaseRunner:
                     if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
                         raise TestRunCancelled()
 
+                result = await _run_agent_with_cancel(agent)
+
+                # Evaluate the verdict now so an inconclusive outcome (LLM/agent
+                # error, NOT a real test failure) can be retried with backoff
+                # instead of recording a false failure. Accuracy > speed.
+                final_text = ""
                 try:
-                    result = await _run_agent_with_cancel(agent)
-                except TestRunCancelled:
-                    cleanup_tc_progress(key)
-                    dur = int((datetime.utcnow() - start).total_seconds() * 1000)
-                    return {
-                        "status": "cancelled",
-                        "overall": "cancelled",
-                        "step_results": [],
-                        "screenshots": list(screenshots),
-                        "logs": agent_logs,
-                        "steps_total": len(steps),
-                        "steps_passed": 0,
-                        "steps_failed": 0,
-                        "summary": "Run cancelled during execution.",
-                        "duration_ms": dur,
-                        "error": None,
-                    }
+                    if hasattr(result, "final_result"):
+                        final_text = str(result.final_result()) or ""
+                    elif hasattr(result, "__str__"):
+                        final_text = str(result)
+                except Exception:
+                    pass
+                verdict = _parse_verdict(final_text, len(steps), history=result)
+
+                if verdict.get("inconclusive") and retry_count < max_retries - 1:
+                    retry_count += 1
+                    wait_time = 3 * (2 ** retry_count)
+                    logger.warning(
+                        f"[TestCaseRunner] tc={test_case_id} inconclusive result "
+                        f"(likely transient LLM/rate-limit). Retry {retry_count}/{max_retries} "
+                        f"in {wait_time}s."
+                    )
+                    if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
+                        raise TestRunCancelled()
+                    await asyncio.sleep(wait_time)
+                    continue
+
                 break
             except TestRunCancelled:
                 cleanup_tc_progress(key)
@@ -679,64 +700,64 @@ class TestCaseRunner:
             except Exception as exc:
                 retry_count += 1
                 if retry_count >= max_retries:
-                    raise exc
+                    logger.error(f"[TestCaseRunner] run_id={run_id} — agent raised (exhausted retries): {exc!r}")
+                    dur = int((datetime.utcnow() - start).total_seconds() * 1000)
+                    return {
+                        "status": "error",
+                        "overall": "error",
+                        "percentage": 100,
+                        "current_step": "An error occurred",
+                        "screenshots": list(screenshots),
+                        "logs": agent_logs,
+                        "steps_total": len(steps),
+                        "steps_passed": 0,
+                        "steps_failed": len(steps),
+                        "summary": str(exc)[:500],
+                        "duration_ms": dur,
+                        "error": str(exc),
+                    }
 
-                wait_time = 2 ** retry_count
+                wait_time = 3 * (2 ** retry_count)
                 logger.info(
-                    f"⚠ Browser startup failed (attempt {retry_count}/{max_retries}). "
+                    f"⚠ Agent run failed (attempt {retry_count}/{max_retries}). "
                     f"Retrying in {wait_time}s... Error: {str(exc)[:100]}"
                 )
                 await asyncio.sleep(wait_time)
 
-        try:
-            # result is already set from agent.run above
-            final_text = ""
-            try:
-                if hasattr(result, "final_result"):
-                    final_text = str(result.final_result()) or ""
-                elif hasattr(result, "__str__"):
-                    final_text = str(result)
-            except Exception:
-                pass
-
-            verdict = _parse_verdict(final_text, len(steps), history=result)
-            dur = int((datetime.utcnow() - start).total_seconds() * 1000)
-
-            step_results = verdict.get("steps", [])
-            passed = sum(1 for s in step_results if s.get("status") == "passed")
-            failed = len(step_results) - passed
-            overall = "passed" if verdict.get("overall") == "passed" else "failed"
-
-            outcome: Dict[str, Any] = {
-                "status": "completed",
-                "overall": overall,
-                "step_results": step_results,
-                "screenshots": list(screenshots),
-                "logs": agent_logs,
-                "steps_total": len(steps),
-                "steps_passed": passed,
-                "steps_failed": failed,
-                "summary": verdict.get("summary", ""),
-                "duration_ms": dur,
-                "error": None,
-            }
-            return outcome
-
-        except Exception as exc:
-            logger.error(f"[TestCaseRunner] run_id={run_id} — agent raised: {exc!r}")
-            dur = int((datetime.utcnow() - start).total_seconds() * 1000)
-            err: Dict[str, Any] = {
+        dur = int((datetime.utcnow() - start).total_seconds() * 1000)
+        step_results = verdict.get("steps", [])
+        passed = sum(1 for s in step_results if s.get("status") == "passed")
+        failed = len(step_results) - passed
+        inconclusive = bool(verdict.get("inconclusive"))
+        if inconclusive:
+            # Exhausted retries and still no usable verdict → report as ERROR
+            # (couldn't determine), clearly distinct from a real test failure.
+            return {
                 "status": "error",
                 "overall": "error",
-                "percentage": 100,
-                "current_step": "An error occurred",
                 "screenshots": list(screenshots),
                 "logs": agent_logs,
                 "steps_total": len(steps),
                 "steps_passed": 0,
                 "steps_failed": len(steps),
-                "summary": str(exc)[:500],
+                "summary": (
+                    "Inconclusive after retries — the browser agent could not get a "
+                    "usable LLM response (likely rate-limit/timeout). Not a test failure; re-run recommended."
+                ),
                 "duration_ms": dur,
-                "error": str(exc),
+                "error": "inconclusive_llm_or_agent_error",
             }
-            return err
+        overall = "passed" if verdict.get("overall") == "passed" else "failed"
+        return {
+            "status": "completed",
+            "overall": overall,
+            "step_results": step_results,
+            "screenshots": list(screenshots),
+            "logs": agent_logs,
+            "steps_total": len(steps),
+            "steps_passed": passed,
+            "steps_failed": failed,
+            "summary": verdict.get("summary", ""),
+            "duration_ms": dur,
+            "error": None,
+        }
