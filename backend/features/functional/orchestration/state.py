@@ -39,6 +39,8 @@ class CaseResult(TypedDict, total=False):
     screenshot_path: Optional[str]
     ai_modified: Dict[str, Any]
     error: Optional[str]
+    error_kind: Optional[str]
+    infra_error: bool
     group_id: Optional[str]
     lane_id: Optional[int]
 
@@ -67,3 +69,6 @@ class OrchestrationState(TypedDict, total=False):
     status: str
     error: Optional[str]
     cancel_requested: bool
+    paused: bool
+    pause_reason: str
+    llm_gate: Dict[str, Any]

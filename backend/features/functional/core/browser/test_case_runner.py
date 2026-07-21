@@ -5,6 +5,7 @@ reports per-step pass/fail, saves screenshots.
 """
 import asyncio
 import json
+import random
 import re
 import sys
 from datetime import datetime
@@ -15,12 +16,18 @@ from common.utils.logger import logger
 from features.functional.core.browser.chrome_automation_args import default_browser_chrome_args
 from features.functional.core.browser.screenshot_file_store import save_screenshot_b64
 from features.functional.core.browser.runner_action_text import action_description_from_output
+from features.functional.core.browser.llm_gate import (
+    LLMCircuitOpen,
+    LLMErrorKind,
+    classify_llm_error,
+    is_retryable_kind,
+)
 from features.functional.core.llm_prompts.test_execution import (
-    TEST_EXECUTION_PROMPT,
     build_auth_section,
     format_steps_for_prompt,
     should_inject_project_credentials,
 )
+from features.functional.core.llm_prompts.registry import get_prompt
 from features.functional.utils.credentials_redaction import redact_known_credentials
 
 # In-memory store for live polling — keyed by "{run_id}:{test_case_id}"
@@ -521,7 +528,8 @@ class TestCaseRunner:
             {"step_number": i + 1, **s} if "step_number" not in s else s
             for i, s in enumerate(steps)
         ], app_url=app_url)
-        task = TEST_EXECUTION_PROMPT.format(
+        prompt_version, prompt_template = get_prompt("test_execution")
+        task = prompt_template.format(
             app_url=app_url,
             auth_section=auth_section,
             title=title,
@@ -529,6 +537,10 @@ class TestCaseRunner:
             preconditions=preconditions or "None",
             steps_formatted=steps_fmt,
             total_steps=len(steps),
+        )
+        logger.info(
+            f"[TestCaseRunner] tc={test_case_id} prompt=test_execution@{prompt_version} "
+            f"model={llm_model or (settings.BROWSER_USE_LLM_MODEL or settings.LITELLM_MODEL)}"
         )
 
         sensitive_data = None
@@ -544,7 +556,8 @@ class TestCaseRunner:
         if browser_context:
             browser = browser_context
         
-        max_retries = 3
+        max_retries = int(getattr(settings, "LLM_RETRY_MAX", 3) or 3)
+        retry_base = float(getattr(settings, "LLM_RETRY_BASE_S", 3.0) or 3.0)
         retry_count = 0
         result: Any = None
 
@@ -552,6 +565,14 @@ class TestCaseRunner:
         # guide length so long legitimate cases still have headroom.
         _cfg_max_steps = int(getattr(settings, "TEST_CASE_MAX_AGENT_STEPS", 40) or 40)
         max_agent_steps = max(_cfg_max_steps, len(steps) * 3 + 5)
+        # Per-case wall-clock cap (independent of the step budget) so a hung page
+        # or agent can't pin a lane indefinitely. 0 disables.
+        wallclock_timeout_s = int(getattr(settings, "TEST_CASE_WALLCLOCK_TIMEOUT_S", 0) or 0)
+
+        def _backoff_with_jitter(attempt: int) -> float:
+            """Full-jitter backoff so lanes don't retry in lockstep (thundering herd)."""
+            ceiling = retry_base * (2 ** attempt)
+            return round(random.uniform(0, ceiling), 2)
 
         async def _run_agent_with_cancel(agent: Any) -> Any:
             """Run browser-use Agent; stop promptly when user cancels (numeric execution_run_id)."""
@@ -652,7 +673,12 @@ class TestCaseRunner:
                     if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
                         raise TestRunCancelled()
 
-                result = await _run_agent_with_cancel(agent)
+                if wallclock_timeout_s > 0:
+                    result = await asyncio.wait_for(
+                        _run_agent_with_cancel(agent), timeout=wallclock_timeout_s
+                    )
+                else:
+                    result = await _run_agent_with_cancel(agent)
 
                 # Evaluate the verdict now so an inconclusive outcome (LLM/agent
                 # error, NOT a real test failure) can be retried with backoff
@@ -669,7 +695,7 @@ class TestCaseRunner:
 
                 if verdict.get("inconclusive") and retry_count < max_retries - 1:
                     retry_count += 1
-                    wait_time = 3 * (2 ** retry_count)
+                    wait_time = _backoff_with_jitter(retry_count)
                     logger.warning(
                         f"[TestCaseRunner] tc={test_case_id} inconclusive result "
                         f"(likely transient LLM/rate-limit). Retry {retry_count}/{max_retries} "
@@ -697,11 +723,76 @@ class TestCaseRunner:
                     "duration_ms": dur,
                     "error": None,
                 }
+            except asyncio.TimeoutError:
+                # Wall-clock cap hit — treat as retryable transient (hung page/agent).
+                retry_count += 1
+                if retry_count >= max_retries:
+                    dur = int((datetime.utcnow() - start).total_seconds() * 1000)
+                    logger.error(
+                        f"[TestCaseRunner] tc={test_case_id} exceeded wall-clock "
+                        f"{wallclock_timeout_s}s (exhausted retries)"
+                    )
+                    return {
+                        "status": "error",
+                        "overall": "error",
+                        "screenshots": list(screenshots),
+                        "logs": agent_logs,
+                        "steps_total": len(steps),
+                        "steps_passed": 0,
+                        "steps_failed": len(steps),
+                        "summary": f"Case exceeded wall-clock timeout ({wallclock_timeout_s}s).",
+                        "duration_ms": dur,
+                        "error": "wallclock_timeout",
+                        "infra_error": True,
+                        "error_kind": LLMErrorKind.TIMEOUT.value,
+                    }
+                wait_time = _backoff_with_jitter(retry_count)
+                logger.warning(
+                    f"⚠ tc={test_case_id} wall-clock timeout (attempt {retry_count}/{max_retries}). "
+                    f"Retrying in {wait_time}s."
+                )
+                await asyncio.sleep(wait_time)
             except Exception as exc:
+                kind = classify_llm_error(exc)
+
+                # Unrecoverable infrastructure errors (budget exhausted, circuit
+                # open, auth) must NOT be retried and must NOT be recorded as a
+                # real test failure. Flag them so the orchestrator can PAUSE the
+                # run and resume once the proxy is healthy — this is exactly the
+                # run #14 failure mode (214 empty "errors") we're eliminating.
+                unrecoverable = (
+                    isinstance(exc, LLMCircuitOpen)
+                    or kind in (LLMErrorKind.BUDGET, LLMErrorKind.AUTH)
+                )
+                if unrecoverable:
+                    dur = int((datetime.utcnow() - start).total_seconds() * 1000)
+                    logger.error(
+                        f"[TestCaseRunner] tc={test_case_id} unrecoverable LLM "
+                        f"infra error ({kind.value}) — not a test failure: {str(exc)[:160]}"
+                    )
+                    return {
+                        "status": "error",
+                        "overall": "error",
+                        "screenshots": list(screenshots),
+                        "logs": agent_logs,
+                        "steps_total": len(steps),
+                        "steps_passed": 0,
+                        "steps_failed": 0,
+                        "summary": (
+                            f"LLM infrastructure unavailable ({kind.value}). Not a test "
+                            "failure — case should be re-run after the proxy recovers."
+                        ),
+                        "duration_ms": dur,
+                        "error": f"llm_{kind.value}",
+                        "infra_error": True,
+                        "error_kind": kind.value,
+                    }
+
                 retry_count += 1
                 if retry_count >= max_retries:
                     logger.error(f"[TestCaseRunner] run_id={run_id} — agent raised (exhausted retries): {exc!r}")
                     dur = int((datetime.utcnow() - start).total_seconds() * 1000)
+                    infra = is_retryable_kind(kind)
                     return {
                         "status": "error",
                         "overall": "error",
@@ -715,11 +806,13 @@ class TestCaseRunner:
                         "summary": str(exc)[:500],
                         "duration_ms": dur,
                         "error": str(exc),
+                        "infra_error": infra,
+                        "error_kind": kind.value,
                     }
 
-                wait_time = 3 * (2 ** retry_count)
+                wait_time = _backoff_with_jitter(retry_count)
                 logger.info(
-                    f"⚠ Agent run failed (attempt {retry_count}/{max_retries}). "
+                    f"⚠ Agent run failed (attempt {retry_count}/{max_retries}, kind={kind.value}). "
                     f"Retrying in {wait_time}s... Error: {str(exc)[:100]}"
                 )
                 await asyncio.sleep(wait_time)

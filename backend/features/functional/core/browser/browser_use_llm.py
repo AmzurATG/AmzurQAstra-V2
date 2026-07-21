@@ -11,7 +11,27 @@ and Agent(use_vision=True).
 """
 from __future__ import annotations
 
+from typing import Any
+
 from config import settings
+
+
+def _build_gated_openai_class():
+    """Subclass browser-use ChatOpenAI so every ainvoke passes through the shared
+    resilience gate (rate limit + circuit breaker + timeout). ChatOpenAI is a
+    dataclass, so a plain method-override subclass keeps full compatibility
+    (isinstance(BaseChatModel) still holds)."""
+    from browser_use import ChatOpenAI
+    from features.functional.core.browser.llm_gate import get_gate
+
+    class GatedChatOpenAI(ChatOpenAI):  # type: ignore[misc]
+        async def ainvoke(self, messages: Any, output_format: Any = None, **kwargs: Any):  # type: ignore[override]
+            gate = get_gate()
+            return await gate.call(
+                lambda: super(GatedChatOpenAI, self).ainvoke(messages, output_format, **kwargs)
+            )
+
+    return GatedChatOpenAI
 
 
 def get_browser_use_llm(model_override: str | None = None):
@@ -44,8 +64,6 @@ def get_browser_use_llm(model_override: str | None = None):
             temperature=settings.BROWSER_USE_LLM_TEMPERATURE,
         )
 
-    from browser_use import ChatOpenAI
-
     if not settings.LITELLM_API_KEY or not settings.LITELLM_API_BASE:
         raise ValueError(
             "Browser agent uses LiteLLM proxy by default. Set LITELLM_API_KEY and LITELLM_API_BASE "
@@ -53,14 +71,18 @@ def get_browser_use_llm(model_override: str | None = None):
             "Or set BROWSER_USE_LLM_BACKEND=google with GEMINI_API_KEY."
         )
 
+    gated_cls = _build_gated_openai_class()
     model = override or (settings.BROWSER_USE_LLM_MODEL or settings.LITELLM_MODEL).strip()
     base = settings.LITELLM_API_BASE.strip().rstrip("/")
     # browser-use defaults frequency_penalty=0.3; Gemini rejects penalty params (400).
-    return ChatOpenAI(
+    # max_retries kept low: the shared gate + case-level retry own resilience, so
+    # we don't want the HTTP client silently retrying 429s 5x and amplifying load
+    # (and budget-400s are non-retryable anyway).
+    return gated_cls(
         model=model,
         api_key=settings.LITELLM_API_KEY.strip(),
         base_url=base,
         temperature=settings.BROWSER_USE_LLM_TEMPERATURE,
         frequency_penalty=None,
-        max_retries=5,
+        max_retries=2,
     )

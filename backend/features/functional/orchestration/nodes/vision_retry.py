@@ -23,13 +23,29 @@ async def vision_retry_node(state: OrchestrationState) -> Dict[str, Any]:
     if progress_mgr.is_cancel_requested(run_id):
         return {"status": "cancelled", "cancel_requested": True}
 
+    # If the shared LLM circuit is open (proxy down / budget gone), skip the
+    # (expensive) retry pass entirely — retrying now would just burn budget and
+    # produce empty errors. The main verdicts stand; resume can re-verify later.
+    from features.functional.core.browser.llm_gate import get_gate
+
+    if get_gate().should_pause():
+        logger.warning(
+            "[VisionRetry] Skipping retry for run %s — LLM circuit open/budget gone.",
+            run_id,
+        )
+        return {"retry_results": [], "status": "reporting"}
+
     case_map = {int(c["test_case_id"]): c for c in (state.get("cases") or [])}
     run_uuid = state.get("run_uuid") or str(uuid.uuid4())
     headless = bool(state.get("headless"))
 
-    # Use a stronger vision model for retries, passed explicitly per-case so we
-    # never mutate the global BROWSER_USE_LLM_MODEL env (racy across lanes).
-    retry_model = getattr(config.settings, "ORCHESTRATION_VISION_RETRY_MODEL", "gpt-4o")
+    # Retry model: explicit config if set (must be provisioned + funded on the
+    # proxy), otherwise reuse the main model. Passed per-case so we never mutate
+    # the global env (racy across lanes). Empty → main model (avoids the run #14
+    # failure where a separate gpt-4o model was over-budget and every retry died).
+    retry_model = (
+        getattr(config.settings, "ORCHESTRATION_VISION_RETRY_MODEL", "") or ""
+    ).strip() or None
 
     pool = LanePool(headless=headless, lane_count=1)
     await pool.start()
@@ -44,7 +60,10 @@ async def vision_retry_node(state: OrchestrationState) -> Dict[str, Any]:
             case = case_map.get(cid)
             if not case:
                 continue
-            logger.info("[VisionRetry] Re-running case %s with model %s", cid, retry_model)
+            logger.info(
+                "[VisionRetry] Re-running case %s with model %s",
+                cid, retry_model or "(main model)",
+            )
             try:
                 cr = await _run_single_case(
                     runner=runner,

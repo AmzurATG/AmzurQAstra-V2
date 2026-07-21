@@ -139,12 +139,49 @@ class Settings(BaseSettings):
     # Estimated RAM per lane (Chrome + agent) used by the adaptive lane guard.
     ORCHESTRATION_PER_LANE_RAM_MB: int = 450
     ORCHESTRATION_REASONING_MODEL: str = "gpt-4o"
-    ORCHESTRATION_VISION_RETRY_MODEL: str = "gpt-4o"
+    # Vision-retry model for hard cases. Leave EMPTY to reuse the main
+    # BROWSER_USE_LLM_MODEL — this avoids the run #14 failure mode where a
+    # separate (gpt-4o) model was over-budget/unavailable and every retry
+    # errored out with no evidence. Set an explicit strong model only when you
+    # know it is provisioned + funded on the proxy.
+    ORCHESTRATION_VISION_RETRY_MODEL: str = ""
     ORCHESTRATION_PLANNER_CHUNK_TOKENS: int = 12000
     ORCHESTRATION_MAX_PLANNERS: int = 4
     # Max browser-use agent steps per test case. Lower fails runaway cases fast
     # without hurting normal cases (most finish well under this).
     TEST_CASE_MAX_AGENT_STEPS: int = 40
+
+    # ── LLM resilience gate (shared across ALL browser lanes) ────────────────
+    # A single process-wide gate throttles every lane's LLM calls so N lanes
+    # can't saturate the shared proxy, trips a circuit breaker when the proxy
+    # is down/over-budget (fail fast instead of 200 empty errors), and enforces
+    # hard per-call timeouts.
+    # Max concurrent in-flight LLM calls across all lanes combined.
+    LLM_MAX_INFLIGHT: int = 4
+    # Global request-per-minute ceiling (token bucket). 0 disables RPM limiting.
+    LLM_RATE_LIMIT_RPM: int = 120
+    # Hard timeout for a single LLM call (seconds) before it is treated as a
+    # transient failure and retried/handed to the breaker.
+    LLM_CALL_TIMEOUT_S: float = 90.0
+    # Circuit breaker: consecutive infra failures (429/5xx/timeout/budget) that
+    # trip the breaker OPEN. While open, calls fail fast for the cooldown.
+    LLM_CB_FAILURE_THRESHOLD: int = 8
+    LLM_CB_COOLDOWN_S: float = 30.0
+    LLM_CB_HALFOPEN_PROBES: int = 2
+    # When the proxy budget is exhausted, hold the breaker open this long — a
+    # budget error will not self-heal, so we pause the run instead of churning.
+    LLM_CB_BUDGET_COOLDOWN_S: float = 900.0
+    # Case-level retry (distinct from browser-use's per-call HTTP retries).
+    LLM_RETRY_MAX: int = 3
+    LLM_RETRY_BASE_S: float = 3.0
+    # Per-test-case wall-clock cap (seconds). Independent of the step budget so a
+    # hung page/agent can't pin a lane forever. 0 disables.
+    TEST_CASE_WALLCLOCK_TIMEOUT_S: int = 360
+
+    # ── Prompt versioning ────────────────────────────────────────────────────
+    # Active prompt version pulled from the prompt registry. Lets us A/B and roll
+    # back prompts; the version used is stamped onto the run for reproducibility.
+    PROMPT_TEST_EXECUTION_VERSION: str = "v3"
     # Comma-separated extra Chrome flags appended after defaults (see chrome_automation_args).
     BROWSER_CHROME_EXTRA_ARGS: Optional[str] = None
     # Outside backend/ to prevent uvicorn --reload restarts when screenshots are written.

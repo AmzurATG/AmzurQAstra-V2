@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from features.functional.core.browser.test_case_runner import TestCaseRunner
+from features.functional.core.browser.llm_gate import get_gate
 from features.functional.orchestration.lane_pool import LanePool
 from features.functional.orchestration.result_persistence import (
     case_result_to_completed_dict,
@@ -109,6 +110,8 @@ async def _run_single_case(
         error=redact_known_credentials(
             result.get("error"), username=username, password=password
         ),
+        error_kind=result.get("error_kind"),
+        infra_error=bool(result.get("infra_error")),
         group_id=group_id,
         lane_id=lane_id,
     )
@@ -284,6 +287,9 @@ async def execute_node(state: OrchestrationState) -> Dict[str, Any]:
         },
     )
     headless = bool(state.get("headless"))
+    # Fresh breaker + metrics for this run so a prior run's state can't leak in.
+    gate = get_gate()
+    gate.reset()
     pool = LanePool(headless=headless, lane_count=state.get("lane_count"))
     await pool.start()
     runner = TestCaseRunner()
@@ -291,6 +297,7 @@ async def execute_node(state: OrchestrationState) -> Dict[str, Any]:
     live_completed: List[Dict[str, Any]] = []
     live_shots: List[str] = []
     results_lock = asyncio.Lock()
+    paused = {"value": False, "reason": ""}
     queue: asyncio.Queue = asyncio.Queue()
     for g in group_table:
         queue.put_nowait(g)
@@ -298,6 +305,24 @@ async def execute_node(state: OrchestrationState) -> Dict[str, Any]:
     async def _worker() -> None:
         while True:
             if progress_mgr.is_cancel_requested(run_id):
+                break
+            # PAUSE (don't fail) when the shared LLM circuit is open — the proxy
+            # is down/over-budget. Stop pulling NEW work so we don't manufacture
+            # hundreds of empty "error" results; un-run cases stay SKIPPED and
+            # the run is resumable once the proxy recovers.
+            if gate.should_pause():
+                if not paused["value"]:
+                    snap = gate.snapshot()
+                    br = snap.get("breaker", {})
+                    paused["value"] = True
+                    paused["reason"] = (
+                        "LLM budget exhausted" if br.get("budget_exhausted")
+                        else f"LLM circuit open ({br.get('last_kind') or 'infra'})"
+                    )
+                    logger.error(
+                        "[Execute] Pausing run %s — %s. Remaining cases left un-run "
+                        "(resume after proxy recovers).", run_id, paused["reason"],
+                    )
                 break
             try:
                 group = queue.get_nowait()
@@ -320,10 +345,23 @@ async def execute_node(state: OrchestrationState) -> Dict[str, Any]:
     finally:
         await pool.shutdown()
 
+    if paused["value"]:
+        progress_mgr.update(
+            run_id,
+            {
+                "current_step_info": f"Paused: {paused['reason']}",
+                "llm_gate": gate.snapshot(),
+            },
+        )
+
+    # Only re-verify genuine failures. Infra errors (budget/circuit/timeout) are
+    # NOT test failures — excluding them keeps the (expensive) vision-retry pass
+    # from burning more budget on cases that never really ran.
     failed = [
         int(r["test_case_id"])
         for r in results_out
         if r.get("status") not in ("passed", "cancelled", "skipped")
+        and not r.get("infra_error")
     ]
     return {
         "case_results": results_out,
@@ -331,4 +369,7 @@ async def execute_node(state: OrchestrationState) -> Dict[str, Any]:
         "active_lanes": [],
         "status": "evidence",
         "completed_count": len(results_out),
+        "paused": paused["value"],
+        "pause_reason": paused["reason"],
+        "llm_gate": gate.snapshot(),
     }

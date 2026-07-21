@@ -90,20 +90,34 @@ async def report_node(state: OrchestrationState, *, db_session_factory) -> Dict[
             await db.execute(select(TestRun).where(TestRun.id == run_id))
         ).scalar_one_or_none()
         cancel = progress_mgr.is_cancel_requested(run_id) or state.get("cancel_requested")
+        paused = bool(state.get("paused"))
+        pause_reason = str(state.get("pause_reason") or "")
         if run_row:
             run_row.passed_tests = passed
             run_row.failed_tests = failed
             run_row.skipped_tests = skipped
             run_row.completed_at = datetime.utcnow()
+            # Paused (LLM infra down/over-budget) is resumable — record as
+            # CANCELLED (the resumable terminal state) with a clear reason,
+            # rather than PASSED/FAILED which would misrepresent the run.
             if cancel:
                 run_row.status = TestRunStatus.CANCELLED
+            elif paused:
+                run_row.status = TestRunStatus.CANCELLED
+                run_row.config = {
+                    **(run_row.config or {}),
+                    "paused": True,
+                    "pause_reason": pause_reason,
+                    "resumable": True,
+                    "llm_gate": state.get("llm_gate"),
+                }
             elif failed > 0:
                 run_row.status = TestRunStatus.FAILED
             else:
                 run_row.status = TestRunStatus.PASSED
         await db.commit()
 
-    terminal = "cancelled" if cancel else ("failed" if failed else "passed")
+    terminal = "paused" if paused else ("cancelled" if cancel else ("failed" if failed else "passed"))
     progress_mgr.set(
         run_id,
         {
@@ -112,6 +126,11 @@ async def report_node(state: OrchestrationState, *, db_session_factory) -> Dict[
             "completed_results": completed_payloads,
             "active_lanes": [],
             "groups": state.get("group_table") or [],
+            "current_step_info": (
+                f"Paused — {pause_reason}. Resume when the LLM proxy recovers."
+                if paused else ""
+            ),
+            "llm_gate": state.get("llm_gate"),
         },
     )
     progress_mgr.clear_cancel(run_id)

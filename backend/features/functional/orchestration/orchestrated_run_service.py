@@ -151,6 +151,12 @@ class OrchestratedRunService:
             "case_payloads": payloads,
             "app_url": resolved_url,
             "run_uuid": str(uuid.uuid4()),
+            # Traceability: which prompt version(s) drove this run.
+            "prompt_versions": {
+                "test_execution": getattr(
+                    config.settings, "PROMPT_TEST_EXECUTION_VERSION", "v3"
+                ),
+            },
         }
         await self.db.commit()
         await self.db.refresh(run)
