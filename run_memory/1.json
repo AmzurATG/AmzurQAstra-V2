@@ -1,0 +1,551 @@
+{
+  "project_id": 1,
+  "hints": [
+    "Case 35 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 52 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 42 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 63 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 53 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 36 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 54 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 65 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 55 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 75 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 76 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 56 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 77 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 98 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 79 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 94 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 80 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 81 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 78 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 91 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 97 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 84 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 92 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 85 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 93 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 95 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 87 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 88 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 89 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Run health: lanes 6/6; reassigns 57; ui_desync 0.",
+    "Prior recon failed \u2014 verify app_url and login selectors before trusting DOM hints.",
+    "Case 1 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 4 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 15 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 16 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 14 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 17 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 2 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 5 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 18 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 6 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 19 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 3 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 7 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 20 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 12 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 38 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 23 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 45 was slow/stale \u2014 prefer tighter scopes or fresh lane.",
+    "Case 41 was slow/stale \u2014 prefer tighter scopes or fresh lane."
+  ],
+  "events": [
+    {
+      "type": "recon_failure",
+      "error": "Page.goto() got an unexpected keyword argument 'wait_until'",
+      "run_id": 23
+    },
+    {
+      "type": "recon_failure",
+      "error": "Page.goto() got an unexpected keyword argument 'wait_until'",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 1,
+      "reason": "stale_heartbeat 23.1s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 4,
+      "reason": "stale_heartbeat 22.8s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 15,
+      "reason": "stale_heartbeat 23.6s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 16,
+      "reason": "stale_heartbeat 23.1s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 14,
+      "reason": "stale_heartbeat 21.3s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 17,
+      "reason": "stale_heartbeat 23.3s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 5,
+      "reason": "stale_heartbeat 23.8s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 2,
+      "reason": "stale_heartbeat 24.2s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 18,
+      "reason": "stale_heartbeat 24.6s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 7,
+      "reason": "stale_heartbeat 20.0s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 21,
+      "reason": "stale_heartbeat 24.4s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 22,
+      "reason": "stale_heartbeat 22.3s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 12,
+      "reason": "slow_case elapsed_ms=150415",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 9,
+      "reason": "stale_heartbeat 23.0s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 24,
+      "reason": "stale_heartbeat 20.8s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 10,
+      "reason": "stale_heartbeat 21.7s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 27,
+      "reason": "stale_heartbeat 20.4s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 11,
+      "reason": "stale_heartbeat 24.3s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 38,
+      "reason": "stale_heartbeat 20.1s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 37,
+      "reason": "stale_heartbeat 20.9s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 29,
+      "reason": "stale_heartbeat 25.0s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 39,
+      "reason": "stale_heartbeat 22.3s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 30,
+      "reason": "stale_heartbeat 20.7s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 44,
+      "reason": "stale_heartbeat 23.8s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 45,
+      "reason": "stale_heartbeat 20.4s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 40,
+      "reason": "stale_heartbeat 24.2s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 51,
+      "reason": "stale_heartbeat 24.5s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 62,
+      "reason": "stale_heartbeat 21.5s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 35,
+      "reason": "stale_heartbeat 20.0s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 52,
+      "reason": "stale_heartbeat 22.8s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 42,
+      "reason": "stale_heartbeat 21.3s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 63,
+      "reason": "stale_heartbeat 24.9s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 53,
+      "reason": "stale_heartbeat 20.0s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 36,
+      "reason": "stale_heartbeat 20.3s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 54,
+      "reason": "stale_heartbeat 21.7s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 65,
+      "reason": "slow_case elapsed_ms=150255",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 55,
+      "reason": "slow_case elapsed_ms=150427",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 75,
+      "reason": "slow_case elapsed_ms=150240",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 76,
+      "reason": "stale_heartbeat 20.0s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 56,
+      "reason": "stale_heartbeat 22.0s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 77,
+      "reason": "slow_case elapsed_ms=150456",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 98,
+      "reason": "stale_heartbeat 23.9s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 79,
+      "reason": "stale_heartbeat 21.3s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 94,
+      "reason": "stale_heartbeat 20.9s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 80,
+      "reason": "stale_heartbeat 22.4s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 81,
+      "reason": "slow_case elapsed_ms=150129",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 78,
+      "reason": "stale_heartbeat 24.5s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 91,
+      "reason": "slow_case elapsed_ms=150260",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 97,
+      "reason": "stale_heartbeat 20.8s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 84,
+      "reason": "slow_case elapsed_ms=150197",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 92,
+      "reason": "slow_case elapsed_ms=150187",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 85,
+      "reason": "slow_case elapsed_ms=150173",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 93,
+      "reason": "slow_case elapsed_ms=150241",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 95,
+      "reason": "slow_case elapsed_ms=150351",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 87,
+      "reason": "slow_case elapsed_ms=150418",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 88,
+      "reason": "stale_heartbeat 23.2s",
+      "run_id": 24
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 89,
+      "reason": "slow_case elapsed_ms=150166",
+      "run_id": 24
+    },
+    {
+      "type": "run_health",
+      "run_id": 24,
+      "health": {
+        "lanes_expected": 6,
+        "lanes_ready": 6,
+        "reassign_count": 57,
+        "circuit_open": false,
+        "ui_desync_events": 0,
+        "recon_ok": false
+      }
+    },
+    {
+      "type": "recon_failure",
+      "error": "Page.goto() got an unexpected keyword argument 'wait_until'",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 1,
+      "reason": "stale_heartbeat 23.4s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 4,
+      "reason": "stale_heartbeat 23.1s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 15,
+      "reason": "stale_heartbeat 22.4s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 16,
+      "reason": "stale_heartbeat 23.0s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 14,
+      "reason": "stale_heartbeat 22.9s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 17,
+      "reason": "stale_heartbeat 22.9s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 2,
+      "reason": "stale_heartbeat 20.6s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 5,
+      "reason": "stale_heartbeat 24.7s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 18,
+      "reason": "stale_heartbeat 24.7s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 6,
+      "reason": "stale_heartbeat 21.9s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 19,
+      "reason": "stale_heartbeat 20.7s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 3,
+      "reason": "stale_heartbeat 21.2s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 7,
+      "reason": "stale_heartbeat 23.7s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 20,
+      "reason": "stale_heartbeat 24.0s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 12,
+      "reason": "stale_heartbeat 24.2s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 38,
+      "reason": "stale_heartbeat 23.6s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 23,
+      "reason": "slow_case elapsed_ms=150660",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 45,
+      "reason": "stale_heartbeat 21.7s",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 41,
+      "reason": "slow_case elapsed_ms=150436",
+      "run_id": 25
+    },
+    {
+      "type": "slow_case_reassign",
+      "test_case_id": 35,
+      "reason": "slow_case elapsed_ms=150592",
+      "run_id": 25
+    },
+    {
+      "type": "recon_failure",
+      "error": "Page.goto() got an unexpected keyword argument 'wait_until'",
+      "run_id": 26
+    }
+  ]
+}

@@ -688,3 +688,161 @@ class JiraIntegration(ProjectManagementIntegration):
                 f"Failed to fetch issue types: {str(e)}",
                 integration_type=self.integration_type
             )
+
+    def _issue_browse_url(self, issue_key: str) -> str:
+        base = (self.config.base_url or "").rstrip("/")
+        return f"{base}/browse/{issue_key}"
+
+    async def create_bug(
+        self,
+        project_key: str,
+        summary: str,
+        description: str,
+        priority: Optional[str] = "Medium",
+    ) -> dict:
+        """
+        Create a Bug issue in the given project.
+
+        Returns:
+            {"key": "PROJ-123", "url": "https://…/browse/PROJ-123", "id": "…"}
+        """
+        try:
+            client = self._get_client()
+            fields: dict = {
+                "project": {"key": project_key},
+                "summary": (summary or "QAstra failure")[:255],
+                "description": description or "",
+                "issuetype": {"name": "Bug"},
+            }
+            if priority:
+                fields["priority"] = {"name": priority}
+
+            def _create():
+                return client.create_issue(fields=fields)
+
+            issue = await self._run_sync(_create)
+            key = getattr(issue, "key", None) or str(issue)
+            return {
+                "key": key,
+                "id": getattr(issue, "id", None),
+                "url": self._issue_browse_url(key),
+            }
+        except JIRAError as e:
+            # Some projects use a localized / custom bug type name — retry with first bug-like type.
+            if e.status_code == 400 and "issuetype" in str(e).lower():
+                try:
+                    types = await self.get_issue_types(project_key)
+                    bug_type = next(
+                        (
+                            t
+                            for t in types
+                            if str(t.get("name", "")).lower() in ("bug", "defect", "fault")
+                        ),
+                        None,
+                    )
+                    if bug_type:
+                        client = self._get_client()
+                        fields = {
+                            "project": {"key": project_key},
+                            "summary": (summary or "QAstra failure")[:255],
+                            "description": description or "",
+                            "issuetype": {"id": bug_type["id"]},
+                        }
+                        if priority:
+                            fields["priority"] = {"name": priority}
+
+                        def _create2():
+                            return client.create_issue(fields=fields)
+
+                        issue = await self._run_sync(_create2)
+                        key = getattr(issue, "key", None) or str(issue)
+                        return {
+                            "key": key,
+                            "id": getattr(issue, "id", None),
+                            "url": self._issue_browse_url(key),
+                        }
+                except Exception:
+                    pass
+            raise IntegrationSyncError(
+                f"Failed to create Jira bug: {str(e)}",
+                integration_type=self.integration_type,
+            )
+
+    async def attach_files(self, issue_key: str, paths: List[str]) -> int:
+        """Attach local files to a Jira issue. Returns number attached."""
+        from pathlib import Path
+
+        if not paths:
+            return 0
+        client = self._get_client()
+        attached = 0
+        for raw in paths:
+            fp = Path(raw)
+            if not fp.is_file():
+                continue
+            try:
+
+                def _attach(p=fp):
+                    with open(p, "rb") as fh:
+                        return client.add_attachment(issue=issue_key, attachment=fh)
+
+                await self._run_sync(_attach)
+                attached += 1
+            except Exception as exc:
+                logging.getLogger("qastra.integration").warning(
+                    "[Jira] attach failed %s → %s: %s", fp.name, issue_key, exc
+                )
+        return attached
+
+    async def assign_to_sprint(self, issue_key: str, sprint_id: int) -> bool:
+        """Move an issue into a sprint via Agile API. No-op if sprint_id falsy."""
+        if not sprint_id:
+            return False
+        try:
+            base_url = self.config.base_url.rstrip("/")
+            auth_str = f"{self.config.email}:{self.config.api_token}"
+            auth_bytes = b64encode(auth_str.encode()).decode()
+            headers = {
+                "Authorization": f"Basic {auth_bytes}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            }
+            url = f"{base_url}/rest/agile/1.0/sprint/{int(sprint_id)}/issue"
+            async with httpx.AsyncClient(timeout=30.0) as http:
+                resp = await http.post(url, headers=headers, json={"issues": [issue_key]})
+            if resp.status_code not in (200, 204):
+                raise IntegrationSyncError(
+                    f"Failed to add {issue_key} to sprint {sprint_id}: {resp.text[:200]}",
+                    integration_type=self.integration_type,
+                )
+            return True
+        except IntegrationSyncError:
+            raise
+        except Exception as e:
+            raise IntegrationSyncError(
+                f"Failed to assign sprint: {str(e)}",
+                integration_type=self.integration_type,
+            )
+
+    async def link_relates(self, issue_key: str, other_key: str) -> bool:
+        """Create a Relates link between two issues (best-effort)."""
+        if not issue_key or not other_key or issue_key == other_key:
+            return False
+        try:
+            client = self._get_client()
+
+            def _link():
+                return client.create_issue_link(
+                    type="Relates",
+                    inwardIssue=issue_key,
+                    outwardIssue=other_key,
+                )
+
+            await self._run_sync(_link)
+            return True
+        except Exception as exc:
+            logging.getLogger("qastra.integration").warning(
+                "[Jira] Relates link %s ↔ %s failed: %s", issue_key, other_key, exc
+            )
+            return False
+

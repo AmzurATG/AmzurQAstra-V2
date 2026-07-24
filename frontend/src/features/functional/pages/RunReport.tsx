@@ -18,6 +18,7 @@ import { Card } from '@common/components/ui/Card'
 
 import { testRunsApi } from '../api'
 import { fetchScreenshotBlobUrl } from '../utils/screenshotFetch'
+import { formatDurationMs } from '../utils/formatDurationMs'
 import type { RunReportCase, RunReportData } from '../types'
 
 function basename(path?: string | null): string {
@@ -56,16 +57,22 @@ function CaseShot({ runId, c }: { runId: number; c: RunReportCase }) {
 function CaseRow({ runId, c }: { runId: number; c: RunReportCase }) {
   const [open, setOpen] = useState(c.status !== 'passed')
   const ok = c.status === 'passed'
+  const blocked = Boolean(c.infra_error) || c.status === 'error'
+  const dur = c.duration_display || formatDurationMs(c.duration_ms)
   return (
     <div className="rounded-lg border border-gray-200 bg-white">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`flex w-full items-center gap-2 px-3 py-2.5 text-left ${ok ? 'hover:bg-green-50/50' : 'hover:bg-red-50/50'}`}
+        className={`flex w-full items-center gap-2 px-3 py-2.5 text-left ${
+          ok ? 'hover:bg-green-50/50' : blocked ? 'hover:bg-amber-50/50' : 'hover:bg-red-50/50'
+        }`}
       >
         {open ? <ChevronDownIcon className="w-4 h-4 text-gray-400" /> : <ChevronRightIcon className="w-4 h-4 text-gray-400" />}
         {ok ? (
           <CheckCircleIcon className="w-5 h-5 text-green-500 shrink-0" />
+        ) : blocked ? (
+          <XCircleIcon className="w-5 h-5 text-amber-500 shrink-0" />
         ) : (
           <XCircleIcon className="w-5 h-5 text-red-500 shrink-0" />
         )}
@@ -76,13 +83,15 @@ function CaseRow({ runId, c }: { runId: number; c: RunReportCase }) {
           </span>
         )}
         <span className="text-xs text-gray-500 tabular-nums">
-          {c.steps_passed}/{c.steps_total} · {c.duration_ms < 1000 ? `${c.duration_ms}ms` : `${(c.duration_ms / 1000).toFixed(1)}s`}
+          {c.steps_passed}/{c.steps_total} · {dur}
         </span>
       </button>
       {open && (
         <div className="px-4 pb-3 pt-1 space-y-2">
-          {c.error_message && (
-            <p className="text-xs text-red-600">Error: {c.error_message}</p>
+          {(c.user_message || c.error_message) && (
+            <p className={`text-xs ${blocked ? 'text-amber-700' : 'text-red-600'}`}>
+              {blocked ? 'Note' : 'Error'}: {c.user_message || c.error_message}
+            </p>
           )}
           {c.steps.map((s, i) => (
             <div key={i} className="text-sm">
@@ -207,17 +216,22 @@ export default function RunReport() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
           { label: 'Total', value: t.total, cls: 'text-gray-900' },
           { label: 'Passed', value: t.passed, cls: 'text-green-600' },
           { label: 'Failed', value: t.failed, cls: 'text-red-600' },
+          { label: 'Blocked', value: t.blocked ?? 0, cls: 'text-amber-600' },
           { label: 'Success', value: `${t.success_rate}%`, cls: 'text-primary-600' },
-          { label: 'AI adaptations', value: t.adaptations, cls: 'text-purple-600' },
+          {
+            label: 'Run time',
+            value: t.duration_display || formatDurationMs(t.duration_ms),
+            cls: 'text-gray-900',
+          },
         ].map((s) => (
           <Card key={s.label} className="text-center p-4">
             <p className="text-xs text-gray-500 uppercase">{s.label}</p>
-            <p className={`text-xl font-bold ${s.cls}`}>{s.value}</p>
+            <p className={`text-xl font-bold tabular-nums ${s.cls}`}>{s.value}</p>
           </Card>
         ))}
       </div>

@@ -97,6 +97,8 @@ class TestResultResponse(BaseModel):
     original_steps: Optional[List[Dict[str, Any]]] = None
     agent_logs: Optional[List[Dict[str, Any]]] = None
     ai_modified: Optional[Dict[str, Any]] = None
+    jira_bug_key: Optional[str] = None
+    jira_bug_url: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
@@ -106,6 +108,19 @@ class TestResultResponse(BaseModel):
 
 class TestRunDetailResponse(TestRunResponse):
     results: List[TestResultResponse] = []
+
+
+class LogJiraBugRequest(BaseModel):
+    sprint_id: Optional[int] = None
+    summary: Optional[str] = None
+    priority: Optional[str] = "Medium"
+    attach_screenshots: bool = True
+
+
+class LogJiraBugResponse(BaseModel):
+    key: str
+    url: Optional[str] = None
+    sprint_id: Optional[int] = None
 
 
 # ── Live Progress (polling) ──────────────────────────────────────────────────
@@ -126,7 +141,9 @@ class CompletedCaseResult(BaseModel):
     steps_total: int
     steps_passed: int
     steps_failed: int
+    setup_skipped_count: Optional[int] = 0
     duration_ms: int
+    duration_display: Optional[str] = None
     step_results: Optional[List[Dict[str, Any]]] = None
     adapted_steps: Optional[List[Dict[str, Any]]] = None
     original_steps: Optional[List[Dict[str, Any]]] = None
@@ -135,6 +152,16 @@ class CompletedCaseResult(BaseModel):
     agent_screenshot_count: Optional[int] = None
     has_adaptations: Optional[bool] = None
     ai_modified: Optional[Dict[str, Any]] = None
+    ui_override: Optional[bool] = None
+    ui_validation: Optional[Dict[str, Any]] = None
+    executor_status: Optional[str] = None
+    verdict_source: Optional[str] = None
+    infra_error: Optional[bool] = None
+    user_message: Optional[str] = None
+    error_kind: Optional[str] = None
+    error_message: Optional[str] = None
+    jira_bug_key: Optional[str] = None
+    jira_bug_url: Optional[str] = None
 
 
 class ActiveLaneInfo(BaseModel):
@@ -172,3 +199,12 @@ class LiveProgressResponse(BaseModel):
     active_lanes: List[ActiveLaneInfo] = []
     groups: List[GroupProgressInfo] = []
     live_screenshots: List[str] = []
+    ui_desync: Optional[bool] = None
+    ui_desync_events: Optional[List[Dict[str, Any]]] = None
+    health: Optional[Dict[str, Any]] = None
+    health_summary: Optional[str] = None
+    supervisor: Optional[Dict[str, Any]] = None
+    runtime_banner: Optional[Dict[str, Any]] = None
+    started_at: Optional[str] = None
+    elapsed_ms: Optional[int] = None
+    elapsed_display: Optional[str] = None

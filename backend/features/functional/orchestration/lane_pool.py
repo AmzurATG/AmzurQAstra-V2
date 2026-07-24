@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from browser_use import Browser, BrowserProfile
@@ -22,34 +22,41 @@ def _free_ram_mb() -> Optional[float]:
 
 
 def effective_lane_count(requested: int) -> int:
-    """Adaptive, RAM-aware lane count.
+    """RAM-aware lane count that honors the requested baseline.
 
-    - Uses the configured baseline (ORCHESTRATION_LANE_COUNT) when RAM supports it.
-    - Scales UP toward ORCHESTRATION_MAX_LANE_COUNT on RAM-rich machines (16GB+).
-    - Scales DOWN when free RAM is constrained so 8GB laptops don't thrash.
+    - Baseline = min(requested, ORCHESTRATION_MAX_LANE_COUNT).
+    - Optional ACCURACY_LANE_COUNT_CAP (>0) further caps the baseline.
+    - Scales DOWN when free RAM cannot support the baseline.
+    - Scales UP only when ORCHESTRATION_LANE_SCALE_UP is True (off by default).
     """
-    target = max(1, int(getattr(config.settings, "ORCHESTRATION_LANE_COUNT", 6) or 6))
-    hard_max = max(target, int(getattr(config.settings, "ORCHESTRATION_MAX_LANE_COUNT", 12) or 12))
-    baseline = max(1, min(int(requested or target), hard_max))
+    configured = max(1, int(getattr(config.settings, "ORCHESTRATION_LANE_COUNT", 6) or 6))
+    hard_max = max(configured, int(getattr(config.settings, "ORCHESTRATION_MAX_LANE_COUNT", 12) or 12))
+    baseline = max(1, min(int(requested or configured), hard_max))
+    cap = int(getattr(config.settings, "ACCURACY_LANE_COUNT_CAP", 0) or 0)
+    if cap > 0:
+        baseline = max(1, min(baseline, cap))
     free = _free_ram_mb()
     min_free = float(getattr(config.settings, "ORCHESTRATION_MIN_FREE_RAM_MB", 1200) or 1200)
     per_lane = float(getattr(config.settings, "ORCHESTRATION_PER_LANE_RAM_MB", 450) or 450)
     if free is None:
         return baseline
     max_by_ram = max(1, int((free - min_free) / per_lane))
-    effective = max(1, min(hard_max, max_by_ram))
-    if effective < baseline:
+    if max_by_ram < baseline:
         logger.warning(
             "[LanePool] RAM guard reduced lanes %s -> %s (free=%.0fMB)",
-            baseline, effective, free,
+            baseline, max_by_ram, free,
         )
-        return effective
-    if effective > baseline:
-        logger.info(
-            "[LanePool] RAM headroom allows scaling lanes %s -> %s (free=%.0fMB)",
-            baseline, effective, free,
-        )
-    return max(baseline, effective)
+        return max_by_ram
+    scale_up = bool(getattr(config.settings, "ORCHESTRATION_LANE_SCALE_UP", False))
+    if scale_up and max_by_ram > baseline:
+        bumped = min(hard_max, max_by_ram)
+        if bumped > baseline:
+            logger.info(
+                "[LanePool] RAM headroom allows scaling lanes %s -> %s (free=%.0fMB)",
+                baseline, bumped, free,
+            )
+        return bumped
+    return baseline
 
 
 @dataclass
@@ -60,6 +67,11 @@ class LaneHandle:
     cases_executed: int = 0
     busy: bool = False
     current_group_id: Optional[str] = None
+    last_heartbeat_at: Optional[float] = None
+    case_started_at: Optional[float] = None
+    current_case_id: Optional[int] = None
+    reassign_count: int = 0
+    quarantined: bool = False
 
 
 class LanePool:

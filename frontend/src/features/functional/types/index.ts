@@ -446,6 +446,19 @@ export interface TestResult {
   duration_ms?: number
   started_at?: string
   completed_at?: string
+  jira_bug_key?: string | null
+  jira_bug_url?: string | null
+}
+
+export interface AgentLogEntry {
+  timestamp: string
+  agent_step: number
+  description: string
+  adaptation?: string | null
+  screenshot_path?: string | null
+  /** Curated evidence flag from ScreenshotAgent */
+  evidence?: boolean
+  raw_screenshot_path?: string | null
 }
 
 export interface TestStepResult {
@@ -454,13 +467,7 @@ export interface TestStepResult {
   actual_result?: string
   description?: string
   adaptation?: string | null
-}
-
-export interface AgentLogEntry {
-  timestamp: string
-  agent_step: number
-  description: string
-  adaptation?: string | null
+  shared_setup?: boolean
   screenshot_path?: string | null
 }
 
@@ -490,7 +497,10 @@ export interface CompletedCaseResult {
   steps_total: number
   steps_passed: number
   steps_failed: number
+  setup_skipped_count?: number
   duration_ms: number
+  /** Preformatted duration from API when available */
+  duration_display?: string | null
   step_results?: TestStepResult[]
   adapted_steps?: TestStepResult[]
   original_steps?: Record<string, unknown>[]
@@ -503,6 +513,15 @@ export interface CompletedCaseResult {
   has_adaptations?: boolean | null
   ai_modified?: Record<string, unknown> | null
   group_id?: string | null
+  ui_override?: boolean
+  executor_status?: string | null
+  verdict_source?: string | null
+  infra_error?: boolean
+  user_message?: string | null
+  error_kind?: string | null
+  error_message?: string | null
+  jira_bug_key?: string | null
+  jira_bug_url?: string | null
 }
 
 export interface ActiveLaneInfo {
@@ -540,19 +559,26 @@ export interface RunReportCase {
   title: string
   status: string
   duration_ms: number
+  duration_display?: string | null
   group_id?: string | null
   steps_total: number
   steps_passed: number
   steps_failed: number
+  setup_skipped_count?: number
   steps: RunReportStep[]
   has_adaptations: boolean
   adaptation_count: number
   screenshot_path?: string | null
   error_message?: string | null
+  user_message?: string | null
+  infra_error?: boolean
+  ui_override?: boolean
+  executor_status?: string | null
 }
 
 export interface RunReportGroup {
   group_id: string
+  parent_group_id?: string | null
   title: string
   phase_order?: string[]
   shared_login: boolean
@@ -560,6 +586,10 @@ export interface RunReportGroup {
   cases: RunReportCase[]
   passed: number
   total: number
+  failed?: number
+  error?: number
+  is_theme?: boolean
+  sub_groups?: RunReportGroup[]
 }
 
 export interface RunReportData {
@@ -572,17 +602,27 @@ export interface RunReportData {
   started_at?: string | null
   completed_at?: string | null
   lane_count?: number | null
+  health?: Record<string, unknown> | null
+  health_summary?: string | null
   totals: {
     total: number
     passed: number
     failed: number
+    blocked?: number
     skipped: number
     success_rate: number
     adaptations: number
+    duration_ms?: number
+    duration_display?: string | null
+    sum_case_duration_ms?: number
+    sum_case_duration_display?: string | null
   }
   groups: RunReportGroup[]
+  /** Nested theme → sub-groups (preferred for display). */
+  themes?: RunReportGroup[]
   cases: RunReportCase[]
   failed_cases: RunReportCase[]
+  blocked_cases?: RunReportCase[]
 }
 
 export interface LiveProgressResponse {
@@ -600,6 +640,14 @@ export interface LiveProgressResponse {
   active_lanes?: ActiveLaneInfo[]
   groups?: GroupProgressInfo[]
   live_screenshots?: string[]
+  ui_desync?: boolean
+  ui_desync_events?: Record<string, unknown>[]
+  health?: Record<string, unknown>
+  health_summary?: string
+  runtime_banner?: { level?: string; message?: string } | null
+  started_at?: string | null
+  elapsed_ms?: number | null
+  elapsed_display?: string | null
 }
 
 // Integrity Check Types

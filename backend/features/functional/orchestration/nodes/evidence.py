@@ -1,13 +1,14 @@
-"""Evidence node: finalize per-case screenshot mapping."""
+"""Evidence node: finalize per-case screenshot mapping via ScreenshotAgent."""
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from features.functional.core.screenshots import ScreenshotAgent
 from features.functional.orchestration.state import CaseResult, OrchestrationState
 
 
 async def evidence_node(state: OrchestrationState) -> Dict[str, Any]:
-    """Ensure each case result has a primary screenshot and live gallery paths."""
+    """Ensure each case result has curated evidence screenshots and a primary path."""
     results: List[CaseResult] = list(state.get("case_results") or [])
     retry_results: List[CaseResult] = list(state.get("retry_results") or [])
     by_case: Dict[int, CaseResult] = {}
@@ -19,14 +20,28 @@ async def evidence_node(state: OrchestrationState) -> Dict[str, Any]:
                 by_case[cid] = r
 
     live_shots: List[str] = []
-    for r in by_case.values():
+    for cid, r in list(by_case.items()):
+        curated = ScreenshotAgent.curate(
+            r.get("agent_logs"),
+            [r["screenshot_path"]] if r.get("screenshot_path") else [],
+            overall=r.get("status"),
+        )
+        r = dict(r)
+        r["agent_logs"] = curated["agent_logs"]
+        r["screenshot_path"] = curated.get("screenshot_path") or r.get("screenshot_path")
+        ai = dict(r.get("ai_modified") or {})
+        ai["evidence_screenshot_count"] = curated["evidence_screenshot_count"]
+        ai["raw_screenshot_count"] = curated.get("raw_screenshot_count")
+        r["ai_modified"] = ai
+        by_case[cid] = r  # type: ignore[assignment]
         path = r.get("screenshot_path")
         if path and path not in live_shots:
             live_shots.append(str(path))
         for log in r.get("agent_logs") or []:
-            lp = log.get("screenshot_path")
-            if lp and str(lp) not in live_shots:
-                live_shots.append(str(lp))
+            if log.get("evidence") and log.get("screenshot_path"):
+                lp = log["screenshot_path"]
+                if str(lp) not in live_shots:
+                    live_shots.append(str(lp))
     live_shots = live_shots[-24:]
 
     merged_results = list(by_case.values())

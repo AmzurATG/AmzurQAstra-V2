@@ -1,6 +1,7 @@
 """
 Test Runs Endpoints
 """
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,8 @@ from features.functional.schemas.test_run import (
     CompletedCaseResult,
     ActiveLaneInfo,
     GroupProgressInfo,
+    LogJiraBugRequest,
+    LogJiraBugResponse,
 )
 from features.functional.db.models.test_run import TestRun, TestRunStatus
 from features.functional.db.models.test_result import TestResultStatus
@@ -40,8 +43,31 @@ from features.functional.services.completed_result_builder import (
 )
 from features.functional.services.test_run_report_service import build_report_data
 from features.functional.services.test_run_pdf import build_test_run_pdf
+from features.functional.core.case_budget import format_duration_ms
 
 router = APIRouter()
+
+
+def _elapsed_from_started(started_at: Optional[datetime]) -> tuple[Optional[int], Optional[str]]:
+    if not started_at:
+        return None, None
+    try:
+        sa = started_at
+        if sa.tzinfo is None:
+            sa = sa.replace(tzinfo=timezone.utc)
+        elapsed_ms = max(0, int((datetime.now(timezone.utc) - sa).total_seconds() * 1000))
+        return elapsed_ms, format_duration_ms(elapsed_ms)
+    except Exception:
+        return None, None
+
+
+def _iso(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return None
+    try:
+        return dt.isoformat()
+    except Exception:
+        return None
 
 
 @router.get("/", response_model=PaginatedResponse[TestRunResponse])
@@ -152,13 +178,30 @@ async def get_live_progress(
     db: AsyncSession = Depends(get_db),
 ):
     """Poll live execution progress. Falls back to DB for completed runs."""
-    run_number_row = (
-        await db.execute(select(TestRun.run_number).where(TestRun.id == run_id))
-    ).scalar_one_or_none()
+    run_meta = (
+        await db.execute(
+            select(TestRun.run_number, TestRun.started_at, TestRun.completed_at).where(
+                TestRun.id == run_id
+            )
+        )
+    ).one_or_none()
+    run_number_row = run_meta[0] if run_meta else None
+    db_started = run_meta[1] if run_meta else None
 
     progress_manager = RunProgressManager()
     progress = progress_manager.get(run_id)
     if progress:
+        started_iso = progress.get("started_at") or _iso(db_started)
+        elapsed_ms, elapsed_display = None, None
+        if started_iso:
+            try:
+                sa = datetime.fromisoformat(str(started_iso).replace("Z", "+00:00"))
+                elapsed_ms, elapsed_display = _elapsed_from_started(sa)
+            except Exception:
+                elapsed_ms, elapsed_display = _elapsed_from_started(db_started)
+        else:
+            elapsed_ms, elapsed_display = _elapsed_from_started(db_started)
+
         body = {
             "status": progress.get("status", "running"),
             "percentage": progress.get("percentage", 0),
@@ -172,6 +215,12 @@ async def get_live_progress(
             "active_lanes": list(progress.get("active_lanes") or []),
             "groups": list(progress.get("groups") or []),
             "live_screenshots": list(progress.get("live_screenshots") or []),
+            "runtime_banner": progress.get("runtime_banner"),
+            "health": progress.get("health"),
+            "health_summary": progress.get("health_summary"),
+            "started_at": started_iso,
+            "elapsed_ms": elapsed_ms,
+            "elapsed_display": elapsed_display,
         }
         if lite:
             body = live_progress_to_lite(body)
@@ -192,6 +241,12 @@ async def get_live_progress(
             active_lanes=[ActiveLaneInfo(**ln) for ln in body.get("active_lanes") or []],
             groups=[GroupProgressInfo(**g) for g in body.get("groups") or []],
             live_screenshots=body.get("live_screenshots") or [],
+            runtime_banner=body.get("runtime_banner"),
+            health=body.get("health"),
+            health_summary=body.get("health_summary"),
+            started_at=body.get("started_at"),
+            elapsed_ms=body.get("elapsed_ms"),
+            elapsed_display=body.get("elapsed_display"),
         )
 
     # Fallback: load from DB
@@ -216,6 +271,19 @@ async def get_live_progress(
                 d = completed_case_to_lite(d)
             completed_raw.append(CompletedCaseResult(**d))
 
+    # Prefer wall-clock for finished runs
+    elapsed_ms, elapsed_display = None, None
+    if run.started_at and run.completed_at:
+        try:
+            elapsed_ms = max(
+                0, int((run.completed_at - run.started_at).total_seconds() * 1000)
+            )
+            elapsed_display = format_duration_ms(elapsed_ms)
+        except Exception:
+            elapsed_ms, elapsed_display = _elapsed_from_started(run.started_at or db_started)
+    else:
+        elapsed_ms, elapsed_display = _elapsed_from_started(run.started_at or db_started)
+
     return LiveProgressResponse(
         run_id=run_id,
         run_number=run.run_number,
@@ -224,6 +292,9 @@ async def get_live_progress(
         total_test_cases=run.total_tests,
         current_test_case_index=run.total_tests if pct == 100 else 0,
         completed_results=completed_raw,
+        started_at=_iso(run.started_at or db_started),
+        elapsed_ms=elapsed_ms,
+        elapsed_display=elapsed_display,
     )
 
 
@@ -368,6 +439,178 @@ async def get_test_run_result(
     if not tr:
         raise HTTPException(status_code=404, detail="Test result not found")
     return tr
+
+
+@router.post(
+    "/{run_id}/results/{result_id}/log-jira",
+    response_model=LogJiraBugResponse,
+)
+async def log_test_result_to_jira(
+    run_id: int,
+    result_id: int,
+    body: LogJiraBugRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a Jira Bug from a failed test result (manual). No sprint → backlog."""
+    from sqlalchemy.orm import selectinload
+
+    from common.db.models.integration import ProjectIntegration, IntegrationType
+    from common.integrations import get_integration
+    from common.integrations.jira.client import JiraIntegration
+    from common.integrations.exceptions import IntegrationError
+    from common.utils.security import decrypt_config
+    from features.functional.db.models.test_result import TestResult
+    from features.functional.db.models.test_case import TestCase
+    from features.functional.services.jira_bug_from_result import (
+        build_jira_bug_draft,
+        is_eligible_for_jira_bug,
+    )
+
+    run = (
+        await db.execute(select(TestRun).where(TestRun.id == run_id))
+    ).scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Test run not found")
+
+    tr = (
+        await db.execute(
+            select(TestResult)
+            .options(
+                selectinload(TestResult.test_case).selectinload(TestCase.user_story),
+            )
+            .where(TestResult.id == result_id, TestResult.test_run_id == run_id)
+        )
+    ).scalar_one_or_none()
+    if not tr:
+        raise HTTPException(status_code=404, detail="Test result not found")
+
+    if tr.jira_bug_key:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "A Jira bug was already filed for this result.",
+                "key": tr.jira_bug_key,
+                "url": tr.jira_bug_url,
+            },
+        )
+
+    st = tr.status.value if hasattr(tr.status, "value") else str(tr.status)
+    ai = tr.ai_modified or {}
+    ok, reason = is_eligible_for_jira_bug(
+        status=st, infra_error=bool(ai.get("infra_error")), ai_modified=ai
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
+
+    integ = (
+        await db.execute(
+            select(ProjectIntegration).where(
+                ProjectIntegration.project_id == run.project_id,
+                ProjectIntegration.integration_type == IntegrationType.jira,
+            )
+        )
+    ).scalar_one_or_none()
+    if not integ or not integ.is_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="Jira is not configured for this project. Connect it under Integrations.",
+        )
+
+    try:
+        cfg = decrypt_config(integ.config)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not read Jira credentials.")
+
+    project_key = cfg.get("project_key") or cfg.get("project_id") or cfg.get("project")
+    if not project_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Jira project key is missing. Re-save the Jira integration.",
+        )
+
+    tc = tr.test_case
+    title = (tc.title if tc else None) or f"Test Case #{tr.test_case_id}"
+    story = getattr(tc, "user_story", None) if tc else None
+    related = None
+    if story and getattr(story, "external_key", None):
+        related = story.external_key
+    elif tc and getattr(tc, "jira_key", None):
+        related = tc.jira_key
+
+    app_url = (run.config or {}).get("app_url")
+    draft = build_jira_bug_draft(
+        title=title,
+        status=st,
+        infra_error=bool(ai.get("infra_error")),
+        ai_modified=ai,
+        run_number=run.run_number,
+        run_id=run.id,
+        app_url=app_url,
+        duration_ms=tr.duration_ms,
+        error_message=tr.error_message,
+        step_results=tr.step_results,
+        original_steps=tr.original_steps,
+        screenshot_path=tr.screenshot_path,
+        agent_logs=tr.agent_logs,
+        related_story_key=related,
+    )
+    if not draft.get("eligible"):
+        raise HTTPException(status_code=400, detail=draft.get("reason") or reason)
+
+    summary = (body.summary or draft["summary"]).strip() or draft["summary"]
+    priority = (body.priority or "Medium").strip() or "Medium"
+
+    try:
+        integration = get_integration("jira", cfg)
+        if not isinstance(integration, JiraIntegration):
+            raise HTTPException(status_code=400, detail="Jira integration unavailable.")
+
+        created = await integration.create_bug(
+            project_key=str(project_key),
+            summary=summary,
+            description=draft["description"],
+            priority=priority,
+        )
+        key = created["key"]
+        url = created.get("url")
+
+        if body.attach_screenshots:
+            paths = draft.get("screenshot_paths") or []
+            if paths:
+                await integration.attach_files(key, paths)
+
+        if body.sprint_id:
+            await integration.assign_to_sprint(key, int(body.sprint_id))
+
+        if related:
+            await integration.link_relates(key, related)
+
+    except HTTPException:
+        raise
+    except IntegrationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to create Jira bug: {exc}",
+        ) from exc
+
+    tr.jira_bug_key = key
+    tr.jira_bug_url = url
+    await db.commit()
+
+    # Patch live progress so the UI can show the filed key without a full reload.
+    progress_manager = RunProgressManager()
+    progress = progress_manager.get(run_id)
+    if progress and isinstance(progress.get("completed_results"), list):
+        for entry in progress["completed_results"]:
+            if isinstance(entry, dict) and int(entry.get("test_result_id") or 0) == result_id:
+                entry["jira_bug_key"] = key
+                entry["jira_bug_url"] = url
+                break
+
+    return LogJiraBugResponse(key=key, url=url, sprint_id=body.sprint_id)
 
 
 @router.get("/{run_id}/results", response_model=List[TestResultResponse])

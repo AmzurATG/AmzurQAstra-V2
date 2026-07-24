@@ -25,6 +25,9 @@ from common.utils.logger import logger
 from features.functional.core.llm_prompts.test_execution import (
     TEST_EXECUTION_PROMPT as _TEST_EXECUTION_V3,
 )
+from features.functional.core.llm_prompts.ui_validation import (
+    UI_VALIDATION_SYSTEM_V1 as _UI_VALIDATION_V1,
+)
 
 
 @dataclass(frozen=True)
@@ -43,11 +46,13 @@ def register(name: str, version: str, template: str) -> None:
 
 
 register("test_execution", "v3", _TEST_EXECUTION_V3)
+register("ui_validation", "v1", _UI_VALIDATION_V1)
 
 
 def _active_version(name: str) -> str:
     mapping = {
         "test_execution": getattr(settings, "PROMPT_TEST_EXECUTION_VERSION", "v3") or "v3",
+        "ui_validation": getattr(settings, "PROMPT_UI_VALIDATION_VERSION", "v1") or "v1",
     }
     return mapping.get(name, "v3")
 

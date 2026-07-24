@@ -64,7 +64,11 @@ async def orchestrator_node(state: OrchestrationState) -> Dict[str, Any]:
     # Re-balance if we have fewer chunks than planners
     if len(chunks) < planner_count:
         planner_count = max(1, len(chunks))
-    lane_count = int(getattr(config.settings, "ORCHESTRATION_LANE_COUNT", 6) or 6)
+    lane_count = int(
+        state.get("lane_count")
+        or getattr(config.settings, "ORCHESTRATION_LANE_COUNT", 6)
+        or 6
+    )
     return {
         "chunks": chunks,
         "planner_count": planner_count,

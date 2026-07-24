@@ -5,17 +5,13 @@ import { Button } from '@common/components/ui/Button'
 import { Card } from '@common/components/ui/Card'
 
 import { TestRunDetailView } from '../../components/TestRunDetailView'
-import { LaneBoard } from '../../components/LaneBoard'
 import { useRequiredActiveTestRun } from '../../context/ActiveTestRunProvider'
 import { isTerminalStatus } from '../../live/progressSource'
 
 /**
  * Functional Testing → Live tab.
  *
- * When a run is active (or just completed and still pinned) the same
- * TestRunDetailView used by the full Run Detail page renders here. When
- * nothing is active, we show an empty state that points users at the Cases
- * tab and offers a shortcut to History.
+ * Shows sequential case progress only — parallel lanes / grouping stay backend-only.
  */
 export default function LiveTab() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -32,7 +28,7 @@ export default function LiveTab() {
           No active test run
         </h3>
         <p className="mt-1 text-sm text-gray-500">
-          Go to Run All, upload your CSV, and start execution. Watch live lane progress here.
+          Go to Run All, upload your CSV, and start execution. Watch live progress here.
         </p>
         <div className="mt-6 flex items-center justify-center gap-2">
           <Link to={`${base}/run-all`}>
@@ -74,18 +70,11 @@ export default function LiveTab() {
           </Link>
         </div>
       )}
-      {!isDone && (progress.active_lanes?.length || progress.groups?.length) ? (
-        <Card className="p-4">
-          <LaneBoard
-            lanes={progress.active_lanes || []}
-            groups={progress.groups}
-            laneTarget={6}
-            completed={progress.completed_results?.length ?? 0}
-            total={progress.total_test_cases}
-          />
-        </Card>
-      ) : null}
-      <TestRunDetailView progress={progress} runId={activeRunId ?? 0} />
+      <TestRunDetailView
+        progress={progress}
+        runId={activeRunId ?? 0}
+        projectId={projectId ? Number(projectId) : undefined}
+      />
     </div>
   )
 }

@@ -140,10 +140,13 @@ export const AgentStepsStrip: React.FC<AgentStepsStripProps> = ({
   enabled = true,
 }) => {
   const logs = agentLogs ?? []
-  const withShots = useMemo(
-    () => logs.filter((l) => l.screenshot_path),
-    [logs]
-  )
+  const withShots = useMemo(() => {
+    const withPath = logs.filter((l) => l.screenshot_path)
+    const curated = withPath.filter((l) => l.evidence === true)
+    if (curated.length > 0) return curated
+    // Legacy results without evidence tags — cap display so we never dump 100+ thumbs
+    return withPath.slice(0, 8)
+  }, [logs])
   const [blobByKey, setBlobByKey] = useState<Record<string, string>>({})
   const [primaryBlobUrl, setPrimaryBlobUrl] = useState<string | null>(null)
   /** Index into `withShots` when viewing agent step gallery; null = closed */

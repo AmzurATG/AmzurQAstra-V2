@@ -3,6 +3,7 @@ import { Card } from '@common/components/ui/Card'
 import { Button } from '@common/components/ui/Button'
 import { StopIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 import { isCancellingStatus } from '../live/progressSource'
+import { formatDurationMs } from '../utils/formatDurationMs'
 import type { LiveProgressResponse } from '../types'
 
 interface ExecutionPanelProps {
@@ -73,20 +74,42 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
 
   const pct = progress.percentage ?? 0
   const passedCount = progress.completed_results.filter(r => r.status === 'passed').length
-  const failedCount = progress.completed_results.filter(r => r.status !== 'passed').length
+  const failedCount = progress.completed_results.filter(r => r.status === 'failed').length
+  const blockedCount = progress.completed_results.filter(
+    r => r.status === 'error' || r.infra_error
+  ).length
+  const banner = progress.runtime_banner
 
   return (
     <Card className="border-primary-100 bg-primary-50/30">
+      {banner?.message && (
+        <div
+          className={`mb-2 rounded border px-3 py-2 text-xs ${
+            banner.level === 'warning'
+              ? 'border-amber-200 bg-amber-50 text-amber-900'
+              : 'border-sky-200 bg-sky-50 text-sky-900'
+          }`}
+        >
+          {banner.message}
+        </div>
+      )}
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-medium text-gray-700">
           {isDone
-            ? `Run complete — ${passedCount} passed, ${failedCount} failed`
+            ? `Run complete — ${passedCount} passed, ${failedCount} failed${blockedCount ? `, ${blockedCount} blocked` : ''}`
             : isCancelling
-              ? 'Cancelling — stopping browser lanes…'
+              ? 'Cancelling — stopping current test…'
+              : progress.status === 'paused'
+                ? 'Paused — waiting for AI service…'
               : `Running: ${progress.current_test_case_title || 'Starting…'} (${Math.min(progress.current_test_case_index + 1, progress.total_test_cases)}/${progress.total_test_cases})`
           }
         </span>
         <div className="flex items-center gap-3">
+          {(progress.elapsed_display || progress.elapsed_ms != null) && (
+            <span className="text-xs text-gray-500 tabular-nums">
+              {progress.elapsed_display || formatDurationMs(progress.elapsed_ms)}
+            </span>
+          )}
           <span className="text-sm font-semibold text-primary-600">{pct}%</span>
           {isRunning && !isCancelling && (
             <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={onCancel}>
@@ -111,10 +134,9 @@ export const ExecutionPanel: React.FC<ExecutionPanelProps> = ({
           style={{ width: `${pct}%` }}
         />
       </div>
-      {!isDone && (progress.active_lanes?.length ?? 0) > 0 && (
+      {!isDone && (progress.completed_results?.length ?? 0) > 0 && (
         <p className="mt-2 text-xs text-gray-500">
-          {(progress.active_lanes || []).filter((l) => l.busy !== false && l.title !== 'Idle').length} of 6 lanes active
-          {(progress.completed_results?.length ?? 0) > 0 && ` · ${progress.completed_results.length} done`}
+          {progress.completed_results.length} of {progress.total_test_cases} cases finished
         </p>
       )}
     </Card>

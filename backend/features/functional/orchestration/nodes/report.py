@@ -6,6 +6,8 @@ from typing import Any, Dict, List
 
 from sqlalchemy import select
 
+from features.functional.core.grouping.setup_step_merger import compute_step_display_counts
+from features.functional.core.memory.store import append_event
 from features.functional.db.models.test_result import TestResult, TestResultStatus
 from features.functional.db.models.test_run import TestRun, TestRunStatus
 from features.functional.orchestration.state import CaseResult, OrchestrationState
@@ -22,6 +24,34 @@ _STATUS_MAP = {
 }
 
 
+def _health_block(state: OrchestrationState) -> Dict[str, Any]:
+    supervisor = state.get("supervisor") or {}
+    watchdog = state.get("watchdog") or {}
+    llm_gate = state.get("llm_gate") or {}
+    desync = list(state.get("ui_desync_events") or [])
+    reassigns = list(watchdog.get("reassign_events") or [])
+    breaker = (llm_gate.get("breaker") or {}) if isinstance(llm_gate, dict) else {}
+    return {
+        "lanes_expected": supervisor.get("lanes_expected"),
+        "lanes_ready": supervisor.get("lanes_ready"),
+        "reassign_count": len(reassigns),
+        "circuit_open": bool(breaker.get("state") == "open" or breaker.get("budget_exhausted")),
+        "ui_desync_events": len(desync),
+        "recon_ok": bool((state.get("recon_cache") or {}).get("ok")) if state.get("recon_cache") else None,
+    }
+
+
+def _health_summary(health: Dict[str, Any]) -> str:
+    parts = [
+        f"lanes {health.get('lanes_ready')}/{health.get('lanes_expected')}",
+        f"reassigns {health.get('reassign_count') or 0}",
+        f"ui_desync {health.get('ui_desync_events') or 0}",
+    ]
+    if health.get("circuit_open"):
+        parts.append("LLM circuit opened during run")
+    return "Run health: " + "; ".join(parts) + "."
+
+
 async def report_node(state: OrchestrationState, *, db_session_factory) -> Dict[str, Any]:
     """Persist case results. db_session_factory injected at invoke time."""
     run_id = int(state["run_id"])
@@ -29,12 +59,13 @@ async def report_node(state: OrchestrationState, *, db_session_factory) -> Dict[
     results: List[CaseResult] = list(state.get("case_results") or [])
     retry_map = {int(r["test_case_id"]): r for r in (state.get("retry_results") or [])}
     for cid, rr in retry_map.items():
-        # Replace initial result with retry when present
         results = [r for r in results if int(r.get("test_case_id") or 0) != cid]
         results.append(rr)
 
     completed_payloads: List[Dict[str, Any]] = []
     passed = failed = skipped = 0
+    health = _health_block(state)
+    health_text = _health_summary(health)
 
     async with db_session_factory() as db:
         for cr in results:
@@ -63,19 +94,17 @@ async def report_node(state: OrchestrationState, *, db_session_factory) -> Dict[
                 skipped += 1
             else:
                 failed += 1
+            counts = compute_step_display_counts(cr.get("step_results") or [])
             completed_payloads.append(
                 completed_case_dict(
                     test_result_id=tr_id,
                     test_case_id=int(cr.get("test_case_id") or 0),
                     title=str(cr.get("title") or ""),
                     status=status_str,
-                    steps_total=len(cr.get("step_results") or []),
-                    steps_passed=sum(
-                        1 for s in (cr.get("step_results") or []) if s.get("status") == "passed"
-                    ),
-                    steps_failed=sum(
-                        1 for s in (cr.get("step_results") or []) if s.get("status") == "failed"
-                    ),
+                    steps_total=counts["steps_total"],
+                    steps_passed=counts["steps_passed"],
+                    steps_failed=counts["steps_failed"],
+                    setup_skipped_count=counts["setup_skipped_count"],
                     duration_ms=int(cr.get("duration_ms") or 0),
                     step_results=cr.get("step_results"),
                     adapted_steps=cr.get("adapted_steps"),
@@ -83,6 +112,10 @@ async def report_node(state: OrchestrationState, *, db_session_factory) -> Dict[
                     agent_logs=cr.get("agent_logs"),
                     screenshot_path=cr.get("screenshot_path"),
                     ai_modified=cr.get("ai_modified"),
+                    ui_override=bool(cr.get("ui_override")),
+                    ui_validation=cr.get("ui_validation"),
+                    executor_status=cr.get("executor_status"),
+                    verdict_source=cr.get("verdict_source"),
                 )
             )
 
@@ -97,27 +130,43 @@ async def report_node(state: OrchestrationState, *, db_session_factory) -> Dict[
             run_row.failed_tests = failed
             run_row.skipped_tests = skipped
             run_row.completed_at = datetime.utcnow()
-            # Paused (LLM infra down/over-budget) is resumable — record as
-            # CANCELLED (the resumable terminal state) with a clear reason,
-            # rather than PASSED/FAILED which would misrepresent the run.
+            cfg = dict(run_row.config or {})
+            cfg["health"] = health
+            cfg["health_summary"] = health_text
             if cancel:
                 run_row.status = TestRunStatus.CANCELLED
             elif paused:
                 run_row.status = TestRunStatus.CANCELLED
-                run_row.config = {
-                    **(run_row.config or {}),
-                    "paused": True,
-                    "pause_reason": pause_reason,
-                    "resumable": True,
-                    "llm_gate": state.get("llm_gate"),
-                }
+                cfg.update(
+                    {
+                        "paused": True,
+                        "pause_reason": pause_reason,
+                        "resumable": True,
+                        "llm_gate": state.get("llm_gate"),
+                    }
+                )
+            elif state.get("status") == "error" and not results:
+                run_row.status = TestRunStatus.FAILED
             elif failed > 0:
                 run_row.status = TestRunStatus.FAILED
             else:
                 run_row.status = TestRunStatus.PASSED
+            run_row.config = cfg
         await db.commit()
 
-    terminal = "paused" if paused else ("cancelled" if cancel else ("failed" if failed else "passed"))
+    project_id = int(state.get("project_id") or 0)
+    if project_id and health.get("reassign_count"):
+        append_event(
+            project_id,
+            {"type": "run_health", "run_id": run_id, "health": health},
+            hint=health_text,
+        )
+
+    live = progress_mgr.get(run_id) or {}
+    terminal = (
+        "error" if (state.get("status") == "error" and not results)
+        else ("paused" if paused else ("cancelled" if cancel else ("failed" if failed else "passed")))
+    )
     progress_mgr.set(
         run_id,
         {
@@ -128,11 +177,22 @@ async def report_node(state: OrchestrationState, *, db_session_factory) -> Dict[
             "groups": state.get("group_table") or [],
             "current_step_info": (
                 f"Paused — {pause_reason}. Resume when the LLM proxy recovers."
-                if paused else ""
+                if paused
+                else (state.get("error") or health_text)
             ),
             "llm_gate": state.get("llm_gate"),
+            "health": health,
+            "health_summary": health_text,
+            "ui_desync": bool(live.get("ui_desync")),
+            "ui_desync_events": list(state.get("ui_desync_events") or live.get("ui_desync_events") or []),
+            "supervisor": state.get("supervisor"),
+            "error": state.get("error"),
         },
     )
     progress_mgr.clear_cancel(run_id)
     progress_mgr.schedule_cleanup(run_id, delay_seconds=600)
-    return {"status": terminal, "completed_count": len(completed_payloads)}
+    return {
+        "status": terminal,
+        "completed_count": len(completed_payloads),
+        "health": health,
+    }

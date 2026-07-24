@@ -28,6 +28,18 @@ STATUS_MAP = {
 def case_result_to_completed_dict(cr: CaseResult) -> Dict[str, Any]:
     """Shape a CaseResult into the CompletedCaseResult dict the live UI expects."""
     step_results = cr.get("step_results") or []
+    ai = dict(cr.get("ai_modified") or {})
+    if cr.get("infra_error"):
+        ai["infra_error"] = True
+    if cr.get("error_kind"):
+        ai["error_kind"] = cr.get("error_kind")
+    if cr.get("error") and not ai.get("user_message"):
+        from features.functional.core.status_narrator import user_message_for
+
+        ai["user_message"] = user_message_for(
+            str(cr.get("error_kind") or ""),
+            error=str(cr.get("error") or ""),
+        )
     d = completed_case_dict(
         test_result_id=int(cr.get("test_result_id") or 0),
         test_case_id=int(cr.get("test_case_id") or 0),
@@ -42,9 +54,14 @@ def case_result_to_completed_dict(cr: CaseResult) -> Dict[str, Any]:
         original_steps=cr.get("original_steps"),
         agent_logs=cr.get("agent_logs"),
         screenshot_path=cr.get("screenshot_path"),
-        ai_modified=cr.get("ai_modified"),
+        ai_modified=ai,
+        ui_override=bool(cr.get("ui_override") or ai.get("ui_override")),
+        ui_validation=cr.get("ui_validation") or ai.get("ui_validation"),
+        executor_status=cr.get("executor_status") or ai.get("executor_status"),
+        verdict_source=cr.get("verdict_source") or ai.get("verdict_source"),
     )
     d["group_id"] = cr.get("group_id")
+    d["error_message"] = cr.get("error")
     return d
 
 

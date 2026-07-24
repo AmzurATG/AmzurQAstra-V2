@@ -137,7 +137,11 @@ export default function TestRunDetail() {
         </div>
       </div>
 
-      <TestRunDetailView progress={progress} runId={numRunId} />
+      <TestRunDetailView
+        progress={progress}
+        runId={numRunId}
+        projectId={projectId ? Number(projectId) : undefined}
+      />
     </div>
   )
 }

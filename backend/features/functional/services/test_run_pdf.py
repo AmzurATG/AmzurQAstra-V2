@@ -5,13 +5,14 @@ import io
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fpdf import FPDF
 from fpdf.enums import Align, WrapMode, XPos, YPos
 
 from config import settings
 from common.utils.logger import logger
+from features.functional.core.case_budget import format_duration_ms
 
 
 def _ascii_safe(s: Any, max_len: int = 8000) -> str:
@@ -66,7 +67,6 @@ def build_test_run_pdf(report: Dict[str, Any]) -> bytes:
     totals = report.get("totals", {})
     now_line = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    # ---- Header / summary ----
     pdf.set_font("Helvetica", "B", 18)
     pdf.cell(0, 10, f"Test Run Report #{report.get('run_number') or report.get('run_id')}", ln=True)
     pdf.set_font("Helvetica", "", 10)
@@ -77,13 +77,27 @@ def build_test_run_pdf(report: Dict[str, Any]) -> bytes:
     pdf.cell(
         0, 5,
         f"Total: {totals.get('total', 0)}   Passed: {totals.get('passed', 0)}   "
-        f"Failed: {totals.get('failed', 0)}   Skipped: {totals.get('skipped', 0)}   "
+        f"Failed: {totals.get('failed', 0)}   Blocked: {totals.get('blocked', 0)}   "
+        f"Skipped: {totals.get('skipped', 0)}   "
         f"Success: {totals.get('success_rate', 0)}%",
         ln=True,
     )
+    run_dur = totals.get("duration_display") or format_duration_ms(totals.get("duration_ms"))
+    sum_dur = totals.get("sum_case_duration_display") or format_duration_ms(
+        totals.get("sum_case_duration_ms")
+    )
+    pdf.cell(0, 5, f"Run wall time: {run_dur}   ·   Sum of case times: {sum_dur}", ln=True)
+    if report.get("started_at") or report.get("completed_at"):
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(
+            0, 5,
+            f"Started: {report.get('started_at') or '-'}   Completed: {report.get('completed_at') or '-'}",
+            ln=True,
+        )
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Helvetica", "", 10)
     pdf.cell(0, 5, f"AI adaptations recorded: {totals.get('adaptations', 0)}", ln=True)
-    if report.get("lane_count"):
-        pdf.cell(0, 5, f"Browser lanes: {report.get('lane_count')}", ln=True)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(120, 120, 120)
     pdf.cell(0, 5, f"Prepared: {now_line}", ln=True)
@@ -95,25 +109,34 @@ def build_test_run_pdf(report: Dict[str, Any]) -> bytes:
 
     def _render_case(case: Dict[str, Any], embed_full: bool) -> None:
         status = case.get("status", "")
-        mark = "PASS" if status == "passed" else status.upper()
+        infra = bool(case.get("infra_error"))
+        if status == "passed":
+            mark = "PASS"
+        elif infra or status == "error":
+            mark = "BLOCKED"
+        else:
+            mark = status.upper()
         pdf.set_font("Helvetica", "B", 11)
         pdf.multi_cell(
-            w, 6, _soft_break(_ascii_safe(f"[{mark}] {case.get('title')} (case #{case.get('test_case_id')})")),
+            w, 6, _soft_break(_ascii_safe(
+                f"[{mark}] {case.get('title')} (case #{case.get('test_case_id')})"
+            )),
             align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT, wrapmode=WrapMode.WORD,
         )
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(110, 110, 110)
-        dur = case.get("duration_ms") or 0
-        dur_txt = f"{dur} ms" if dur < 1000 else f"{dur/1000:.1f} s"
+        dur_txt = case.get("duration_display") or format_duration_ms(case.get("duration_ms") or 0)
         pdf.cell(
             0, 5,
-            f"Steps {case.get('steps_passed', 0)}/{case.get('steps_total', 0)} passed  ·  {dur_txt}"
+            f"Steps {case.get('steps_passed', 0)}/{case.get('steps_total', 0)} passed"
+            f"  ·  Duration: {dur_txt}"
             + (f"  ·  {case.get('adaptation_count')} AI adaptation(s)" if case.get("adaptation_count") else ""),
             ln=True,
         )
         pdf.set_text_color(0, 0, 0)
-        if case.get("error_message"):
-            mc(4, f"Error: {case.get('error_message')}", size=9, style="I")
+        msg = case.get("user_message") or case.get("error_message")
+        if msg:
+            mc(4, f"{'Note' if infra else 'Error'}: {msg}", size=9, style="I")
 
         for s in case.get("steps", [])[:60]:
             sn = s.get("step_number", "?")
@@ -142,7 +165,6 @@ def build_test_run_pdf(report: Dict[str, Any]) -> bytes:
                 logger.warning("[TestRunPDF] embed screenshot failed: %s", exc)
         pdf.ln(2)
 
-    # ---- Failures appendix first (most important) ----
     failed_cases = report.get("failed_cases", [])
     if failed_cases:
         pdf.set_font("Helvetica", "B", 14)
@@ -151,7 +173,18 @@ def build_test_run_pdf(report: Dict[str, Any]) -> bytes:
         for c in failed_cases:
             _render_case(c, embed_full=True)
 
-    # ---- Grouped results ----
+    blocked_cases = report.get("blocked_cases", [])
+    if blocked_cases:
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 8, f"Blocked / infrastructure ({len(blocked_cases)})", ln=True)
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_text_color(110, 110, 110)
+        pdf.cell(0, 5, "Not recorded as application test failures.", ln=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(1)
+        for c in blocked_cases:
+            _render_case(c, embed_full=True)
+
     for g in report.get("groups", []):
         pdf.set_font("Helvetica", "B", 13)
         pdf.cell(
@@ -159,11 +192,6 @@ def build_test_run_pdf(report: Dict[str, Any]) -> bytes:
             _ascii_safe(f"Group: {g.get('title')}  ({g.get('passed', 0)}/{g.get('total', 0)} passed)"),
             ln=True,
         )
-        if g.get("shared_login"):
-            pdf.set_font("Helvetica", "I", 9)
-            pdf.set_text_color(110, 110, 110)
-            pdf.cell(0, 5, "Shared-login group (login executed once)", ln=True)
-            pdf.set_text_color(0, 0, 0)
         pdf.ln(1)
         for c in g.get("cases", []):
             _render_case(c, embed_full=(c.get("status") != "passed"))

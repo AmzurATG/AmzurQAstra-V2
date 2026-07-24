@@ -28,6 +28,35 @@ from features.functional.core.llm_prompts.test_execution import (
     should_inject_project_credentials,
 )
 from features.functional.core.llm_prompts.registry import get_prompt
+from features.functional.core.status_narrator import narrate_case_result
+
+
+def _infra_result(
+    *,
+    steps: List[Dict[str, Any]],
+    screenshots: List[str],
+    agent_logs: List[Dict[str, Any]],
+    duration_ms: int,
+    error_kind: str,
+    error: str,
+    summary: str,
+) -> Dict[str, Any]:
+    raw = {
+        "status": "error",
+        "overall": "error",
+        "screenshots": list(screenshots),
+        "logs": agent_logs,
+        "step_results": [],
+        "steps_total": len(steps),
+        "steps_passed": 0,
+        "steps_failed": 0,
+        "summary": summary,
+        "duration_ms": duration_ms,
+        "error": error,
+        "infra_error": True,
+        "error_kind": error_kind,
+    }
+    return narrate_case_result(raw, steps)
 from features.functional.utils.credentials_redaction import redact_known_credentials
 
 # In-memory store for live polling — keyed by "{run_id}:{test_case_id}"
@@ -264,7 +293,13 @@ def _parse_verdict(
 
     if parsed:
         try:
-            return _normalize_verdict(parsed, total_steps)
+            from features.functional.core.accuracy.gates import VerdictGate
+            from features.functional.core.accuracy.types import VerdictSource
+
+            return VerdictGate.tag_verdict(
+                _normalize_verdict(parsed, total_steps),
+                VerdictSource.PARSED,
+            )
         except Exception as exc:
             logger.warning(f"[TestCaseRunner] Verdict normalization failed: {exc}")
 
@@ -277,28 +312,44 @@ def _parse_verdict(
             ok = None
         if ok is True:
             logger.info("[TestCaseRunner] Verdict JSON missing; using agent is_successful()=True fallback.")
-            return _synthesize_verdict_from_history(narrative, total_steps, True)
+            from features.functional.core.accuracy.gates import VerdictGate
+            from features.functional.core.accuracy.types import VerdictSource
+
+            return VerdictGate.tag_verdict(
+                _synthesize_verdict_from_history(narrative, total_steps, True),
+                VerdictSource.FALLBACK,
+            )
         if ok is False:
             logger.info("[TestCaseRunner] Verdict JSON missing; using agent is_successful()=False fallback.")
-            return _synthesize_verdict_from_history(narrative, total_steps, False)
+            from features.functional.core.accuracy.gates import VerdictGate
+            from features.functional.core.accuracy.types import VerdictSource
+
+            return VerdictGate.tag_verdict(
+                _synthesize_verdict_from_history(narrative, total_steps, False),
+                VerdictSource.FALLBACK,
+            )
 
     logger.warning("[TestCaseRunner] No parseable verdict and no agent success flag — inconclusive.")
-    return {
-        "steps": [
-            {
-                "step_number": i + 1,
-                "status": "error",
-                "actual_result": "Could not parse agent output",
-                "adaptation": None,
-            }
-            for i in range(total_steps)
-        ],
-        "overall": "failed",
-        "summary": "Agent did not return parseable VERDICT_JSON and task completion status was unavailable.",
-        # Signals an infrastructure/LLM problem (not a real test verdict) so the
-        # runner can retry with backoff instead of recording a false failure.
-        "inconclusive": True,
-    }
+    from features.functional.core.accuracy.gates import VerdictGate
+    from features.functional.core.accuracy.types import VerdictSource
+
+    return VerdictGate.tag_verdict(
+        {
+            "steps": [
+                {
+                    "step_number": i + 1,
+                    "status": "error",
+                    "actual_result": "Could not parse agent output",
+                    "adaptation": None,
+                }
+                for i in range(total_steps)
+            ],
+            "overall": "failed",
+            "summary": "Agent did not return parseable VERDICT_JSON and task completion status was unavailable.",
+            "inconclusive": True,
+        },
+        VerdictSource.INCONCLUSIVE,
+    )
 
 
 # ── LLM ──────────────────────────────────────────────────────────────────────
@@ -307,6 +358,12 @@ def _llm(model_override: Optional[str] = None):
     from features.functional.core.browser.browser_use_llm import get_browser_use_llm
 
     return get_browser_use_llm(model_override=model_override)
+
+
+def _llms(model_override: Optional[str] = None):
+    from features.functional.core.browser.browser_use_llm import get_browser_use_llms
+
+    return get_browser_use_llms(model_override=model_override)
 
 
 # ── Runner ───────────────────────────────────────────────────────────────────
@@ -332,12 +389,20 @@ class TestCaseRunner:
         on_step_callback: Optional[Any] = None,
         execution_run_id: Optional[int] = None,
         llm_model: Optional[str] = None,
+        session_context: Optional[str] = None,
+        extra_prompt_hint: Optional[str] = None,
+        wallclock_timeout_s: Optional[int] = None,
+        reassign_count: int = 0,
     ) -> Dict[str, Any]:
         return await self._run_impl(
             run_id, test_case_id, title, description, preconditions,
             steps, app_url, username, password, use_google_signin, headless,
             capture_screenshots, browser_context, on_step_callback, execution_run_id,
             llm_model=llm_model,
+            session_context=session_context,
+            extra_prompt_hint=extra_prompt_hint,
+            wallclock_timeout_s=wallclock_timeout_s,
+            reassign_count=reassign_count,
         )
 
     async def _run_impl(
@@ -358,6 +423,10 @@ class TestCaseRunner:
         on_step_callback: Optional[Any] = None,
         execution_run_id: Optional[int] = None,
         llm_model: Optional[str] = None,
+        session_context: Optional[str] = None,
+        extra_prompt_hint: Optional[str] = None,
+        wallclock_timeout_s: Optional[int] = None,
+        reassign_count: int = 0,
     ) -> Dict[str, Any]:
         from browser_use import Agent, Browser, BrowserProfile
         from features.functional.services.run_progress_manager import RunProgressManager
@@ -488,6 +557,13 @@ class TestCaseRunner:
             step_num = last.get("agent_step")
             if step_num is None:
                 return
+            from features.functional.core.screenshots import should_capture_agent_frame
+
+            if not should_capture_agent_frame(
+                current_count=len(screenshots),
+                agent_step=int(step_num) if step_num is not None else 0,
+            ):
+                return
             try:
                 summary = await session.get_browser_state_summary(include_screenshot=True)
             except Exception as exc:
@@ -538,6 +614,23 @@ class TestCaseRunner:
             steps_formatted=steps_fmt,
             total_steps=len(steps),
         )
+        if session_context == "already_authenticated":
+            task += (
+                "\n\nSESSION CONTEXT: The browser session is already authenticated "
+                "from a prior case in this group. Do NOT re-login or re-navigate to "
+                "the login page unless a step explicitly requires it. Skip redundant "
+                "setup and continue from the current app state.\n"
+            )
+        if extra_prompt_hint:
+            task += f"\n\n{extra_prompt_hint.strip()}\n"
+        try:
+            from features.functional.core.browser.llm_gate import get_gate
+
+            health = get_gate().health_hint()
+            if health:
+                task += f"\n\n{health}\n"
+        except Exception:
+            pass
         logger.info(
             f"[TestCaseRunner] tc={test_case_id} prompt=test_execution@{prompt_version} "
             f"model={llm_model or (settings.BROWSER_USE_LLM_MODEL or settings.LITELLM_MODEL)}"
@@ -565,9 +658,22 @@ class TestCaseRunner:
         # guide length so long legitimate cases still have headroom.
         _cfg_max_steps = int(getattr(settings, "TEST_CASE_MAX_AGENT_STEPS", 40) or 40)
         max_agent_steps = max(_cfg_max_steps, len(steps) * 3 + 5)
-        # Per-case wall-clock cap (independent of the step budget) so a hung page
-        # or agent can't pin a lane indefinitely. 0 disables.
-        wallclock_timeout_s = int(getattr(settings, "TEST_CASE_WALLCLOCK_TIMEOUT_S", 0) or 0)
+        # Adaptive per-case wall-clock (4m / 10m / 15m). Explicit override wins.
+        from features.functional.core.case_budget import budget_for_case
+
+        if wallclock_timeout_s is not None:
+            wallclock_timeout_s = int(wallclock_timeout_s)
+        else:
+            wallclock_timeout_s = int(
+                budget_for_case(steps, reassign_count=reassign_count)["wallclock_timeout_s"]
+            )
+        logger.info(
+            "[TestCaseRunner] tc=%s wallclock=%ss steps=%s reassign=%s",
+            test_case_id,
+            wallclock_timeout_s,
+            len(steps),
+            reassign_count,
+        )
 
         def _backoff_with_jitter(attempt: int) -> float:
             """Full-jitter backoff so lanes don't retry in lockstep (thundering herd)."""
@@ -644,21 +750,25 @@ class TestCaseRunner:
                         "error": None,
                     }
 
-                agent = Agent(
-                    task=task,
-                    llm=_llm(llm_model),
-                    browser=browser,
-                    browser_profile=BrowserProfile(
+                primary_llm, fallback_llm = _llms(llm_model)
+                agent_kwargs: Dict[str, Any] = {
+                    "task": task,
+                    "llm": primary_llm,
+                    "browser": browser,
+                    "browser_profile": BrowserProfile(
                         headless=headless,
                         is_local=True,
                         disable_security=True,
                         args=default_browser_chrome_args(),
                         enable_default_extensions=settings.BROWSER_USE_DEFAULT_EXTENSIONS,
                     ) if not browser else None,
-                    sensitive_data=sensitive_data,
-                    register_new_step_callback=_on_step,
-                    use_vision=True,  # Explicitly enable vision prowess
-                )
+                    "sensitive_data": sensitive_data,
+                    "register_new_step_callback": _on_step,
+                    "use_vision": True,
+                }
+                if fallback_llm is not None:
+                    agent_kwargs["fallback_llm"] = fallback_llm
+                agent = Agent(**agent_kwargs)
 
                 # Re-check cancellation immediately after agent creation to avoid late browser launch.
                 if execution_run_id is not None and progress_mgr.is_cancel_requested(execution_run_id):
@@ -732,20 +842,15 @@ class TestCaseRunner:
                         f"[TestCaseRunner] tc={test_case_id} exceeded wall-clock "
                         f"{wallclock_timeout_s}s (exhausted retries)"
                     )
-                    return {
-                        "status": "error",
-                        "overall": "error",
-                        "screenshots": list(screenshots),
-                        "logs": agent_logs,
-                        "steps_total": len(steps),
-                        "steps_passed": 0,
-                        "steps_failed": len(steps),
-                        "summary": f"Case exceeded wall-clock timeout ({wallclock_timeout_s}s).",
-                        "duration_ms": dur,
-                        "error": "wallclock_timeout",
-                        "infra_error": True,
-                        "error_kind": LLMErrorKind.TIMEOUT.value,
-                    }
+                    return _infra_result(
+                        steps=steps,
+                        screenshots=screenshots,
+                        agent_logs=agent_logs,
+                        duration_ms=dur,
+                        error_kind=LLMErrorKind.TIMEOUT.value,
+                        error="wallclock_timeout",
+                        summary=f"Case exceeded wall-clock timeout ({wallclock_timeout_s}s).",
+                    )
                 wait_time = _backoff_with_jitter(retry_count)
                 logger.warning(
                     f"⚠ tc={test_case_id} wall-clock timeout (attempt {retry_count}/{max_retries}). "
@@ -764,36 +869,38 @@ class TestCaseRunner:
                     isinstance(exc, LLMCircuitOpen)
                     or kind in (LLMErrorKind.BUDGET, LLMErrorKind.AUTH)
                 )
+                try:
+                    from features.functional.core.browser.llm_gate import get_gate
+
+                    if get_gate().should_pause() and kind == LLMErrorKind.RATE:
+                        unrecoverable = True
+                except Exception:
+                    pass
                 if unrecoverable:
                     dur = int((datetime.utcnow() - start).total_seconds() * 1000)
                     logger.error(
                         f"[TestCaseRunner] tc={test_case_id} unrecoverable LLM "
                         f"infra error ({kind.value}) — not a test failure: {str(exc)[:160]}"
                     )
-                    return {
-                        "status": "error",
-                        "overall": "error",
-                        "screenshots": list(screenshots),
-                        "logs": agent_logs,
-                        "steps_total": len(steps),
-                        "steps_passed": 0,
-                        "steps_failed": 0,
-                        "summary": (
+                    return _infra_result(
+                        steps=steps,
+                        screenshots=screenshots,
+                        agent_logs=agent_logs,
+                        duration_ms=dur,
+                        error_kind=kind.value,
+                        error=f"llm_{kind.value}",
+                        summary=(
                             f"LLM infrastructure unavailable ({kind.value}). Not a test "
                             "failure — case should be re-run after the proxy recovers."
                         ),
-                        "duration_ms": dur,
-                        "error": f"llm_{kind.value}",
-                        "infra_error": True,
-                        "error_kind": kind.value,
-                    }
+                    )
 
                 retry_count += 1
                 if retry_count >= max_retries:
                     logger.error(f"[TestCaseRunner] run_id={run_id} — agent raised (exhausted retries): {exc!r}")
                     dur = int((datetime.utcnow() - start).total_seconds() * 1000)
                     infra = is_retryable_kind(kind)
-                    return {
+                    raw = {
                         "status": "error",
                         "overall": "error",
                         "percentage": 100,
@@ -809,6 +916,7 @@ class TestCaseRunner:
                         "infra_error": infra,
                         "error_kind": kind.value,
                     }
+                    return narrate_case_result(raw, steps) if infra else raw
 
                 wait_time = _backoff_with_jitter(retry_count)
                 logger.info(
@@ -818,30 +926,32 @@ class TestCaseRunner:
                 await asyncio.sleep(wait_time)
 
         dur = int((datetime.utcnow() - start).total_seconds() * 1000)
+        from features.functional.core.accuracy.gates import ScreenshotGate, VerdictGate
+        from features.functional.core.accuracy.types import VerdictSource
+
         step_results = verdict.get("steps", [])
         passed = sum(1 for s in step_results if s.get("status") == "passed")
         failed = len(step_results) - passed
         inconclusive = bool(verdict.get("inconclusive"))
+        verdict_source = str(verdict.get("verdict_source") or VerdictSource.PARSED.value)
+
         if inconclusive:
-            # Exhausted retries and still no usable verdict → report as ERROR
-            # (couldn't determine), clearly distinct from a real test failure.
-            return {
-                "status": "error",
-                "overall": "error",
-                "screenshots": list(screenshots),
-                "logs": agent_logs,
-                "steps_total": len(steps),
-                "steps_passed": 0,
-                "steps_failed": len(steps),
-                "summary": (
-                    "Inconclusive after retries — the browser agent could not get a "
-                    "usable LLM response (likely rate-limit/timeout). Not a test failure; re-run recommended."
-                ),
-                "duration_ms": dur,
-                "error": "inconclusive_llm_or_agent_error",
-            }
+            # Exhausted retries and still no usable / parsed verdict → ERROR,
+            # never a synthetic all-failed test failure (accuracy gate).
+            from features.functional.core.screenshots import ScreenshotAgent
+
+            exhausted = VerdictGate.exhausted_payload(
+                screenshots=list(screenshots),
+                agent_logs=agent_logs,
+                steps_total=len(steps),
+                duration_ms=dur,
+                source=verdict_source,
+                original_steps=steps,
+            )
+            return ScreenshotAgent.apply_to_result(exhausted)
+
         overall = "passed" if verdict.get("overall") == "passed" else "failed"
-        return {
+        payload: Dict[str, Any] = {
             "status": "completed",
             "overall": overall,
             "step_results": step_results,
@@ -853,4 +963,19 @@ class TestCaseRunner:
             "summary": verdict.get("summary", ""),
             "duration_ms": dur,
             "error": None,
+            "verdict_source": verdict_source,
         }
+        shot_fail = ScreenshotGate.evaluate(
+            capture_screenshots=capture_screenshots,
+            screenshots=screenshots,
+            agent_logs=agent_logs,
+            overall=overall,
+        )
+        if shot_fail:
+            payload.update(shot_fail)
+        else:
+            # Curate evidence set so UI never shows dozens of agent frames.
+            from features.functional.core.screenshots import ScreenshotAgent
+
+            ScreenshotAgent.apply_to_result(payload)
+        return payload

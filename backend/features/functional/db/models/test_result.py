@@ -49,6 +49,10 @@ class TestResult(BaseModel):
     ai_modified = Column(JSONB, nullable=True)  # Per-step AI modification metadata for UI toggle
     # Per browser-use agent iteration: timestamp, agent_step, description, adaptation, screenshot_path
     agent_logs = Column(JSONB, nullable=True)
+
+    # Filed Jira bug from a failed result (manual Log to Jira)
+    jira_bug_key = Column(String(50), nullable=True)
+    jira_bug_url = Column(String(500), nullable=True)
     
     # Execution timestamps
     started_at = Column(DateTime(timezone=True), nullable=True)

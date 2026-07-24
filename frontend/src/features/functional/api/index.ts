@@ -322,6 +322,21 @@ export const testRunsApi = {
   syncStep: (resultId: number, stepNumber: number) =>
     apiClient.post(`/functional/test-runs/results/${resultId}/steps/${stepNumber}/sync`),
 
+  logResultToJira: (
+    runId: number,
+    resultId: number,
+    data: {
+      sprint_id?: number | null
+      summary?: string
+      priority?: string
+      attach_screenshots?: boolean
+    }
+  ) =>
+    apiClient.post<{ key: string; url?: string | null; sprint_id?: number | null }>(
+      `/functional/test-runs/${runId}/results/${resultId}/log-jira`,
+      data
+    ),
+
   getReport: (runId: number) =>
     apiClient.get<import('../types').RunReportData>(`/functional/test-runs/${runId}/report`),
 

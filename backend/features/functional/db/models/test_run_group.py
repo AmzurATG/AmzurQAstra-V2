@@ -20,6 +20,7 @@ class TestRunGroup(BaseModel):
 
     test_run_id = Column(Integer, ForeignKey("test_runs.id"), nullable=False, index=True)
     group_id = Column(String(64), nullable=False)
+    parent_group_id = Column(String(64), nullable=True, index=True)
     title = Column(String(500), nullable=True)
     phase_order = Column(JSONB, nullable=True)
     case_ids = Column(JSONB, nullable=False, default=list)

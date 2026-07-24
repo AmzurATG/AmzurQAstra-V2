@@ -250,6 +250,7 @@ class OrchestratedRunService:
         run.status = TestRunStatus.RUNNING
         run.started_at = datetime.utcnow()
         await self.db.commit()
+        started_iso = run.started_at.isoformat() if run.started_at else None
 
         initial_state: OrchestrationState = {
             "run_id": run_id,
@@ -280,6 +281,7 @@ class OrchestratedRunService:
                 "active_lanes": [],
                 "groups": [],
                 "live_screenshots": [],
+                "started_at": started_iso,
             },
         )
 
