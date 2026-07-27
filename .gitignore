@@ -49,8 +49,9 @@ htmlcov/
 test-results/
 playwright-report/
 
-# Integrity check / runtime browser screenshots (served from backend static mount)
-screenshots/
+# Runtime browser screenshots only (NOT the Python package core/screenshots/)
+/screenshots/
+backend/screenshots/
 
 # Misc
 *.bak
